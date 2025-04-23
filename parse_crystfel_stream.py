@@ -42,15 +42,18 @@ def parse_crystfel_stream(stream_file, debug=False):
             if len(parts) >= 6:
                 a, b, c = map(float, parts[:3])
                 alpha, beta, gamma = map(float, parts[3:6])
-                metadata["a"] = a*10
-                metadata["b"] = b*10
-                metadata["c"] = c*10
-                metadata["alpha"] = 90
-                metadata["beta"] = 90
-                metadata["gamma"] = 90
-                # metadata["alpha"] = alpha
-                # metadata["beta"] = beta
-                # metadata["gamma"] = gamma
+                # metadata["a"] = a*10
+                # metadata["b"] = b*10
+                # metadata["c"] = c*10
+                metadata["a"] = a
+                metadata["b"] = b
+                metadata["c"] = c
+                # metadata["alpha"] = 90
+                # metadata["beta"] = 90
+                # metadata["gamma"] = 90
+                metadata["alpha"] = alpha
+                metadata["beta"] = beta
+                metadata["gamma"] = gamma
 
         for ln in lines:
             stripped = ln.strip()
@@ -172,3 +175,13 @@ def parse_crystfel_stream(stream_file, debug=False):
         print(f"Parsed {len(df_cryst)} crystal rows (events).")
 
     return df_refl, df_cryst
+
+if __name__ == "__main__":
+
+    stream_file = "/home/bubl3932/files/MIL101/xgandalf_iterations_max_radius_1.8_step_0.5/filtered_metrics/filtered_metrics.stream"
+
+    df_refl, df_cryst = parse_crystfel_stream(stream_file, debug=True)
+    print("Reflection DataFrame:")
+    print(df_refl.head())
+    print("\nCrystal DataFrame:")
+    print(df_cryst.head())
