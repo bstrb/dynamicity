@@ -1,0 +1,30 @@
+[project]
+name = "sed-scaler"
+version = "0.1.0"
+description = "Robust kinematical scaling for serial electron diffraction"
+authors = [{ name="Your Lab", email="you@example.com"}]
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2.2",
+    "cctbx-bundle",          # provides cctbx.miller, flex, etc.
+    "numba>=0.59",           # optional JIT for merge step
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "black", "ruff", "mypy",
+    "hatch",
+]
+
+[project.scripts]
+sed-scale = "sed_scaler.cli:main"
+
+[tool.hatch.version]
+source = "vcs"

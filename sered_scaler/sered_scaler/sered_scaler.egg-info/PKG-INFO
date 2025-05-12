@@ -1,0 +1,42 @@
+Metadata-Version: 2.4
+Name: sered_scaler
+Version: 0.1.0
+Summary: Serial electron‑diffraction scaling utilities
+Author-email: Your Name <you@example.com>
+License-Expression: MIT
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.22
+Requires-Dist: pandas>=1.5
+Requires-Dist: scipy>=1.9
+Requires-Dist: scikit-learn>=1.2
+Provides-Extra: dask
+Requires-Dist: dask[dataframe]>=2024.3; extra == "dask"
+Provides-Extra: bayes
+Requires-Dist: pymc>=5.10; extra == "bayes"
+Requires-Dist: arviz>=0.17; extra == "bayes"
+
+# ────────────────────────────────  file: README.md  ────────────────────────────────
+
+```markdown
+# sered_scaler 🔬📈
+Light‑weight scaling & merging pipeline for **Serial electron diffraction**
+(Serial‑ED) datasets recorded as CrystFEL `*.stream` files.
+
+## Quick install (editable)
+```bash
+git clone …/sered_scaler.git
+cd sered_scaler
+pip install -e .[dask,bayes]   # optional extras
+```
+
+## Minimal run
+```bash
+scale_serial_ed run.stream --cutoff 2.5 --out merged_F2.csv
+```
+
+## Pipeline stages
+1. **ingest**   – stream → DataFrames (`sered_scaler.io`)
+2. **provision** – robust log‑scale fit (Huber)
+3. **filter**    – Z‑score or Bayesian mixture → weights
+4. **merge**     – weighted WLS → nearly kinematic `F²(hkl)`
