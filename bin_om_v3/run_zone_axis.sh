@@ -4,12 +4,12 @@
 # Wrapper for misorientation_to_zone_axis.py
 
 # ─── USER SETTINGS ────────────────────────────────────────────────────────
-STREAM_FILE="/home/bubl3932/files/simulations/cP_LTA/sim_001/xgandalf_iterations_max_radius_0.0_step_0.1/LTAsim_0.0_0.0.stream"
+STREAM_FILE="/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_000/xgandalf_iterations_max_radius_0.0_step_0.1/mfm300sim_0.0_0.0.stream"
 
-HMAX=1          # search limit |h|≤HMAX
-GMX=1.2         # reciprocal-space radius (nm-1) for crowdedness
-TOP=20           # keep TOP most crowded axes
-THETA0=5.0      # θ0 (deg) in danger formula
+HMAX=10          # search limit |h|≤HMAX
+GMX=3         # reciprocal-space radius (nm-1) for crowdedness
+TOP=1000           # keep TOP most crowded axes
+THETA0=10.0      # θ0 (deg) in danger formula
 # -------------------------------------------------------------------------
 
 SCRIPT_DIR="$(dirname "$0")"

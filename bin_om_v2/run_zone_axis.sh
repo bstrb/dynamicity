@@ -5,7 +5,7 @@
 # produce (i) a CSV, (ii) a θ-rank plot and (iii) a sorted *.stream* copy.
 
 # ---- user-editable variables -----------------------------------------------
-STREAM_FILE="/home/bubl3932/files/simulations/cP_LTA/sim_001/xgandalf_iterations_max_radius_0.0_step_0.1/LTAsim_0.0_0.0.stream"
+STREAM_FILE="/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_000/xgandalf_iterations_max_radius_0.0_step_0.1/mfm300sim_0.0_0.0.stream"
 # STREAM_FILE="/home/bubl3932/files/MFM300_VIII/MFM_spot3_streams/filtered_metrics/filtered_metrics.stream"
 
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"      # folder that holds this script
