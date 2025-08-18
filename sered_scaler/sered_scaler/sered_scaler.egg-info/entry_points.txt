@@ -1,2 +1,0 @@
-[console_scripts]
-scale_serial_ed = sered_scaler.cli.scale_serial_ed:main
