@@ -74,163 +74,124 @@ def _axes(*triples: str) -> List[Tuple[int,int,int]]:
     return out
 
 AXES_BY_LATTICE: Dict[str, List[Tuple[int,int,int]]] = {
-    # "triclinic": _axes(
-    #     "1 0 0","-1 0 0","0 1 0","0 -1 0","0 0 1","0 0 -1"
-    # ),
+    # No rotational symmetry → no unique “high-symmetry” directions.
+    # Still, use the basis axes as the minimal, practical primaries.
     "triclinic": _axes(
-        
+        "1 0 0","-1 0 0",
+        "0 1 0","0 -1 0",
+        "0 0 1","0 0 -1"
+    ),
+
+    # 2/m with unique b: [010] is the only proper rotation axis (2-fold).
+    # [100] and [001] are the other lattice axes (not rotationally special,
+    # but standard primaries to complement [010]).
+    "monoclinic": _axes(
+        "0 1 0","0 -1 0",     # <010>  (2-fold axis)
+        "1 0 0","-1 0 0",     # <100>
+        "0 0 1","0 0 -1"      # <001>
+    ),
+
+    # mmm: three orthogonal 2-fold axes → the three basis directions are the primaries.
+    "orthorhombic": _axes(
+        "1 0 0","-1 0 0",     # <100>
+        "0 1 0","0 -1 0",     # <010>
+        "0 0 1","0 0 -1"      # <001>
+    ),
+
+    # # 4/mmm: principal 4-fold along c; two inequivalent 2-folds in the basal plane.
+    # "tetragonal": _axes(
+    #     "0 0 1","0 0 -1",     # <001>  (4-fold)
+    #     "1 0 0","-1 0 0",     # <100>  (2-fold, along a)
+    #     "1 1 0","-1 -1 0"     # <110>  (2-fold, diagonal in basal plane)
+    # ),
+    # 4/mmm: principal 4-fold along c; two inequivalent 2-folds in the basal plane.
+    "tetragonal": _axes(
+" 0  0  1",
+"-1 -1  1",
+"-1  1  1",
+" 1 -1  1",
+" 1  1  1",
 " 0  1  0",
 " 1  0  0",
-" 1  1  0",
-"-1  1  0",
+"-1  0  1",
+" 0 -1  1",
 " 0  1  1",
-" 1  1  1",
-" 0  0  1",
 " 1  0  1",
-" 1  2  0",
-" 2  1  0",
-" 2  1  1",
-" 1  2  1",
+"-1  1  0",
+" 1  1  0",
+"-1 -1  3",
+"-1  1  3",
+" 1 -1  3",
+" 1  1  3",
+"-3 -1  1",
+"-3  1  1",
+"-1 -3  1",
+"-1  3  1",
+" 1 -3  1",
+" 1  3  1",
+" 3 -1  1",
+" 3  1  1",
+"-1  0  2",
+" 0 -1  2",
+" 0  1  2",
+" 1  0  2",
+"-3 -1  3",
+"-3  1  3",
+"-1 -3  3",
+"-1  3  3",
+" 1 -3  3",
+" 1  3  3",
+" 3 -1  3",
+" 3  1  3",
+"-1 -1  2",
+"-1  1  2",
+" 1 -1  2",
+" 1  1  2",
+"-1 -1  5",
+"-1  1  5",
+" 1 -1  5",
+" 1  1  5",
+"-2  0  1",
+" 0 -2  1",
+" 0  2  1",
+" 2  0  1",
+"-3 -3  1",
+"-3  3  1",
+" 3 -3  1",
+" 3  3  1",
 "-2  1  0",
 "-1  2  0",
-"-1  1  1",
-" 0  2  1",
-" 0 -1  1",
-"-1  0  1",
-" 1 -1  1",
-" 2  0  1",
-" 2  2  1",
-"-1 -1  1",
-"-1  2  1",
-" 2 -1  1",
-" 0  3  1",
-" 3  1  1",
-" 1  3  1",
-" 0 -2  1",
-"-2  0  1",
-"-2  1  1",
-" 3  0  1",
-" 3  2  1",
-" 2  3  1",
-"-1 -2  1",
-"-2 -1  1",
-" 1 -2  1",
-" 3  1  0",
-" 2  3  0",
-"-3  1  0",
-"-1  3  0",
-" 1  3  0",
-" 3  2  0",
-" 1  4  0",
-"-3  2  0",
-"-2  3  0",
-" 4  1  0",
-" 1  1  2",
-" 2  4  1",
-" 3  3  1",
-"-1  3  1",
-" 3  4  0",
-"-2 -2  1",
-"-2  2  1",
-" 2 -2  1",
-" 3 -1  1",
-" 4  2  1",
-"-1 -3  1",
-"-3 -1  1",
-" 3  4  1",
-" 4  3  1",
-"-4  1  0",
-"-1  4  0",
-" 4  3  0",
-" 1  2  2",
-" 4  1  1",
-" 2  1  2",
-" 1  4  1",
-" 2  3  2",
-" 0  1  2",
-" 0 -3  1",
-" 0  4  1",
-" 1  0  2",
-"-3  0  1",
-"-1  1  2",
-"-3 -2  1",
-" 1  3  2",
-" 3  1  2",
-" 3  2  2",
-" 4  0  1",
-"-3  1  1",
-" 1 -3  1",
-"-1  0  2",
-" 1 -1  2",
-"-1  2  2",
-" 5  1  1",
-" 2 -1  2",
-" 1  5  1",
-" 0 -1  2",
-" 0  3  2",
-" 3  0  2",
-" 3  3  2",
-"-2 -3  1",
-" 1  5  0",
-" 5  2  0",
-" 3  5  1",
-"-3  3  1",
-" 5  3  1",
-" 3 -3  1",
-"-1 -1  2",
-" 0  5  1",
-" 5  0  1",
-"-1  4  1",
-" 4 -1  1",
-" 5  1  0",
-" 2  5  0"
+" 1  2  0",
+" 2  1  0",
     ),
-    "monoclinic": _axes(
-        "0 1 0","0 -1 0",
-        "1 0 0","-1 0 0",
-        "0 0 1","0 0 -1",
-        "1 0 1","-1 0 1","1 0 -1","-1 0 -1"
-    ),
-    "orthorhombic": _axes(
-        "1 0 0","-1 0 0","0 1 0","0 -1 0","0 0 1","0 0 -1",
-        "1 1 0","-1 1 0","1 -1 0","-1 -1 0",
-        "1 0 1","-1 0 1","1 0 -1","-1 0 -1",
-        "0 1 1","0 -1 1","0 1 -1","0 -1 -1"
-    ),
-    
-    "tetragonal": _axes(
-    "0 0 1","-1 -1 1","-1 1 1","1 -1 1","1 1 1",
-    "0 1 0","1 0 0",
-    "-1 0 1","0 -1 1","0 1 1","1 0 1",
-    "1 -1 0", "1 1 0",
-    "-1 -1 3", "-1 1 3", "1 -1 3", "1 1 3",
-    "-3 -1 1", "-3 1 1", "-1 -3 1", "-1 3 1", "1 -3 1", "1 3 1","3 -1 1", "3 1 1",
-),
 
-
-
+    # trigonal in hexagonal setting (3m/−3m): 3-fold along c; 2-folds in the basal net.
     "trigonal": _axes(
-        "1 1 1","-1 -1 -1",
-        "1 1 -1","-1 -1 1","1 -1 1","-1 1 -1",
-        "1 0 -1","-1 0 1","0 1 -1","0 -1 1","-1 1 0","1 -1 0"
+        "0 0 1","0 0 -1",     # <001>  (3-fold)
+        "1 0 0","-1 0 0",     # <100>  (basal 2-fold type A)
+        "1 1 0","-1 -1 0"     # <110>  (basal 2-fold type B; not equivalent to <100>)
     ),
+
+    # rhombohedral (r setting): 3-fold along the rhombohedral axis; pick one basal 2-fold family.
+    # (In r axes, <100>, <010>, and <1-10> are cycled by the 3-fold; one representative suffices.)
     "rhombohedral": _axes(
-        "1 1 1","-1 -1 -1",
-        "1 1 -1","-1 -1 1","1 -1 1","-1 1 -1",
-        "1 0 -1","-1 0 1","0 1 -1","0 -1 1","-1 1 0","1 -1 0"
+        "0 0 1","0 0 -1",     # <001>_r  (3-fold)
+        "1 0 0","-1 0 0"      # one basal 2-fold family in r basis
     ),
+
+    # 6/mmm: 6-fold along c; two inequivalent basal 2-folds (<100> and <110>).
     "hexagonal": _axes(
-        "0 0 1","0 0 -1",
-        "1 0 0","-1 0 0","0 1 0","0 -1 0","1 -1 0","-1 1 0",
-        "2 -1 0","-2 1 0","1 -2 0","-1 2 0",
-        "1 0 1","-1 0 1","0 1 1","0 -1 1","1 0 -1","-1 0 -1","0 1 -1","0 -1 -1"
+        "0 0 1","0 0 -1",     # <001>  (6-fold)
+        "1 0 0","-1 0 0",     # <100>  (basal 2-fold type A)
+        "1 1 0","-1 -1 0"     # <110>  (basal 2-fold type B)
     ),
+
+    # m-3m: the classic trio—4-fold, 3-fold, 2-fold.
     "cubic": _axes(
-        "1 0 0","-1 0 0","0 1 0","0 -1 0","0 0 1","0 0 -1",
-        "1 1 0","-1 1 0","1 -1 0","-1 -1 0","1 0 1","-1 0 1",
-        "1 0 -1","-1 0 -1","0 1 1","0 -1 1","0 1 -1","0 -1 -1",
-        "1 1 1","-1 1 1","1 -1 1","1 1 -1","-1 -1 1","-1 1 -1","1 -1 -1","-1 -1 -1"
-    ),
+        "0 0 1","0 0 -1",     # <001>  (4-fold)
+        "1 1 1","-1 -1 -1",   # <111>  (3-fold)
+        "1 1 0","-1 -1 0"     # <110>  (2-fold)
+    )
 }
 
 LATTICE_ALIASES = {
@@ -519,7 +480,6 @@ def write_sorted_by_angle(
                 dst.write(header)
                 for cm in grp:
                     src.seek(cm.start); dst.write(src.read(cm.end - cm.start))
-            print(f"Wrote → {out_path}")
 
 # ---------- CLI ----------
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -528,9 +488,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         description=__doc__)
 
     ap.add_argument("input_stream", type=Path)
-    ap.add_argument("output",       type=Path,
-                    help="For --sort-angle: output .stream filename. "
-                         "For angle binning: prefix (file names get suffixes).")
+
+    # Make 'output' optional to preserve backward compatibility AND allow omission
+    ap.add_argument(
+        "output",
+        type=Path,
+        nargs="?",  # <-- optional now
+        help=("For --sort-angle: output .stream filename (optional: defaults to <input>_sorted.stream). "
+              "For angle binning: prefix (optional: defaults to <input>_bin).")
+    )
+
     ap.add_argument("--beam", type=float, nargs=3, metavar=("X","Y","Z"),
                     default=(0.0, 0.0, 1.0),
                     help="Lab-frame beam direction (default 0 0 1)")
@@ -559,8 +526,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     help="Where unindexed chunks go in --sort-angle (default: end).")
     ap.add_argument("--count-split", type=int,
                     help="After --sort-angle, split into files of N chunks each (optional).")
-    ap.add_argument("--report", type=Path,
-                    help="Write per-chunk report '<img> //<event> -> [uvw] angle=…' to this file.")
+    ap.add_argument("--report", action="store_true",
+                    help="Write per-chunk report '<img> //<event> -> [uvw] angle=…'.")
 
     args = ap.parse_args(argv)
 
@@ -603,26 +570,40 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     beam_xyz = np.asarray(args.beam, float)
     header_bytes, chunk_list = index_chunks(args.input_stream, axes_user, beam_xyz)
 
+    # Define the report filename relative to the input_stream
+    report_path = args.input_stream.with_name(args.input_stream.stem + "_report.txt")
+
     # optional report
     if args.report:
-        with args.report.open("w", encoding="utf-8") as rep:
+        with report_path.open("w", encoding="utf-8") as rep:
             for cm in chunk_list:
                 if math.isfinite(cm.angle) and cm.best_axis is not None:
                     ax = cm.best_axis
-                    rep.write(f"{cm.img_base} //{cm.event} -> [{ax[0]} {ax[1]} {ax[2]}] angle={cm.angle:.2f}°\n")
+                    rep.write(f"{cm.img_base} //{cm.event} -> "
+                              f"[{ax[0]} {ax[1]} {ax[2]}] angle={cm.angle:.2f}°\n")
                 else:
                     rep.write(f"{cm.img_base} //{cm.event} -> unindexed\n")
+        print(f"Wrote report → {report_path}")
+
+    # ---- derive defaults for outputs when 'output' not provided ----
+    # For --sort-angle: a concrete .stream filename
+    default_sorted_path = args.input_stream.with_name(args.input_stream.stem + "_sorted.stream")
+    # For binning: a prefix (no extension; your writer will add suffixes/extensions)
+    default_bin_prefix = args.input_stream.with_name(args.input_stream.stem + "_bin")
 
     # perform operation
     if args.sort_angle:
+        out_base = args.output if args.output is not None else default_sorted_path
         write_sorted_by_angle(
             args.input_stream,
             header_bytes,
             chunk_list,
-            out_base=args.output,
+            out_base=out_base,
             include_unindexed=args.include_unindexed,
             count_split=args.count_split
         )
+        if args.output is None:
+            print(f"Wrote sorted stream → {out_base}")
     else:
         # angle binning
         if args.angle_bins:
@@ -632,14 +613,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             angle_bins = parse_angle_bins(args.angle_split, None)
         else:
             raise SystemExit("Provide --angle-bins or --angle-split, or use --sort-angle.")
+
+        out_prefix = args.output if args.output is not None else default_bin_prefix
         write_angle_bins(
             args.input_stream,
             header_bytes,
             chunk_list,
-            out_prefix=args.output,
+            out_prefix=out_prefix,
             bins=angle_bins,
             report_path=None  # report already handled above if requested
         )
+        if args.output is None:
+            print(f"Wrote angle-binned outputs with prefix → {out_prefix}")
 
 if __name__ == "__main__":
     main()

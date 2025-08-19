@@ -244,7 +244,9 @@ def main():
     ap.add_argument("--score-beta",  type=float, default=0.5)
     ap.add_argument("--margin-px", type=float, default=0.0, help="Edge margin (pixels) (default 0)")
     ap.add_argument("--tol-g", type=float, default=5e-4, help="|g| tolerance for equality (default 5e-4)")
-    ap.add_argument("--csv", type=str, default=None, help="Optional CSV output path")
+    # ap.add_argument("--csv", type=str, default=None, help="Optional CSV output path")
+    ap.add_argument("--csv", action="store_true", help="Optional CSV output in same foldewr as cell (default: False)")
+    ap.add_argument("--listuvw", action="store_true", help="List UVW in output (for further processing)")
     args = ap.parse_args()
 
     # Parse inputs
@@ -325,17 +327,39 @@ def main():
     print("(u v w)   r_px    g_min(1/Å)  ring_mult   N    M    Score")
     for r in rows:
         print(f"{r['u']:>2} {r['v']:>2} {r['w']:>2}  {r['r_px']:7.2f}   {r['g_min_1_over_A']:.4f}    {r['ring_mult']:>3}    {r['N']:>3}  {r['M']:>4}  {r['Score']:>7.2f}")
-    for r in rows:
-        print(f"\"{r['u']:>2} {r['v']:>2} {r['w']:>2}\",")
+    if args.listuvw:
+        for r in rows:
+            print(f"\"{r['u']:>2} {r['v']:>2} {r['w']:>2}\",")
 
+    csv_path = args.geom.replace(".geom", "_problematic_orientations.csv") 
 
-    # CSV
     if args.csv:
         with open(args.csv, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else
-                               ["u","v","w","ring_type","g_min_1_over_A","r_px","ring_mult","N","M","Score","inside"])
+            # Write your custom header lines as comments
+            f.write(f"# Cell: {cell['lattice_type'].upper()} {cell['centering'].upper()} | "
+                    f"a={cell['a']:.4f} Å b={cell['b']:.4f} Å c={cell['c']:.4f} Å "
+                    f"al={cell['al']:.2f}° be={cell['be']:.2f}° ga={cell['ga']:.2f}°\n")
+            f.write(f"# Geom: λ={geom['wavelength_A']} Å, L={geom['clen_m']} m, res={geom['res_px_per_m']} px/m | "
+                    f"panel {nx}×{ny}px | edge r={r_edge_px:.2f}px\n")
+            f.write(f"# Settings: UVW_MAX={args.uvw_max}, g_enum={g_enum:.3f}, g_crowd={g_crowd:.3f}, "
+                    f"I_min_rel={args.i_min_rel}, N_min={args.n_min}, M_min={args.m_min}, "
+                    f"ring_mult_min={args.ring_mult_min}, α={args.score_alpha}, β={args.score_beta}, tol_g={args.tol_g}\n\n")
+
+            # Write the actual CSV table
+            w = csv.DictWriter(
+                f,
+                fieldnames=list(rows[0].keys()) if rows else
+                ["u","v","w","ring_type","g_min_1_over_A","r_px","ring_mult","N","M","Score","inside"]
+            )
             w.writeheader()
-            for r in rows: w.writerow(r)
+            for r in rows:
+                w.writerow(r)
+
+            # Write triplets as quoted row
+            triplets = [f"{r['u']:>2} {r['v']:>2} {r['w']:>2}" for r in rows]
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            writer.writerow(triplets)
+
         print(f"\nWrote CSV: {args.csv}")
 
 if __name__ == "__main__":

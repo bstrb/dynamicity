@@ -14,9 +14,8 @@
 
 set -eu
 
-# STREAM="mfm300sim_0.0_0.0.stream"
-STREAM="/Users/xiaodong/Desktop/simulations/RbS2Sb_aP/sim_000/RbS2Sb.stream"
-EVENT_ID="516"
+STREAM="/home/bubl3932/files/simulations/oI_GaLiO4Ti/sim_001/1008839.stream"
+EVENT_ID="6177"
 MAX=5
 TOP=10
 BEAM="0 0 1"
