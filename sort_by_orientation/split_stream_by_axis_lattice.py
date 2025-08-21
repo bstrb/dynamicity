@@ -99,70 +99,10 @@ AXES_BY_LATTICE: Dict[str, List[Tuple[int,int,int]]] = {
     ),
 
     # # 4/mmm: principal 4-fold along c; two inequivalent 2-folds in the basal plane.
-    # "tetragonal": _axes(
-    #     "0 0 1","0 0 -1",     # <001>  (4-fold)
-    #     "1 0 0","-1 0 0",     # <100>  (2-fold, along a)
-    #     "1 1 0","-1 -1 0"     # <110>  (2-fold, diagonal in basal plane)
-    # ),
-    # 4/mmm: principal 4-fold along c; two inequivalent 2-folds in the basal plane.
     "tetragonal": _axes(
-" 0  0  1",
-"-1 -1  1",
-"-1  1  1",
-" 1 -1  1",
-" 1  1  1",
-" 0  1  0",
-" 1  0  0",
-"-1  0  1",
-" 0 -1  1",
-" 0  1  1",
-" 1  0  1",
-"-1  1  0",
-" 1  1  0",
-"-1 -1  3",
-"-1  1  3",
-" 1 -1  3",
-" 1  1  3",
-"-3 -1  1",
-"-3  1  1",
-"-1 -3  1",
-"-1  3  1",
-" 1 -3  1",
-" 1  3  1",
-" 3 -1  1",
-" 3  1  1",
-"-1  0  2",
-" 0 -1  2",
-" 0  1  2",
-" 1  0  2",
-"-3 -1  3",
-"-3  1  3",
-"-1 -3  3",
-"-1  3  3",
-" 1 -3  3",
-" 1  3  3",
-" 3 -1  3",
-" 3  1  3",
-"-1 -1  2",
-"-1  1  2",
-" 1 -1  2",
-" 1  1  2",
-"-1 -1  5",
-"-1  1  5",
-" 1 -1  5",
-" 1  1  5",
-"-2  0  1",
-" 0 -2  1",
-" 0  2  1",
-" 2  0  1",
-"-3 -3  1",
-"-3  3  1",
-" 3 -3  1",
-" 3  3  1",
-"-2  1  0",
-"-1  2  0",
-" 1  2  0",
-" 2  1  0",
+        "0 0 1","0 0 -1",     # <001>  (4-fold)
+        "1 0 0","-1 0 0",     # <100>  (2-fold, along a)
+        "1 1 0","-1 -1 0"     # <110>  (2-fold, diagonal in basal plane)
     ),
 
     # trigonal in hexagonal setting (3m/−3m): 3-fold along c; 2-folds in the basal net.
@@ -573,17 +513,32 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # Define the report filename relative to the input_stream
     report_path = args.input_stream.with_name(args.input_stream.stem + "_report.txt")
 
+
     # optional report
     if args.report:
+        valid = []
+        invalid = []
+        for cm in chunk_list:
+            if math.isfinite(cm.angle) and cm.best_axis is not None:
+                valid.append(cm)
+            else:
+                invalid.append(cm)
+
+        # sort valid ones by angle (ascending)
+        valid.sort(key=lambda cm: cm.angle)
+
         with report_path.open("w", encoding="utf-8") as rep:
-            for cm in chunk_list:
-                if math.isfinite(cm.angle) and cm.best_axis is not None:
-                    ax = cm.best_axis
-                    rep.write(f"{cm.img_base} //{cm.event} -> "
-                              f"[{ax[0]} {ax[1]} {ax[2]}] angle={cm.angle:.2f}°\n")
-                else:
-                    rep.write(f"{cm.img_base} //{cm.event} -> unindexed\n")
+            for cm in valid:
+                ax = cm.best_axis
+                rep.write(f"{cm.img_base} //{cm.event} -> "
+                        f"[{ax[0]} {ax[1]} {ax[2]}] angle={cm.angle:.2f}°\n")
+
+            # write the unindexed ones last
+            for cm in invalid:
+                rep.write(f"{cm.img_base} //{cm.event} -> unindexed\n")
+
         print(f"Wrote report → {report_path}")
+
 
     # ---- derive defaults for outputs when 'output' not provided ----
     # For --sort-angle: a concrete .stream filename

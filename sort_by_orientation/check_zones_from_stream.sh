@@ -14,9 +14,9 @@
 
 set -eu
 
-STREAM="/home/bubl3932/files/simulations/oI_GaLiO4Ti/sim_001/1008839.stream"
-EVENT_ID="6177"
-MAX=5
+STREAM="/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_1.8_step_0.5/filtered_metrics/filtered_metrics.stream"
+EVENT_ID="4734-1 "
+MAX=15
 TOP=10
 BEAM="0 0 1"
 KEEPSIGN=0
