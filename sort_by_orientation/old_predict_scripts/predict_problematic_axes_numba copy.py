@@ -3,10 +3,11 @@
 """
 Predict ZOLZ-centered, visually "problematic" zone axes from a CrystFEL stream header.
 
-Changes in this version:
-- **Always-on progress bar** (stderr); no flags needed
-- Removed flags: --listuvw, --progress, --progress-steps
-- Keeps parallel scanning and Numba-accelerated three-beam overlap counting
+Enhancements vs. original:
+- Robust header parsing tolerant to whitespace
+- Progress/timing via --progress
+- Parallel per-direction scanning via --jobs (multiprocessing)
+- **Numba-accelerated** three-beam overlap counting (huge speedup on large in-zone sets)
 
 Author: Buster Blomberg (parallel + Numba)
 """
@@ -47,32 +48,6 @@ def _extract_block(txt: str, begin_marker: str, end_marker: str) -> str:
             if estart > bend:
                 return txt[bend:estart]
     raise ValueError(f"Could not find well-formed block: '{begin_marker}' .. '{end_marker}'")
-
-# ----------------------------- Simple progress bar -----------------------------
-
-class ProgressBar:
-    def __init__(self, total, width=40, label=""):
-        self.total = max(1, int(total))
-        self.width = max(10, int(width))
-        self.count = 0
-        self.label = label
-        self._render()
-
-    def update(self, n=1):
-        self.count += n
-        if self.count > self.total:
-            self.count = self.total
-        self._render()
-
-    def _render(self):
-        frac = self.count / self.total
-        filled = int(self.width * frac)
-        bar = "#" * filled + "-" * (self.width - filled)
-        eprint(f"\r{self.label}[{bar}] {self.count}/{self.total}", end="")
-
-    def finish(self):
-        self._render()
-        eprint("")  # newline
 
 # ----------------------------- Parsing -----------------------------
 
@@ -217,6 +192,7 @@ def _hkls_to_keys(hkls_int32):
         h = hkls_int32[i,0]; k = hkls_int32[i,1]; l = hkls_int32[i,2]
         # if out-of-range, clamp to a sentinel outside valid domain
         if abs(h) > MAX_ABS or abs(k) > MAX_ABS or abs(l) > MAX_ABS:
+            # This shouldn't happen with reasonable bounds; mark invalid
             keys[i] = np.int64(-1)
         else:
             keys[i] = (((np.int64(h)+BIAS) << SHIFT_H)
@@ -372,7 +348,7 @@ def _eval_dir(uvw):
 def main():
     ap = argparse.ArgumentParser(description="Predict visually problematic ZOLZ-centered zone axes from a CrystFEL stream header (parallel + Numba).")
     ap.add_argument("--stream", required=True, help="Path to .stream file, or '-' to read from stdin")
-    ap.add_argument("--uvw-max", type=int, default=10)
+    ap.add_argument("--uvw-max", type=int, default=3)
     ap.add_argument("--g-enum-bound", type=float, default=None)
     ap.add_argument("--g-max", type=float, default=None)
     ap.add_argument("--zolz-only", action="store_true", default=True)
@@ -385,16 +361,19 @@ def main():
     ap.add_argument("--score-beta",  type=float, default=0.6)
     ap.add_argument("--margin-px", type=float, default=0.0)
     ap.add_argument("--tol-g", type=float, default=5e-4)
-    ap.add_argument("--nrows", type=int, default=None, help="Maximum number of rows to print and save (default: all)")
     ap.add_argument("--csv", action="store_true")
-    ap.add_argument("--printresults", action="store_true", help="Print results table to stdout (headers always printed)")
+    ap.add_argument("--listuvw", action="store_true")
+    ap.add_argument("--progress", action="store_true")
+    ap.add_argument("--printresults", action="store_true", help="Print results to stdout (default: dont print to stderr)")
+    ap.add_argument("--progress-steps", type=int, default=10)
     # Parallel controls
     ap.add_argument("--jobs", type=int, default=os.cpu_count(), help="Worker processes (default: all cores)")
     ap.add_argument("--chunksize", type=int, default=8, help="Items per task sent to each worker")
     args = ap.parse_args()
 
     t0 = time.time()
-    eprint("[0/6] Reading headers...")
+    if args.progress:
+        eprint("[0/6] Reading headers...")
 
     # Parse stream
     cell, geom = parse_stream_headers(args.stream)
@@ -410,19 +389,21 @@ def main():
     g_enum = args.g_enum_bound if args.g_enum_bound is not None else 1.10 * g_edge
     g_crowd = args.g_max if args.g_max is not None else g_edge
 
-    eprint(f"[1/6] Parsed cell & geom. Panel {nx}×{ny}px, edge r≈{r_edge_px:.2f}px.")
-    eprint(f"      g_edge≈{g_edge:.4f} Å⁻¹ | g_enum={g_enum:.4f} | g_crowd={g_crowd:.4f}")
-    a_s = sqrt(max(Gstar[0][0],1e-16)); b_s = sqrt(max(Gstar[1][1],1e-16)); c_s = sqrt(max(Gstar[2][2],1e-16))
-    hmax = max(1, floor(g_enum/a_s)+2); kmax = max(1, floor(g_enum/b_s)+2); lmax = max(1, floor(g_enum/c_s)+2)
-    approx = (2*hmax+1)*(2*kmax+1)*(2*lmax+1)
-    eprint(f"[2/6] Enumerating HKL up to g={g_enum:.3f} (box ≈ ±{hmax}, ±{kmax}, ±{lmax} → {approx:,} triples)...")
+    if args.progress:
+        eprint(f"[1/6] Parsed cell & geom. Panel {nx}×{ny}px, edge r≈{r_edge_px:.2f}px.")
+        eprint(f"      g_edge≈{g_edge:.4f} Å⁻¹ | g_enum={g_enum:.4f} | g_crowd={g_crowd:.4f}")
+        a_s = sqrt(max(Gstar[0][0],1e-16)); b_s = sqrt(max(Gstar[1][1],1e-16)); c_s = sqrt(max(Gstar[2][2],1e-16))
+        hmax = max(1, floor(g_enum/a_s)+2); kmax = max(1, floor(g_enum/b_s)+2); lmax = max(1, floor(g_enum/c_s)+2)
+        approx = (2*hmax+1)*(2*kmax+1)*(2*lmax+1)
+        eprint(f"[2/6] Enumerating HKL up to g={g_enum:.3f} (box ≈ ±{hmax}, ±{kmax}, ±{lmax} → {approx:,} triples)...")
 
     # Global HKL enumeration (shared read-only)
     t_enum0 = time.time()
     HKL, _ = enumerate_hkl_up_to_g(Gstar, g_enum, centering=cell["centering"])
     t_enum1 = time.time()
-    eprint(f"      ...{len(HKL):,} reflections kept (elapsed {t_enum1 - t_enum0:.1f}s).")
-    eprint(f"[3/6] Building unique UVW list (|u|,|v|,|w| ≤ {args.uvw_max})...")
+    if args.progress:
+        eprint(f"      ...{len(HKL):,} reflections kept (elapsed {t_enum1 - t_enum0:.1f}s).")
+        eprint(f"[3/6] Building unique UVW list (|u|,|v|,|w| ≤ {args.uvw_max})...")
 
     # Enumerate canonical zone axes
     seen=set(); dirs=[]
@@ -435,9 +416,9 @@ def main():
                     seen.add(canon); dirs.append(canon)
 
     total = len(dirs)
-    eprint(f"      ...{total} unique directions.")
-    eprint(f"[4/6] Scanning directions in parallel with --jobs {args.jobs}, chunksize {args.chunksize}...")
-    pb = ProgressBar(total, width=42, label="      Progress ")
+    if args.progress:
+        eprint(f"      ...{total} unique directions.")
+        eprint(f"[4/6] Scanning directions in parallel with --jobs {args.jobs}, chunksize {args.chunksize}...")
 
     # Prepare worker globals
     params = {
@@ -450,24 +431,32 @@ def main():
     # Parallel map across directions
     rows=[]
     if args.jobs == 1:
+        step = max(1, total // max(1,args.progress_steps))
         _worker_init(HKL, Gstar, params)
-        for uvw in dirs:
+        for idx,uvw in enumerate(dirs,1):
+            if args.progress and (idx==1 or idx%step==0 or idx==total):
+                eprint(f"      [{idx:>4}/{total}] uvw=({uvw[0]:>2} {uvw[1]:>2} {uvw[2]:>2})")
             rec = _eval_dir(uvw)
             if rec: rows.append(rec)
-            pb.update(1)
-        pb.finish()
     else:
         import multiprocessing as mp
         # Use "fork" so big HKL list is shared CoW
         with mp.get_context("fork").Pool(processes=args.jobs, initializer=_worker_init, initargs=(HKL, Gstar, params)) as pool:
-            seen_count = 0
-            for rec in pool.imap_unordered(_eval_dir, dirs, chunksize=args.chunksize):
-                seen_count += 1
-                if rec: rows.append(rec)
-                pb.update(1)
-            pb.finish()
+            it = pool.imap_unordered(_eval_dir, dirs, chunksize=args.chunksize)
+            if args.progress:
+                ping_every = max(1, total // max(1,args.progress_steps))
+                seen_count = 0
+                for rec in it:
+                    seen_count += 1
+                    if rec: rows.append(rec)
+                    if (seen_count == 1) or (seen_count % ping_every == 0) or (seen_count == total):
+                        eprint(f"      [{seen_count:>4}/{total}] ...")
+            else:
+                for rec in it:
+                    if rec: rows.append(rec)
 
-    eprint(f"[5/6] Reducing & sorting {len(rows)} results...")
+    if args.progress:
+        eprint(f"[5/6] Reducing & sorting {len(rows)} results...")
 
     # --- Normalize N and M across surviving rows, then recompute Score (min–max to [0,1]) ---
     if rows:
@@ -490,20 +479,18 @@ def main():
     # Sort & print
     rows.sort(key=lambda r: (-r["Score"], -r["N"], r["r_px"], abs(r["u"])+abs(r["v"])+abs(r["w"]), r["u"], r["v"], r["w"]))
 
-    if args.nrows is not None:
-        rows = rows[:args.nrows]
-
     print(f"Cell: {cell['lattice_type'].upper()} {cell['centering'].upper()} | a={cell['a']:.4f} Å b={cell['b']:.4f} Å c={cell['c']:.4f} Å "
           f"al={cell['al']:.2f}° be={cell['be']:.2f}° ga={cell['ga']:.2f}°")
     print(f"Geom: λ={geom['wavelength_A']} Å, L={geom['clen_m']} m, res={geom['res_px_per_m']} px/m | panel {nx}×{ny}px | edge r={r_edge_px:.2f}px")
     print(f"Settings: UVW_MAX={args.uvw_max}, g_enum={g_enum:.3f}, g_crowd={g_crowd:.3f}, I_min_rel={args.i_min_rel}, "
-          f"N_min={args.n_min}, M_min={args.m_min}, ring_mult_min={args.ring_mult_min}, α={args.score_alpha}, β={args.score_beta}, tol_g={args.tol_g}")
+          f"N_min={args.n_min}, M_min={args.m_min}, ring_mult_min={args.ring_mult_min}, α={args.score_alpha}, β={args.score_beta}, tol_g={args.tol_g}\n")
 
     if args.printresults:
         print("(u v w)   r_px    g_min(1/Å)  ring_mult   N    M    Score")
         for r in rows:
             print(f"{r['u']:>2} {r['v']:>2} {r['w']:>2}  {r['r_px']:7.2f}   {r['g_min_1_over_A']:.4f}    {r['ring_mult']:>3}    {r['N']:>3}  {r['M']:>4}  {r['Score']:>7.2f}")
-        for r in rows:
+        if args.listuvw:
+            for r in rows:
                 print(f"\"{r['u']:>2} {r['v']:>2} {r['w']:>2}\",")
 
     if args.csv:
@@ -527,10 +514,10 @@ def main():
             f.write("\n# Problematic axis triplets listed:\n")
             f.write("# " + " ".join(triplets) + "\n")
 
-        print(f"Wrote CSV: {csv_path}")
+        print(f"\nWrote CSV: {csv_path}")
 
-    # if args.progress:
-    eprint(f"[6/6] Done in {time.time() - t0:.1f}s.")
+    if args.progress:
+        eprint(f"[6/6] Done in {time.time() - t0:.1f}s.")
 
 if __name__ == "__main__":
     main()

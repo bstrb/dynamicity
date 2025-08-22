@@ -274,7 +274,7 @@ def index_chunks(
                             cm.best_score = sc
                             # compute angle/score metric
                             if (sc is not None) and math.isfinite(sc) and sc > 0.0:
-                                cm.ang_over_score = cm.angle / sc
+                                cm.ang_over_score = cm.angle / (sc**(1.5))
                             else:
                                 cm.ang_over_score = math.inf
                     except Exception:
