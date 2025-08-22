@@ -8,7 +8,7 @@ set -euo pipefail
 #   --m-min 885 \
 #   --progress \
 #   --csv 
-
+ 
 # python3 predict_problematic_axes_numba.py \
 #   --stream "/home/bubl3932/files/simulations/aP_C23H22O5/sim_000/1515178.stream" \
 #   --uvw-max 5 \
@@ -23,10 +23,12 @@ set -euo pipefail
 #   # --g-enum-bound 1.1 \
 
 python3 predict_problematic_axes_numba.py \
-  --stream "/home/bubl3932/files/simulations/aP_C23H22O5/sim_000/1515178.stream" \
+  --stream "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_000/MFM300.stream" \
   --uvw-max 5 \
   --ring-mult-min 2 \
-  --n-min 670 \
-  --m-min 885 \
+  --g-max 3 \
+  --g-enum-bound 1.1 \
+  --n-min 122 \
+  --m-min 0 \
   --progress \
   --csv 

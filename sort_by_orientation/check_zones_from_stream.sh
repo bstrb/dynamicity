@@ -14,13 +14,13 @@
 
 set -eu
 
-STREAM="/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_1.8_step_0.5/filtered_metrics/filtered_metrics.stream"
-EVENT_ID="4734-1 "
-MAX=15
+STREAM="/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_000/MFM300.stream"
+EVENT_ID="11"
+MAX=5
 TOP=10
 BEAM="0 0 1"
 KEEPSIGN=0
-PRINTVEC=0
+PRINTVEC=1
 
 usage() {
   sed -n '2,200p' "$0" | sed 's/^# //;t;d'

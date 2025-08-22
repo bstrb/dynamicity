@@ -496,6 +496,8 @@ def main():
     if args.csv:
         csv_path = args.stream.replace(".stream", "_problematic_orientations.csv")
         with open(csv_path, "w", newline="") as f:
+            f.write("# CrystFEL problematic zone axes prediction\n")
+            f.write(f"# Stream: {args.stream}\n")
             f.write(f"# Cell: {cell['lattice_type'].upper()} {cell['centering'].upper()} | "
                     f"a={cell['a']:.4f} Å b={cell['b']:.4f} Å c={cell['c']:.4f} Å "
                     f"al={cell['al']:.2f}° be={cell['be']:.2f}° ga={cell['ga']:.2f}°\n")
@@ -503,14 +505,16 @@ def main():
                     f"panel {nx}×{ny}px | edge r={r_edge_px:.2f}px\n")
             f.write(f"# Settings: UVW_MAX={args.uvw_max}, g_enum={g_enum:.3f}, g_crowd={g_crowd:.3f}, "
                     f"I_min_rel={args.i_min_rel}, N_min={args.n_min}, M_min={args.m_min}, "
-                    f"ring_mult_min={args.ring_mult_min}, α={args.score_alpha}, β={args.score_beta}, tol_g={args.tol_g}\n\n")
+                    f"ring_mult_min={args.ring_mult_min}, α={args.score_alpha}, β={args.score_beta}, tol_g={args.tol_g}\n")
             w = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else
                                ["u","v","w","ring_type","g_min_1_over_A","r_px","ring_mult","N","M","Score","inside"])
             w.writeheader()
             for r in rows: w.writerow(r)
             triplets = [f'"{r["u"]:>2} {r["v"]:>2} {r["w"]:>2}"' for r in rows]
             f.write("\n # Problematic axis triplets listed:\n")
-            f.write(" ".join(triplets) + "\n")
+            # f.write(" ".join(triplets) + "\n")
+            f.write("# " + " ".join(triplets) + "\n")
+
         print(f"\nWrote CSV: {csv_path}")
 
     if args.progress:
