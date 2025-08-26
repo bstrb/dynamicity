@@ -2,11 +2,32 @@
 set -euo pipefail
 
 python3 predict_problematic_axes_numba.py \
-  --stream "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.0_step_0.1/MFM300_0.0_0.0.stream" \
-  --ring-mult-min 2 \
-  --nrows 50 \
+  --stream "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_1.0_step_0.1/filtered_metrics/filtered_metrics.stream" \
+  --nrows 100 \
   --csv 
 
-  # --uvw-max 15 \
-  # --g-max 3 \
-  # --g-enum-bound 1.1 \
+# Example additions to command line:
+# --uvw-max 15 \
+# --g-enum-bound 1.1 \
+# --g-max 3 \
+
+# ap.add_argument("--stream", required=True, help="Path to .stream file, or '-' to read from stdin")
+# ap.add_argument("--uvw-max", type=int, default=10)
+# ap.add_argument("--g-enum-bound", type=float, default=None)
+# ap.add_argument("--g-max", type=float, default=None)
+# ap.add_argument("--zolz-only", action="store_true", default=True)
+# ap.add_argument("--holz", dest="holz", action="store_true")
+# ap.add_argument("--i-min-rel", type=float, default=0.0)
+# ap.add_argument("--ring-mult-min", type=int, default=2)
+# ap.add_argument("--n-min", type=int, default=0)
+# ap.add_argument("--m-min", type=int, default=0)
+# ap.add_argument("--score-alpha", type=float, default=0.4)
+# ap.add_argument("--score-beta",  type=float, default=0.6)
+# ap.add_argument("--margin-px", type=float, default=0.0)
+# ap.add_argument("--tol-g", type=float, default=5e-4)
+# ap.add_argument("--nrows", type=int, default=None, help="Maximum number of rows to print and save (default: all)")
+# ap.add_argument("--csv", action="store_true")
+# ap.add_argument("--printresults", action="store_true", help="Print results table to stdout (headers always printed)")
+# # Parallel controls
+# ap.add_argument("--jobs", type=int, default=os.cpu_count(), help="Worker processes (default: all cores)")
+# ap.add_argument("--chunksize", type=int, default=8, help="Items per task sent to each worker")

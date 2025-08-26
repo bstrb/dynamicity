@@ -272,9 +272,13 @@ def index_chunks(
                                 neg = (-best_axis[0], -best_axis[1], -best_axis[2])
                                 sc = axis_score_map.get(neg)
                             cm.best_score = sc
-                            # compute angle/score metric
-                            if (sc is not None) and math.isfinite(sc) and sc > 0.0:
-                                cm.ang_over_score = cm.angle / (sc**(1.5))
+                            # # compute angle/score metric
+                            # if (sc is not None) and math.isfinite(sc) and sc > 0.0:
+                            #     cm.ang_over_score = cm.angle / sc
+                            # Product of normalized angle and (2 - score)
+                            if (sc is not None) and math.isfinite(sc) and 0.0 <= sc <= 1.0:
+                                angle_norm = min(cm.angle, 90.0) / 90.0   # cap at 90° → [0,1]
+                                cm.ang_over_score = angle_norm * (2 - sc)
                             else:
                                 cm.ang_over_score = math.inf
                     except Exception:
@@ -491,8 +495,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                       help="Comma-separated angle edges, e.g., 0,12.5,50")
 
     ap.add_argument("--include-unindexed", choices=("end","start","drop"),
-                    default="end",
-                    help="Where unindexed chunks go in --sort-angle (default: end).")
+                    default="drop",
+                    help="Where unindexed chunks go in --sort-angle (default: drop).")
     ap.add_argument("--count-split", type=int,
                     help="After --sort-angle, split into files of N chunks each (optional).")
     ap.add_argument("--report", action="store_true",
