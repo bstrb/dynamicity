@@ -96,7 +96,7 @@ def main():
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Wrote unit cell to: {out_path}")
+    print(f"Wrote unit cell from stream header to: {out_path}")
 
 if __name__ == "__main__":
     main()

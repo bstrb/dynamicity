@@ -21,7 +21,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 # -------- helpers --------
 
@@ -31,71 +31,6 @@ def run_cmd(cmd, log_path) -> int:
         proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, text=True)
         proc.wait()
         return proc.returncode
-
-def parse_shell_table(path: str) -> Tuple[List[Dict[str, str]], List[str]]:
-    """Whitespace-or-tab separated table; ignore comments/blank lines."""
-    if not os.path.exists(path):
-        return [], []
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        lines = [ln.strip("\n") for ln in f if ln.strip() and not ln.lstrip().startswith("#")]
-    if not lines:
-        return [], []
-    header = lines[0]
-    body = lines[1:]
-    if "\t" in header:
-        cols = header.split("\t")
-        rows = [ln.split("\t") for ln in body]
-    else:
-        splitter = re.compile(r"\s+")
-        cols = splitter.split(header.strip())
-        rows = [splitter.split(ln.strip()) for ln in body]
-    table = []
-    for r in rows:
-        if len(r) < len(cols):
-            r = r + [""] * (len(cols) - len(r))
-        table.append({cols[i]: r[i] for i in range(len(cols))})
-    return table, cols
-
-def f2(x: Optional[str]) -> Optional[float]:
-    try:
-        return float(x)
-    except Exception:
-        return None
-
-def find_col(candidates: List[str], cols: List[str]) -> Optional[str]:
-    lowmap = {c.lower(): c for c in cols}
-    for c in candidates:
-        if c.lower() in lowmap:
-            return lowmap[c.lower()]
-    return None
-
-def compute_overall_completeness(shell_path: str) -> Optional[float]:
-    """Fallback path: compute overall completeness from the shell table."""
-    table, cols = parse_shell_table(shell_path)
-    if not table:
-        return None
-    nposs = find_col(["nposs","n_poss","npossible","n_possible","n_expected"], cols)
-    nobs  = find_col(["nobs","n_obs","nmeas","n_meas","nobserved","n_reflections"], cols)
-    comp  = find_col(["completeness","compl","percent_completeness","comp","complete"], cols)
-
-    # Prefer weighted by possible reflections
-    if nposs and nobs:
-        tot_poss = 0.0
-        tot_obs  = 0.0
-        for row in table:
-            p = f2(row.get(nposs)); o = f2(row.get(nobs))
-            if p is not None and o is not None:
-                tot_poss += p; tot_obs += o
-        if tot_poss > 0:
-            return 100.0 * (tot_obs / tot_poss)
-
-    # Fallback: average of per-shell completeness
-    if comp:
-        vals = [f2(r.get(comp)) for r in table if f2(r.get(comp)) is not None]
-        if vals:
-            return sum(vals) / len(vals)
-
-    return None
 
 def grep_last_number(log_path: str, key: str) -> Optional[str]:
     if not os.path.exists(log_path):
@@ -118,19 +53,42 @@ def extract_bfactor_from_log(log_path: str) -> Optional[float]:
 
 def extract_overall_completeness_from_log(log_path: str) -> Optional[float]:
     """
-    Preferred path: read 'Overall completeness = XX.XXXXXX %' from check_hkl_completeness.log.
+    Read 'Overall completeness = XX.XXXXX %' from check_hkl log.
     Robust to spacing/case and optional percent sign.
     """
     if not os.path.exists(log_path):
         return None
     with open(log_path, "r", encoding="utf-8", errors="replace") as f:
         txt = f.read()
-    m = re.search(
-        r"overall\s+completeness\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
-        txt,
-        re.IGNORECASE,
-    )
+    m = re.search(r"overall\s+completeness\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*%?", txt, re.IGNORECASE)
     return float(m.group(1)) if m else None
+
+def extract_overall_redundancy_from_log(log_path: str) -> Optional[float]:
+    """
+    Read 'Overall redundancy = X.XXXXXX measurements/unique reflection'
+    from check_hkl log.
+    """
+    if not os.path.exists(log_path):
+        return None
+    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+        txt = f.read()
+    m = re.search(r"overall\s+redundancy\s*=\s*([0-9]+(?:\.[0-9]+)?)", txt, re.IGNORECASE)
+    return float(m.group(1)) if m else None
+
+def extract_overall_snr_from_log(log_path: str) -> Optional[float]:
+    """
+    Read 'Overall <snr> = X.XXXXXX' from check_hkl log.
+    """
+    if not os.path.exists(log_path):
+        return None
+    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+        txt = f.read()
+    # allow variants like < SNR >, <I/sigma>, etc., but prioritize <snr>
+    m = re.search(r"overall\s*<\s*snr\s*>\s*=\s*([0-9]+(?:\.[0-9]+)?)", txt, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    m2 = re.search(r"overall\s+(?:i/\s*sigma|i\s*/\s*sig(?:ma)?)\s*=\s*([0-9]+(?:\.[0-9]+)?)", txt, re.IGNORECASE)
+    return float(m2.group(1)) if m2 else None
 
 # -------- main --------
 
@@ -138,7 +96,7 @@ def main():
     ap = argparse.ArgumentParser(description="QC for crystfel.hkl [+hkl1/hkl2] in a directory.")
     ap.add_argument("--dir", help="Directory containing crystfel.hkl (and optional crystfel.hkl1/2). If omitted, use CWD.")
     ap.add_argument("--cell", "-c", required=True, help="Unit cell file (.cell or .pdb)")
-    ap.add_argument("--symmetry", "-y", required=True, help='Point group symmetry, e.g. \"4/mmm\"')
+    ap.add_argument("--symmetry", "-y", required=True, help='Point group symmetry, e.g. "4/mmm"')
     ap.add_argument("--lowres", type=float, default=4.0, help="Low resolution cutoff d (Å)")
     ap.add_argument("--highres", type=float, default=0.4, help="High resolution cutoff d (Å)")
     ap.add_argument("--outdir", "-o", default="qc_stats", help="Output directory (created under --dir/CWD)")
@@ -184,11 +142,14 @@ def main():
         print(f"check_hkl failed (see {comp_log})", file=sys.stderr)
         sys.exit(rc)
 
-    # Prefer reading "Overall completeness" from the log; fallback to computing from shell table.
+    # Extract overall stats from the log
     completeness = extract_overall_completeness_from_log(comp_log)
-    if completeness is None:
-        completeness = compute_overall_completeness(comp_shell)
+    redundancy   = extract_overall_redundancy_from_log(comp_log)
+    snr          = extract_overall_snr_from_log(comp_log)
+
     comp_str = f"{completeness:.2f}%" if completeness is not None else "NA"
+    red_str  = f"{redundancy:.2f}×"   if redundancy   is not None else "NA"
+    snr_str  = f"{snr:.2f}"           if snr          is not None else "NA"
 
     # 2) Optional Wilson
     b_str = None
@@ -201,7 +162,7 @@ def main():
             f"--nshells={args.nshells}", "--wilson", f"--shell-file={wil_shell}"
         ]
         print("[2/3] check_hkl (--wilson)…")
-        _ = run_cmd(cmd_wil, wil_log)  # non-zero sometimes when atoms unknown; still log
+        _ = run_cmd(cmd_wil, wil_log)  # may be non-zero in some cases; still parse if present
         b = extract_bfactor_from_log(wil_log)
         b_str = f"{b:.2f} Å²" if b is not None else "NA"
     else:
@@ -239,11 +200,12 @@ def main():
     # Summary
     print("\n=== SUMMARY ===")
     print(f"Completeness: {comp_str}")
-    print(f"CC1/2:       {cc_str}")
-    print(f"Rsplit:      {rs_str}")
+    print(f"Redundancy:   {red_str}")
+    print(f"SNR:         {snr_str}")
+    print(f"CC1/2:        {cc_str}")
+    print(f"Rsplit:       {rs_str}")
     if args.wilson:
-        print(f"Wilson B:    {b_str}")
-    print(f"\nShell tables & logs in: {outdir}")
+        print(f"Wilson B:     {b_str}")
 
 if __name__ == "__main__":
     main()
