@@ -1,0 +1,11 @@
+# macOS system files
+.DS_Store
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Binary or data files you don’t want tracked
+*.bin
