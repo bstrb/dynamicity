@@ -9,3 +9,7 @@ __pycache__/
 
 # Binary or data files you don’t want tracked
 *.bin
+
+# Numba intermediate files
+*.nbi
+*.nbc
