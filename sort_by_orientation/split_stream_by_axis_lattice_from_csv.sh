@@ -1,6 +1,6 @@
 # split_stream_by_axis_lattice_from_csv.sh
 
-python split_stream_by_axis_lattice_from_csv.py --from-csv /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_1.0_step_0.1/filtered_metrics/filtered_metrics_problematic_orientations.csv --sort-angle --metric angle_over_score --report --count-split 213
+python split_stream_by_axis_lattice_from_csv.py --from-csv /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.0_step_0.1/MFM300VIII_512_0.0_0.0_problematic_orientations.csv --sort-angle --metric angle_over_score --report --count-split 6615
 
 # # input_stream is optional when --from-csv supplies '# Stream: …'
 # ap.add_argument("input_stream", type=Path, nargs="?", help="Input .stream file. Optional if --from-csv is given and header contains '# Stream: <path>'.")
