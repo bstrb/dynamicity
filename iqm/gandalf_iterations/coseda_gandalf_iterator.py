@@ -124,6 +124,7 @@ def estimate_passes(max_radius: float, step: float) -> int:
     return max(1, count)
 
 # -------------------- backend runner --------------------
+# from coseda_gandalf_radial_iterator_helpers import gandalf_iterator
 
 def run_gandalf_iterator(
     *,
@@ -160,14 +161,23 @@ def run_gandalf_iterator(
     overall_max = max(1, per_pass_total * passes_total)
 
     # Tiny runner so we can import the iterator in the child process
-    runner_code = textwrap.dedent("""
+    runner_code = textwrap.dedent(f"""
         import sys
+        import os
+        
+        # Add the gandalf_iterations directory to Python path
+        script_dir = r"{os.path.dirname(os.path.abspath(__file__))}"
+        if script_dir not in sys.path:
+            sys.path.insert(0, script_dir)
+        
         try:
             # Vendored inside COSEDA
-            from coseda.gandalf_iterations.gandalf_radial_iterator import gandalf_iterator
-        except ImportError:
-            # Or available as a top-level package/module
+            # from coseda.gandalf_iterations.gandalf_radial_iterator import gandalf_iterator
             from coseda_gandalf_radial_iterator_helpers import gandalf_iterator
+        except ImportError as e:
+            sys.stderr.write(f"Import error: {{e}}\\n")
+            sys.stderr.flush()
+            sys.exit(1)
 
         if __name__ == "__main__":
             args = sys.argv[1:]

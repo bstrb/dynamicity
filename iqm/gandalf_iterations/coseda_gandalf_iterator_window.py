@@ -1,6 +1,6 @@
 # cosedaUI/gandalf_iterator_window.py
 from __future__ import annotations
-
+ 
 import os
 import re
 import time
@@ -13,14 +13,6 @@ from PyQt6.QtWidgets import (
     QFormLayout, QMessageBox, QComboBox, QSpinBox, QDoubleSpinBox, QProgressBar,
     QFileDialog, QWidget, QSizePolicy
 )
-
-# from coseda.gandalf_iterator import (
-#     DEFAULT_PEAKFINDER_OPTIONS,
-#     INDEXING_FLAGS,
-#     count_images_in_h5_folder,
-#     estimate_passes,
-#     run_gandalf_iterator,
-# )
 
 from coseda_gandalf_iterator import (
     DEFAULT_PEAKFINDER_OPTIONS,
@@ -93,7 +85,6 @@ class Worker(QObject):
             self.error.emit(str(e))
 
 # -------------------- main dialog --------------------
-
 class GandalfIteratorWindow(QDialog):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -106,7 +97,6 @@ class GandalfIteratorWindow(QDialog):
         self._mirror_only_progress = True
 
         self._build_ui()
-
     # ---------- UI ----------
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
@@ -125,50 +115,113 @@ class GandalfIteratorWindow(QDialog):
         files_group.setLayout(files_form)
         main_layout.addWidget(files_group)
 
-        # Basic params
+        # Basic params (output base on one row, threads/max_radius/step on next row)
         basic_group = QGroupBox("Basic Parameters")
         bg = QFormLayout()
+
+        # Output base row (make it expand like other flags)
         self.output_edit = QLineEdit("Xtal")
+        self.output_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.output_edit.setMinimumWidth(500)  # Match minimum width with other flags
+        output_row = QHBoxLayout()
+        output_row.addWidget(QLabel("Output base:"))
+        output_row.addWidget(self.output_edit)
+        output_row_widget = QWidget()
+        output_row_widget.setLayout(output_row)
+        bg.addRow(output_row_widget)
+
+        # Threads, Max radius, Step on same row
         self.threads_spin = QSpinBox(); self.threads_spin.setRange(1, 1024); self.threads_spin.setValue(24)
         self.max_radius_spin = QDoubleSpinBox(); self.max_radius_spin.setRange(0.0, 10.0); self.max_radius_spin.setDecimals(3); self.max_radius_spin.setSingleStep(0.05); self.max_radius_spin.setValue(0.0)
         self.step_spin = QDoubleSpinBox(); self.step_spin.setRange(0.01, 5.0); self.step_spin.setDecimals(3); self.step_spin.setSingleStep(0.05); self.step_spin.setValue(0.1)
-        bg.addRow("Output base:", self.output_edit)
-        bg.addRow("Threads:", self.threads_spin)
-        bg.addRow("Max radius:", self.max_radius_spin)
-        bg.addRow("Step:", self.step_spin)
+
+        params_row = QHBoxLayout()
+        params_row.addWidget(QLabel("Threads:"))
+        params_row.addWidget(self.threads_spin)
+        params_row.addSpacing(10)
+        params_row.addWidget(QLabel("Max radius:"))
+        params_row.addWidget(self.max_radius_spin)
+        params_row.addSpacing(10)
+        params_row.addWidget(QLabel("Step:"))
+        params_row.addWidget(self.step_spin)
+        params_widget = QWidget()
+        params_widget.setLayout(params_row)
+
+        bg.addRow(params_widget)
         basic_group.setLayout(bg)
         main_layout.addWidget(basic_group)
 
         # Peakfinder
         peak_group = QGroupBox("Peakfinder")
         pf_form = QFormLayout()
+        peak_row = QHBoxLayout()
         self.peak_combo = QComboBox(); self.peak_combo.addItems(list(DEFAULT_PEAKFINDER_OPTIONS.keys()))
         self.peak_params_edit = QLineEdit()
         self.peak_params_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        pf_form.addRow("Method:", self.peak_combo)
-        pf_form.addRow("Params (auto):", self.peak_params_edit)
+        peak_row.addWidget(QLabel("Method:"))
+        peak_row.addWidget(self.peak_combo)
+        peak_row.addSpacing(10)
+        peak_row.addWidget(QLabel("Params (auto):"))
+        peak_row.addWidget(self.peak_params_edit)
+        peak_row_widget = QWidget()
+        peak_row_widget.setLayout(peak_row)
+        pf_form.addRow(peak_row_widget)
         peak_group.setLayout(pf_form)
         main_layout.addWidget(peak_group)
         self._update_peak_params(self.peak_combo.currentText())
         self.peak_combo.currentTextChanged.connect(self._update_peak_params)
-
-        # Advanced flags (mirrors your defaults)
+        # Advanced flags (some on same row)
         adv_group = QGroupBox("Advanced Indexing & Other Flags")
         adv_form = QFormLayout()
+
         self.min_peaks_spin = QSpinBox(); self.min_peaks_spin.setRange(1, 1000); self.min_peaks_spin.setValue(15)
         self.tolerance_edit = QLineEdit("10,10,10,5")
-        self.samp_pitch_spin = QSpinBox(); self.samp_pitch_spin.setRange(1, 90); self.samp_pitch_spin.setValue(5)
-        self.grad_desc_spin = QSpinBox(); self.grad_desc_spin.setRange(0, 100); self.grad_desc_spin.setValue(1)
-        self.xg_tol_spin = QDoubleSpinBox(); self.xg_tol_spin.setDecimals(4); self.xg_tol_spin.setRange(0.0001, 1.0); self.xg_tol_spin.setSingleStep(0.0005); self.xg_tol_spin.setValue(0.02)
         self.int_radius_edit = QLineEdit("4,5,9")
+
+        # Row: Min peaks, Cell tolerance, Integration radius
+        min_cell_int_row = QHBoxLayout()
+        min_cell_int_row.addWidget(QLabel("Min peaks:"))
+        min_cell_int_row.addWidget(self.min_peaks_spin)
+        min_cell_int_row.addSpacing(10)
+        min_cell_int_row.addWidget(QLabel("Cell tolerance:"))
+        min_cell_int_row.addWidget(self.tolerance_edit)
+        min_cell_int_row.addSpacing(10)
+        min_cell_int_row.addWidget(QLabel("Integration radius:"))
+        min_cell_int_row.addWidget(self.int_radius_edit)
+        min_cell_int_widget = QWidget()
+        min_cell_int_widget.setLayout(min_cell_int_row)
+
+        self.samp_pitch_spin = QSpinBox(); self.samp_pitch_spin.setRange(1, 90); self.samp_pitch_spin.setValue(5)
+        self.xg_tol_spin = QDoubleSpinBox(); self.xg_tol_spin.setDecimals(4); self.xg_tol_spin.setRange(0.0001, 1.0); self.xg_tol_spin.setSingleStep(0.0005); self.xg_tol_spin.setValue(0.02)
+        self.grad_desc_spin = QSpinBox(); self.grad_desc_spin.setRange(0, 100); self.grad_desc_spin.setValue(1)
+
+        # Row: XG sampling pitch, XG tolerance, Grad-desc iterations
+        pitch_tol_grad_row = QHBoxLayout()
+        pitch_tol_grad_row.addWidget(QLabel("XG sampling pitch:"))
+        pitch_tol_grad_row.addWidget(self.samp_pitch_spin)
+        pitch_tol_grad_row.addSpacing(10)
+        pitch_tol_grad_row.addWidget(QLabel("XG tolerance:"))
+        pitch_tol_grad_row.addWidget(self.xg_tol_spin)
+        pitch_tol_grad_row.addSpacing(10)
+        pitch_tol_grad_row.addWidget(QLabel("Grad-desc iterations:"))
+        pitch_tol_grad_row.addWidget(self.grad_desc_spin)
+        pitch_tol_grad_widget = QWidget()
+        pitch_tol_grad_widget.setLayout(pitch_tol_grad_row)
+
         self.other_flags_edit = QLineEdit("--no-revalidate --no-half-pixel-shift --no-refine --no-non-hits-in-stream --no-retry --fix-profile-radius=70000000")
-        adv_form.addRow("Min peaks:", self.min_peaks_spin)
-        adv_form.addRow("Cell tolerance:", self.tolerance_edit)
-        adv_form.addRow("XG sampling pitch:", self.samp_pitch_spin)
-        adv_form.addRow("XG grad-desc iterations:", self.grad_desc_spin)
-        adv_form.addRow("XG tolerance:", self.xg_tol_spin)
-        adv_form.addRow("Integration radius:", self.int_radius_edit)
-        adv_form.addRow("Other flags:", self.other_flags_edit)
+        self.other_flags_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.other_flags_edit.setMinimumWidth(500)  # Optional: set a reasonable minimum width
+
+        # Put the "Other flags" row in a horizontal layout to ensure expansion
+        other_flags_row = QHBoxLayout()
+        other_flags_row.addWidget(QLabel("Other flags:"))
+        other_flags_row.addWidget(self.other_flags_edit)
+        other_flags_widget = QWidget()
+        other_flags_widget.setLayout(other_flags_row)
+
+        adv_form.addRow(min_cell_int_widget)
+        adv_form.addRow(pitch_tol_grad_widget)
+        adv_form.addRow(other_flags_widget)
         adv_group.setLayout(adv_form)
         main_layout.addWidget(adv_group)
 
