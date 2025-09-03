@@ -35,13 +35,3 @@ def extract_resolution(geom_file_path: str) -> float:
                     except ValueError:
                         raise ValueError(f"Invalid resolution value: {res_str}")
     raise ValueError("Resolution not found in the geometry file.")
-
-if __name__ == "__main__":
-    
-    geom_file = "/Users/xiaodong/Desktop/simulations/LTA/LTAsim.geom"
-    try:
-        resolution = extract_resolution(geom_file)
-        print(f"mm per pixel: {1000/resolution}")
-    except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)

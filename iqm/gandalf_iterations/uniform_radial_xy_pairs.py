@@ -45,21 +45,3 @@ def generate_sorted_grid_points(max_radius, step=0.5):
     points.sort(key=lambda pt: (pt[0] - x_center) ** 2 + (pt[1] - y_center) ** 2)
     print(f"Generated {len(points)} grid points in the circle.")
     return points
-
-# Example usage:
-if __name__ == "__main__":
-    center_x, center_y = 0, 0
-    max_radius = 1    # maximum radius of the circle
-    step = 0.5        # grid granularity
-    
-    # points = grid_points_in_circle(center_x, center_y, max_radius, step)
-    points = generate_sorted_grid_points(max_radius, step)
-    
-    # Quick visual check
-    xs, ys = zip(*points)
-    plt.scatter(xs, ys)
-    plt.gca().set_aspect('equal', 'box')
-    plt.title("Grid Points in a Circle Sorted by Radial Distance (Rounded Coordinates)")
-    plt.xlabel("X")
-    plt.ylabel("Y")
-    plt.show()

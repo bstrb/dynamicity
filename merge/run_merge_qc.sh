@@ -10,11 +10,7 @@ set -euo pipefail
 # Hardcoded list of stream files
 #######################################
 STREAMS=(
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.0_step_0.1/MFM300VIII_512_0.0_0.0_sorted_part1.stream"
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.0_step_0.1/MFM300VIII_512_0.0_0.0_sorted_part2.stream"
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.0_step_0.1/MFM300VIII_512_0.0_0.0_sorted_part3.stream"
   "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.0_step_0.1/MFM300VIII_512_0.0_0.0_sorted_part4.stream"
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.0_step_0.1/MFM300VIII_512_0.0_0.0_sorted_part5.stream"
 )
 
 #######################################

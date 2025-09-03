@@ -2,8 +2,8 @@
 set -euo pipefail
 
 python3 predict_problematic_axes_numba.py \
-  --stream "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.0_step_0.1/MFM300VIII_512_0.0_0.0.stream" \
-  --nrows 100 \
+  --stream "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/filtered_metrics/filtered_metrics.stream" \
+  --nrows 110 \
   --csv 
 
 # Example additions to command line:

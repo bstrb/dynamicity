@@ -1,7 +1,7 @@
 # split_stream_by_axis_lattice_from_csv.sh
 
-python split_stream_by_axis_lattice_from_csv.py --from-csv /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/filtered_metrics/filtered_metrics_problematic_orientations.csv --sort-angle --metric angle_over_score --report 
-
+python split_stream_by_axis_lattice_from_csv.py --from-csv /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/filtered_metrics/filtered_metrics_problematic_orientations.csv --report --angle-bins 0,2,50
+# --sort-angle --metric angle_over_score
 # # input_stream is optional when --from-csv supplies '# Stream: …'
 # ap.add_argument("input_stream", type=Path, nargs="?", help="Input .stream file. Optional if --from-csv is given and header contains '# Stream: <path>'.")
 # ap.add_argument("output", type=Path, nargs="?", help=("For --sort-angle: output .stream filename (default <input>_sorted.stream).  "For binning: prefix (default <input>_bin)."))
