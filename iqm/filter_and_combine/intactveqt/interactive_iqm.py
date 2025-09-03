@@ -401,3 +401,176 @@ def write_filtered_csv(
                     out[c] = r.get(c, "")
             writer.writerow(out)
     print(f"[metric_tools] Wrote {len(rows)} rows → {output_csv_path}")
+
+    # -------- Direction map (reuse/adjust as you like) --------
+# True  => lower is better
+# False => higher is better (will be inverted for “badness”)
+LOWER_IS_BETTER.update({
+    "weighted_rmsd": True,
+    "fraction_outliers": True,
+    "length_deviation": True,
+    "angle_deviation": True,
+    "peak_ratio": False,              # higher=better
+    "percentage_unindexed": True,
+})
+
+# -------- Per-chunk normalization --------
+def _norm_values(vals: list[float], *, method: str, robust: bool, winsor: tuple[float,float]) -> tuple[list[float], dict]:
+    """Return normalized values (mean≈0, sd≈1 for z/robust_z; in [0,1] for minmax) + stats dict."""
+    if not vals:
+        return [], {"method": method}
+    lo_q, hi_q = winsor
+    if method == "minmax":
+        vmin, vmax = min(vals), max(vals)
+        if vmax == vmin:
+            return [0.5 for _ in vals], {"vmin": vmin, "vmax": vmax, "method": method}
+        return [ (v - vmin) / (vmax - vmin) for v in vals ], {"vmin": vmin, "vmax": vmax, "method": method}
+
+    if robust:
+        med = _median(vals)
+        mad = _mad(vals, med)
+        sigma = 1.4826*mad if mad > 0 else (max(1e-9, (max(vals)-min(vals))/6.0) if len(vals) > 1 else 1.0)
+        lo, hi = _quantiles(vals, lo_q, hi_q)
+        w = [_winsorize(v, lo, hi) for v in vals]
+        return [ (vw - med)/sigma for vw in w ], {"median": med, "sigma": sigma, "lo": lo, "hi": hi, "method": "robust_z"}
+    else:
+        mu = sum(vals)/len(vals)
+        var = sum((v-mu)**2 for v in vals)/(len(vals)-1) if len(vals) > 1 else 0.0
+        sd = math.sqrt(var) if var > 0 else 1.0
+        return [ (v - mu)/sd for v in vals ], {"mean": mu, "sd": sd, "method": "zscore"}
+
+def normalize_metrics_per_chunk(
+    grouped: dict[str, list[dict]],
+    metrics: list[str],
+    *,
+    method: str = "robust_z",   # 'robust_z' | 'zscore' | 'minmax'
+    winsor: tuple[float,float] = (0.01, 0.99),
+) -> dict[str, list[dict]]:
+    """
+    For each event group, normalize each metric within that group and attach
+    a direction-aware *badness* value in r[f"{m}__norm"], where lower=better.
+    """
+    out: dict[str, list[dict]] = {}
+    robust = (method == "robust_z")
+    for ev, rows in grouped.items():
+        rows2 = []
+        # collect per-metric vectors (skip None)
+        per_m_vals: dict[str, list[tuple[int,float]]] = {m: [] for m in metrics}
+        for i, r in enumerate(rows):
+            for m in metrics:
+                v = _to_float(r.get(m))
+                if v is not None:
+                    per_m_vals[m].append((i, v))
+
+        # compute normalized series metric-by-metric
+        norm_series: dict[str, dict[int, float]] = {m: {} for m in metrics}
+        for m in metrics:
+            if not per_m_vals[m]:
+                continue
+            idxs, vals = zip(*per_m_vals[m])
+            norm_vals, _stats = _norm_values(list(vals),
+                                             method=("minmax" if method=="minmax" else "zscore"),
+                                             robust=robust,
+                                             winsor=winsor)
+            # convert to badness (lower=better)
+            if LOWER_IS_BETTER.get(m, True):
+                bad = norm_vals[:]  # already “low=good” after z or minmax centered low
+            else:
+                # invert: high-good → high-badness becomes negative; for minmax use 1 - x
+                bad = ([-z for z in norm_vals] if method!="minmax" else [1.0 - x for x in norm_vals])
+            for i, b in zip(idxs, bad):
+                norm_series[m][i] = b
+
+        # write back copies with __norm fields
+        for i, r in enumerate(rows):
+            rr = dict(r)
+            for m in metrics:
+                rr[m + "__norm"] = norm_series[m].get(i)  # may be None if metric missing
+            rows2.append(rr)
+        out[ev] = rows2
+    return out
+
+# -------- Combine per chunk & select best --------
+def combine_per_chunk_and_select_best(
+    grouped_norm: dict[str, list[dict]],
+    metrics: list[str],
+    weights: list[float],
+    *,
+    norm_suffix: str = "__norm",
+    new_metric_name: str = "combined_metric",
+) -> list[dict]:
+    """
+    Build a weighted BADNESS score from per-chunk normalized metrics, then
+    pick the single lowest score per event. Returns the best rows (flattened).
+    """
+    best: list[dict] = []
+    for ev, rows in grouped_norm.items():
+        if not rows:
+            continue
+        # weighted mean of available normalized metrics
+        scored: list[tuple[float, dict]] = []
+        for r in rows:
+            num = 0.0
+            den = 0.0
+            for m, w in zip(metrics, weights):
+                if w == 0: 
+                    continue
+                v = r.get(m + norm_suffix)
+                if v is None:
+                    continue
+                num += float(w) * float(v)
+                den += abs(float(w))
+            if den == 0:
+                continue
+            score = num/den
+            rr = dict(r); rr[new_metric_name] = score
+            scored.append((score, rr))
+        if not scored:
+            continue
+        scored.sort(key=lambda x: x[0])
+        best.append(scored[0][1])
+    return best
+
+# -------- Global normalization & optional filtering --------
+def global_normalize_metric(
+    rows: list[dict],
+    metric: str = "combined_metric",
+    *,
+    method: str = "robust_z",  # 'robust_z' | 'zscore' | 'minmax'
+    winsor: tuple[float,float] = (0.01, 0.99),
+    out_name: str | None = None,
+) -> tuple[list[dict], dict]:
+    """
+    Normalize a single metric across all rows. Returns (rows_with_norm, stats).
+    The normalized column is metric + "__global" (or out_name).
+    """
+    vals = [ _to_float(r.get(metric)) for r in rows ]
+    idx = [ i for i,v in enumerate(vals) if v is not None ]
+    z  = [ vals[i] for i in idx ]
+    norm, stats = _norm_values(z, method=("minmax" if method=="minmax" else "zscore"),
+                               robust=(method=="robust_z"), winsor=winsor)
+    name = out_name or (metric + "__global")
+    out = []
+    it = iter(norm)
+    for i, r in enumerate(rows):
+        rr = dict(r)
+        rr[name] = (next(it) if i in idx else None)
+        out.append(rr)
+    return out, stats
+
+def filter_by_global_metric(
+    rows: list[dict],
+    *,
+    metric_norm_name: str,
+    threshold: float,
+    keep_low: bool = True,
+) -> list[dict]:
+    """Keep rows where normalized metric ≤ threshold (keep_low=True) or ≥ if keep_low=False."""
+    out = []
+    for r in rows:
+        v = _to_float(r.get(metric_norm_name))
+        if v is None:
+            continue
+        if (v <= threshold) if keep_low else (v >= threshold):
+            out.append(r)
+    return out

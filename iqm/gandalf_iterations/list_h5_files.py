@@ -35,8 +35,3 @@ def list_h5_files(input_path):
         print(f"An unexpected error occurred: {e}")
     
     return listfile_path
-        
-# Example usage:
-if __name__ == "__main__":
-    directory = "/path/to/your/h5/files"
-    list_h5_files(directory)

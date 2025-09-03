@@ -587,7 +587,7 @@ class GandalfWindow(QMainWindow):
         import tempfile, textwrap
         runner_code = textwrap.dedent("""
             import sys
-            from gandalf_iterations.gandalf_radial_iterator import gandalf_iterator
+            from gandalf_radial_iterator import gandalf_iterator
 
             if __name__ == "__main__":
                 args = sys.argv[1:]

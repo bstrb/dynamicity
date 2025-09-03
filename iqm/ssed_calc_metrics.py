@@ -76,7 +76,7 @@ def get_ui(parent):
         print("WRMSD Tolerance:", wrmsd)
         print("Indexing Tolerance:", indexing_tol)
         try:
-            process_indexing_metrics(folder, wrmsd_tolerance=wrmsd, indexing_tolerance=indexing_tol)
+            process_indexing_metrics(folder, wrmsd_tolerance=wrmsd, indexing_tolerance=indexing_tol, workers=8, peaks_tile=256, refls_tile=4096)
             print("Metrics processed successfully.")
         except Exception as e:
             print("Error processing metrics:", e)

@@ -32,9 +32,3 @@ def perturb_det_shifts(file_list, x_pert, y_pert):
             h5f["entry/data/det_shift_y_mm"][:] = y_data
 
     print(f"  => Applied x shift of {x_pert} mm, y shift of {y_pert} mm")
-
-if __name__ == "__main__":
-    list_file = "/Users/xiaodong/Desktop/simulations/LTA/simulation-34/list.lst"
-    xpert, y_pert = -0.2, 0.3
-    perturb_det_shifts(list_file, xpert, y_pert) # Apply the shifts
-    # perturb_det_shifts(list_file, -xpert, -y_pert) # Shift back

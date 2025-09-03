@@ -14,10 +14,10 @@
 
 set -eu
 
-STREAM="/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_000/MFM300.stream"
-EVENT_ID="11"
+STREAM="/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.0_step_0.1/MFM300VIII_512_0.0_0.0.stream"
+EVENT_ID="16036-1"
 MAX=5
-TOP=10
+TOP=15
 BEAM="0 0 1"
 KEEPSIGN=0
 PRINTVEC=1

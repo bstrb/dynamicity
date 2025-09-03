@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-split_stream_by_axis_lattice_from_csv.py
+split_stream_by_axis_lattice.py
 ===============================
 
 CrystFEL .stream utilities where **each chunk is one event**.
@@ -25,6 +25,10 @@ Existing:
       1) --sort-angle                    : copy of input with events sorted.
       2) --angle-bins / --angle-split    : split into angle-deviation bins.
 
+Progress:
+  • Auto progress bar on TTY; silent in non-interactive mode.
+  • Force on with --progress, force off with --no-progress.
+
 Conventions
 -----------
 • Each chunk is an event/frame. Missing astar/bstar/cstar ⇒ unindexed (angle = +inf).
@@ -33,9 +37,9 @@ Conventions
 """
 
 from __future__ import annotations
-import argparse, math, re, unicodedata, csv
+import argparse, math, re, unicodedata, csv, sys, time, shutil
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Sequence
+from typing import Dict, List, Tuple, Optional, Sequence, Callable
 import numpy as np
 
 # ---------- stream markers ----------
@@ -51,6 +55,57 @@ AXIS_LINE_RE = {
 }
 IMG_FN_RE  = re.compile(r'^Image filename:\s*(\S+)')
 EVENT_ANY_RE = re.compile(r'^Event:\s*//\s*([^\s]+)')
+
+# ---------- tiny progress helper (TTY-aware) ----------
+class _Progress:
+    def __init__(self, enabled: bool, total: int, label: str, min_interval: float = 0.1):
+        self.enabled   = enabled and total > 0 and sys.stderr.isatty()
+        self.total     = max(int(total), 1)
+        self.label     = label
+        self.min_ivl   = min_interval
+        self.last_t    = 0.0
+        self.start_t   = time.monotonic()
+        self.n         = 0
+
+    def update(self, inc: int):
+        if not self.enabled:
+            return
+        self.n += int(inc)
+        now = time.monotonic()
+        if (now - self.last_t) < self.min_ivl and self.n < self.total:
+            return
+        self.last_t = now
+        frac = min(max(self.n / self.total, 0.0), 1.0)
+        pct  = int(frac * 100)
+        elapsed = now - self.start_t
+        speed = (self.n / 1_048_576) / elapsed if elapsed > 0 else 0.0  # MiB/s
+        rem = (self.total - self.n) / max(self.n, 1) * elapsed if self.n > 0 else float('inf')
+        width = max(shutil.get_terminal_size((80, 20)).columns - 20, 20)
+        bar_w = max(min(width - 35, 40), 10)
+        filled = int(bar_w * frac)
+        bar = "[" + "#" * filled + "-" * (bar_w - filled) + "]"
+        eta = "--:--" if not math.isfinite(rem) else time.strftime("%M:%S", time.gmtime(rem))
+        msg = f"\r{self.label:<10} {bar} {pct:3d}%  {speed:5.1f} MiB/s  ETA {eta}"
+        sys.stderr.write(msg)
+        sys.stderr.flush()
+
+    def close(self):
+        if not self.enabled:
+            return
+        # Final line with total stats
+        total_time = time.monotonic() - self.start_t
+        speed = (self.total / 1_048_576) / total_time if total_time > 0 else 0.0
+        width = max(shutil.get_terminal_size((80, 20)).columns - 20, 20)
+        bar_w = max(min(width - 35, 40), 10)
+        bar = "[" + "#" * bar_w + "]"
+        msg = f"\r{self.label:<10} {bar} 100%  {speed:5.1f} MiB/s  ETA 00:00\n"
+        sys.stderr.write(msg)
+        sys.stderr.flush()
+
+def _make_progress(flag_progress: Optional[bool], total: int, label: str) -> _Progress:
+    # flag_progress: True (force on), False (force off), None (auto)
+    enabled = True if flag_progress is True else (False if flag_progress is False else True)
+    return _Progress(enabled, total, label)
 
 # ---------- axes per lattice (legacy path retained) ----------
 def _axes(*triples: str) -> List[Tuple[int,int,int]]:
@@ -200,10 +255,16 @@ def index_chunks(
     stream_path: Path,
     axes: List[Tuple[int,int,int]],
     beam_xyz: np.ndarray,
-    axis_score_map: Optional[Dict[Tuple[int,int,int], float]] = None
+    axis_score_map: Optional[Dict[Tuple[int,int,int], float]] = None,
+    *,
+    progress_flag: Optional[bool] = None
 ) -> Tuple[bytes, List[ChunkMeta]]:
     header = bytearray()
     chunks: List[ChunkMeta] = []
+
+    total_bytes = stream_path.stat().st_size
+    prog = _make_progress(progress_flag, total_bytes, "Indexing")
+    read_pos_prev = 0
 
     with stream_path.open("rb") as fh:
         in_header = True
@@ -221,6 +282,11 @@ def index_chunks(
             line_b = fh.readline()
             if not line_b:
                 break  # EOF
+
+            # progress update by bytes consumed
+            now_pos = fh.tell()
+            prog.update(now_pos - read_pos_prev)
+            read_pos_prev = now_pos
 
             if in_header:
                 if line_b.startswith(BEGIN_CHUNK_B):
@@ -272,9 +338,6 @@ def index_chunks(
                                 neg = (-best_axis[0], -best_axis[1], -best_axis[2])
                                 sc = axis_score_map.get(neg)
                             cm.best_score = sc
-                            # # compute angle/score metric
-                            # if (sc is not None) and math.isfinite(sc) and sc > 0.0:
-                            #     cm.ang_over_score = cm.angle / sc
                             # Product of normalized angle and (2 - score)
                             if (sc is not None) and math.isfinite(sc) and 0.0 <= sc <= 1.0:
                                 angle_norm = min(cm.angle, 90.0) / 90.0   # cap at 90° → [0,1]
@@ -310,6 +373,7 @@ def index_chunks(
                         elif key == 'cstar':
                             cstar = np.asarray(vec, float); have_cstar = True
 
+    prog.close()
     return bytes(header), chunks
 
 # ---------- helpers for bins ----------
@@ -343,7 +407,9 @@ def write_angle_bins(
     chunks: List[ChunkMeta],
     out_prefix: Path,
     bins: List[Tuple[float,float]],
-    report_path: Optional[Path] = None
+    report_path: Optional[Path] = None,
+    *,
+    progress_flag: Optional[bool] = None
 ) -> None:
     # optional text report
     rep_fh = None
@@ -382,6 +448,11 @@ def write_angle_bins(
     indexed = [cm for cm in chunks if math.isfinite(cm.angle)]
     indexed.sort(key=lambda cm: (cm.angle, cm.seq))
 
+    # progress based on total bytes to copy
+    total_copy = sum(cm.end - cm.start for cm in indexed)
+    prog = _make_progress(progress_flag, total_copy, "Writing")
+    copied = 0
+
     with src_path.open("rb") as src:
         for cm in indexed:
             placed = False
@@ -389,7 +460,20 @@ def write_angle_bins(
                 first = (j == 0)
                 if in_bin_float(cm.angle, low, high, first):
                     dst = get_handle(low, high)
-                    src.seek(cm.start); dst.write(src.read(cm.end - cm.start))
+                    src.seek(cm.start)
+                    chunk_len = cm.end - cm.start
+                    # Stream copy with progress updates in blocks
+                    remaining = chunk_len
+                    block = 1024 * 256
+                    while remaining > 0:
+                        n = min(block, remaining)
+                        buf = src.read(n)
+                        if not buf:
+                            break
+                        dst.write(buf)
+                        remaining -= len(buf)
+                        copied += len(buf)
+                        prog.update(len(buf))
                     placed = True
                     break
             if not placed:
@@ -400,6 +484,7 @@ def write_angle_bins(
         print(f"Wrote → {path}")
     if rep_fh:
         rep_fh.close()
+    prog.close()
 
 # ---------- write: sorted copy (by chosen metric) ----------
 def write_sorted_by_metric(
@@ -410,7 +495,8 @@ def write_sorted_by_metric(
     *,
     metric: str = "angle",             # 'angle' | 'angle_over_score'
     include_unindexed: str = "end",    # 'end' | 'start' | 'drop'
-    count_split: Optional[int] = None
+    count_split: Optional[int] = None,
+    progress_flag: Optional[bool] = None
 ) -> None:
     if include_unindexed not in {"end","start","drop"}:
         raise ValueError("--include-unindexed must be one of: end, start, drop")
@@ -442,6 +528,11 @@ def write_sorted_by_metric(
     else:
         groups = [order[i:i+count_split] for i in range(0, len(order), count_split)]
 
+    # total bytes for progress across all outputs
+    total_copy = sum(cm.end - cm.start for cm in order)
+    prog = _make_progress(progress_flag, total_copy, "Writing")
+    copied = 0
+
     with src_path.open("rb") as src:
         for gi, grp in enumerate(groups):
             out_path = (out_base if count_split is None
@@ -449,7 +540,19 @@ def write_sorted_by_metric(
             with out_path.open("wb") as dst:
                 dst.write(header)
                 for cm in grp:
-                    src.seek(cm.start); dst.write(src.read(cm.end - cm.start))
+                    src.seek(cm.start)
+                    remaining = cm.end - cm.start
+                    block = 1024 * 256
+                    while remaining > 0:
+                        n = min(block, remaining)
+                        buf = src.read(n)
+                        if not buf:
+                            break
+                        dst.write(buf)
+                        remaining -= len(buf)
+                        copied += len(buf)
+                        prog.update(len(buf))
+    prog.close()
 
 # ---------- CLI ----------
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -486,6 +589,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     ap.add_argument("--printaxes", action="store_true",
                     help="Print the axes that will be used and exit.")
 
+    # Modes
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--sort-angle", action="store_true",
                       help="Write a copy of the input with chunks sorted by the chosen metric (--metric).")
@@ -502,11 +606,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     ap.add_argument("--report", action="store_true",
                     help="Write per-chunk report '<img> //<event> -> [uvw] score=… angle=… angle/score=…'.")
 
+    # Progress flags
+    grp_prog = ap.add_mutually_exclusive_group()
+    grp_prog.add_argument("--progress", dest="progress", action="store_true",
+                          help="Force-enable progress bar (even if not a TTY).")
+    grp_prog.add_argument("--no-progress", dest="no_progress", action="store_true",
+                          help="Disable progress bar.")
+
     args = ap.parse_args(argv)
 
     # Decide axes and stream source
     axes_user: List[Tuple[int,int,int]]
     axis_score_map: Dict[Tuple[int,int,int], float] = {}
+
+    # resolve progress preference: None (auto), True, or False
+    progress_flag: Optional[bool] = (True if args.progress else (False if args.no_progress else None))
 
     if args.from_csv if False else args.from_csv:  # keep accidental typos from breaking; real var is args.from_csv
         stream_from_csv, axes_scores = parse_problematic_csv(args.from_csv)
@@ -559,7 +673,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     # index pass
     beam_xyz = np.asarray(args.beam, float)
-    header_bytes, chunk_list = index_chunks(args.input_stream, axes_user, beam_xyz, axis_score_map or None)
+    header_bytes, chunk_list = index_chunks(
+        args.input_stream, axes_user, beam_xyz, axis_score_map or None,
+        progress_flag=progress_flag
+    )
 
     # Report filename relative to the input_stream
     report_path = args.input_stream.with_name(args.input_stream.stem + "_report.txt")
@@ -610,7 +727,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             out_base=out_base,
             metric=args.metric,
             include_unindexed=args.include_unindexed,
-            count_split=args.count_split
+            count_split=args.count_split,
+            progress_flag=progress_flag
         )
         if args.output is None:
             print(f"Wrote sorted stream → {out_base}")
@@ -631,7 +749,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             chunk_list,
             out_prefix=out_prefix,
             bins=angle_bins,
-            report_path=None
+            report_path=None,
+            progress_flag=progress_flag
         )
         if args.output is None:
             print(f"Wrote angle-binned outputs with prefix → {out_prefix}")
