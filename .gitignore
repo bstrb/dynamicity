@@ -1,5 +1,5 @@
 # macOS system files
-.DS_Store
+*.DS_Store
 
 # Python cache and compiled files
 __pycache__/

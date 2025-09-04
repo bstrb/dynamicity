@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QWidget, QSizePolicy
 )
 
+from coseda.initialize import write_gandalfiteratorsettings
 from coseda.gandalf_radial_iterator import (
     # DEFAULT_PEAKFINDER_OPTIONS,
     # INDEXING_FLAGS,
@@ -26,7 +27,6 @@ from coseda.gandalf_radial_iterator import (
 # -------------------- constants --------------------
 
 DEFAULT_PEAKFINDER_OPTIONS = {
-    "cxi": ["--peaks=cxi"],
     "peakfinder9": [
         "--peaks=peakfinder9",
         "--min-snr-biggest-pix=7",
@@ -46,6 +46,7 @@ DEFAULT_PEAKFINDER_OPTIONS = {
         "--min-res=0",
         "--max-res=1200",
     ],
+    "cxi": ["--peaks=cxi"],
 }
 
 INDEXING_FLAGS: List[str] = ["--indexing=xgandalf", "--integration=rings"]
@@ -53,15 +54,21 @@ INDEXING_FLAGS: List[str] = ["--indexing=xgandalf", "--integration=rings"]
 # -------------------- small helper row --------------------
 
 class FileBrowseRow(QWidget):
-    def __init__(self, label: str, mode: str, parent: Optional[QWidget] = None):
+    def __init__(self, label: str, mode: str, parent: Optional[QWidget] = None, default: str = ""):
         super().__init__(parent)
         self._mode = mode  # "file" or "dir"
+
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+
         self._lab = QLabel(label)
         self._edit = QLineEdit()
+        if default:  # set default path if provided
+            self._edit.setText(default)
+
         self._btn = QPushButton("Browse…")
         self._btn.clicked.connect(self._on_browse)
+
         lay.addWidget(self._lab)
         lay.addWidget(self._edit, 1)
         lay.addWidget(self._btn)
@@ -76,6 +83,7 @@ class FileBrowseRow(QWidget):
 
     def text(self) -> str:
         return self._edit.text().strip()
+
 
 # -------------------- worker (backend in a thread) --------------------
 
@@ -120,11 +128,15 @@ class Worker(QObject):
             self.error.emit(str(e))
 
 # -------------------- main dialog --------------------
+
 class GandalfIteratorWindow(QDialog):
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[Widget] = None, ini_directory: Optional[str] = None, ini_file_path: Optional[str] = None):
         super().__init__(parent)
         self.setWindowTitle("Gandalf Iterator")
         self.setModal(False)
+        self.ini_directory = ini_directory
+        self.current_input_path = ini_file_path
+
         self._t0 = None
         self._per_pass_total = 0
         self._passes_total = 1
@@ -135,7 +147,9 @@ class GandalfIteratorWindow(QDialog):
         self._worker: Optional[Worker] = None
 
         self._build_ui()
+
     # ---------- UI ----------
+
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
@@ -144,9 +158,13 @@ class GandalfIteratorWindow(QDialog):
         # Files group
         files_group = QGroupBox("Files")
         files_form = QFormLayout()
-        self.geom_row = FileBrowseRow("Geometry (.geom):", "file")
-        self.cell_row = FileBrowseRow("Cell (.cell):", "file")
-        self.input_row = FileBrowseRow("Input folder:", "dir")
+        # self.geom_row = FileBrowseRow("Geometry (.geom):", "file")
+        # self.cell_row = FileBrowseRow("Cell (.cell):", "file")
+        # self.input_row = FileBrowseRow("Input folder:", "dir")
+        self.geom_row = FileBrowseRow("Geometry (.geom):", "file", default="/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_000/4135627.geom")
+        self.cell_row = FileBrowseRow("Cell (.cell):", "file", default="/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_000/4135627.cell")
+        self.input_row = FileBrowseRow("Input folder:", "dir", default="/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_000")
+
         files_form.addRow(self.geom_row)
         files_form.addRow(self.cell_row)
         files_form.addRow(self.input_row)
@@ -242,7 +260,7 @@ class GandalfIteratorWindow(QDialog):
         pitch_tol_grad_widget = QWidget()
         pitch_tol_grad_widget.setLayout(pitch_tol_grad_row)
 
-        self.other_flags_edit = QLineEdit("--no-revalidate --no-half-pixel-shift --no-refine --no-non-hits-in-stream --no-retry --fix-profile-radius=70000000")
+        self.other_flags_edit = QLineEdit("--no-half-pixel-shift --no-non-hits-in-stream --no-refine --no-retry --fix-profile-radius=70000000 --no-revalidate")
         self.other_flags_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.other_flags_edit.setMinimumWidth(500)
 
@@ -268,11 +286,11 @@ class GandalfIteratorWindow(QDialog):
         prog_group.setLayout(v)
         main_layout.addWidget(prog_group)
 
-        # Controls
         row = QHBoxLayout()
         self.run_btn = QPushButton("Run"); self.run_btn.clicked.connect(self._on_run)
         self.stop_btn = QPushButton("Stop"); self.stop_btn.setEnabled(False); self.stop_btn.clicked.connect(self._on_stop_clicked)
-        row.addWidget(self.run_btn); row.addWidget(self.stop_btn)
+        self.save_btn = QPushButton("Save Settings"); self.save_btn.clicked.connect(self._on_save_clicked); self.save_btn.setEnabled(bool(self.current_input_path))
+        row.addWidget(self.run_btn); row.addWidget(self.stop_btn);row.addWidget(self.save_btn)
         main_layout.addLayout(row)
 
         # Mirror
@@ -296,6 +314,30 @@ class GandalfIteratorWindow(QDialog):
         else:
             self._mirror_stdout = True
             self._mirror_only_progress = False
+
+    # ADD this method to the class (e.g., below _on_mirror_change)
+    def _collect_params_for_ini(self) -> dict:
+        peak_params = self.peak_params_edit.text().strip().split()
+        other_flags = [f for f in self.other_flags_edit.text().split() if f.strip()]
+
+        return dict(
+            geomfile_path=self.geom_row.text().strip(),
+            cellfile_path=self.cell_row.text().strip(),
+            output_file_base=(self.output_edit.text().strip() or "Xtal"),
+            threads=int(self.threads_spin.value()),
+            max_radius=float(self.max_radius_spin.value()),
+            step=float(self.step_spin.value()),
+            peakfinder_method=self.peak_combo.currentText(),
+            peakfinder_params=peak_params,
+            min_peaks=int(self.min_peaks_spin.value()),
+            cell_tolerance=self.tolerance_edit.text().strip(),
+            sampling_pitch=int(self.samp_pitch_spin.value()),
+            grad_desc_iterations=int(self.grad_desc_spin.value()),
+            xgandalf_tolerance=float(self.xg_tol_spin.value()),
+            int_radius=self.int_radius_edit.text().strip(),
+            other_flags=other_flags,  # NOTE: do not include INDEXING_FLAGS here; keep user extras only
+        )
+
 
     def _update_peak_params(self, method: str):
         params = DEFAULT_PEAKFINDER_OPTIONS.get(method, [])
@@ -391,6 +433,51 @@ class GandalfIteratorWindow(QDialog):
             self.progress_label.setText(self.progress_label.text() + " • Stopping…")
 
     # ---------- slots from worker ----------
+
+    # ADD this method to the class (e.g., near other slots)
+    def _on_save_clicked(self):
+        if not self.current_input_path:
+            QMessageBox.warning(self, "No INI File", "Cannot determine INI file to save settings.")
+            return
+
+        # Basic validation similar to old UI
+        geom = self.geom_row.text().strip()
+        cell = self.cell_row.text().strip()
+        if not geom or not os.path.exists(geom):
+            QMessageBox.warning(self, "Invalid Geometry", "Geometry file path is missing or does not exist.")
+            return
+        if not cell or not os.path.exists(cell):
+            QMessageBox.warning(self, "Invalid Cell", "Cell file path is missing or does not exist.")
+            return
+        if self.step_spin.value() <= 0:
+            QMessageBox.warning(self, "Invalid Step", "Step size must be greater than zero.")
+            return
+        if self.max_radius_spin.value() < 0:
+            QMessageBox.warning(self, "Invalid Max Radius", "Max radius must be non-negative.")
+            return
+
+        p = self._collect_params_for_ini()
+        # Write using the same API as the old script
+        write_gandalfiteratorsettings(
+            input_path=self.current_input_path,
+            geomfile_path=p["geomfile_path"],
+            cellfile_path=p["cellfile_path"],
+            output_file_base=p["output_file_base"],
+            threads=p["threads"],
+            max_radius=p["max_radius"],
+            step=p["step"],
+            peakfinder_method=p["peakfinder_method"],
+            peakfinder_params=p["peakfinder_params"],
+            min_peaks=p["min_peaks"],
+            cell_tolerance=p["cell_tolerance"],
+            sampling_pitch=p["sampling_pitch"],
+            grad_desc_iterations=p["grad_desc_iterations"],
+            xgandalf_tolerance=p["xgandalf_tolerance"],
+            int_radius=p["int_radius"],
+            other_flags=p["other_flags"],
+        )
+        QMessageBox.information(self, "Settings Saved", "Gandalf settings have been saved to the INI file.")
+
 
     def _on_progress(self, done: int, total: int):
         pct = (done / total * 100.0) if total else 0.0

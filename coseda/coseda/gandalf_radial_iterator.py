@@ -55,33 +55,6 @@ def _handle_signal(_sig, _frame):
 signal.signal(signal.SIGINT, _handle_signal)
 signal.signal(signal.SIGTERM, _handle_signal)
 
-# -------------------- constants --------------------
-
-DEFAULT_PEAKFINDER_OPTIONS = {
-    "cxi": ["--peaks=cxi"],
-    "peakfinder9": [
-        "--peaks=peakfinder9",
-        "--min-snr-biggest-pix=7",
-        "--min-snr-peak-pix=6",
-        "--min-snr=5",
-        "--min-sig=11",
-        "--min-peak-over-neighbour=-inf",
-        "--local-bg-radius=3",
-    ],
-    "peakfinder8": [
-        "--peaks=peakfinder8",
-        "--threshold=800",
-        "--min-snr=5",
-        "--min-pix-count=2",
-        "--max-pix-count=200",
-        "--local-bg-radius=3",
-        "--min-res=0",
-        "--max-res=1200",
-    ],
-}
-
-INDEXING_FLAGS: List[str] = ["--indexing=xgandalf", "--integration=rings"]
-
 _PROGRESS_RE = re.compile(r"^\s*(\d+)\s+images\s+processed\b", re.IGNORECASE)
 
 # -------------------- HDF5 utilities --------------------
