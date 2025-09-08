@@ -1,4 +1,3 @@
-# cosedaUI/indexintegrate_window.py
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QFormLayout, QCheckBox, QSpinBox, QFileDialog, QMessageBox, QTabWidget, QComboBox, QTextEdit
@@ -827,52 +826,3 @@ class IndexingControlWindow(QWidget):
                 self.log_file.close()
             except:
                 pass
-
-
-# -------------------------------
-# CLI / module entrypoint
-# -------------------------------
-def main():
-    import sys
-    import argparse
-    from PyQt6.QtWidgets import QApplication, QMainWindow
-
-    parser = argparse.ArgumentParser(
-        prog="python -m cosedaUI.indexintegrate_window",
-        description="Launch the COSEDA Indexing & Integration UI"
-    )
-    parser.add_argument("--ini", required=True, help="Path to your COSEDA .ini file")
-    parser.add_argument("--h5", required=True, help="Path to the HDF5 file to process")
-    args = parser.parse_args()
-
-    ini_abs = os.path.abspath(args.ini)
-    h5_abs = os.path.abspath(args.h5)
-
-    if not os.path.isfile(ini_abs):
-        print(f"ERROR: INI not found: {ini_abs}")
-        sys.exit(2)
-    if not os.path.isfile(h5_abs):
-        print(f"ERROR: HDF5 not found: {h5_abs}")
-        sys.exit(2)
-
-    class MainWindow(QMainWindow):
-        def __init__(self, ini_path, h5_path):
-            super().__init__()
-            self.full_ini_file_path = os.path.abspath(ini_path)
-            self.setWindowTitle("COSEDA Indexing & Integration")
-            widget = IndexingControlWindow(
-                main_window=self,
-                ini_directory=os.path.dirname(self.full_ini_file_path),
-                h5_path=h5_path,
-                parent=self
-            )
-            self.setCentralWidget(widget)
-            self.resize(1100, 800)
-
-    app = QApplication(sys.argv)
-    win = MainWindow(ini_abs, h5_abs)
-    win.show()
-    sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()

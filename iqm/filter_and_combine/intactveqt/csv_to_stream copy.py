@@ -36,28 +36,22 @@ EVENT_PREFIX = b"Event:"
 # ────────────────────────────────────────────────────────────────────────────────
 # 1.  CSV → wanted events & row order
 # ────────────────────────────────────────────────────────────────────────────────
-
-def _collect_requests(csv_path: str,
-                      event_col: str,
-                      streamfile_col: str,
-                      base_dir: str | None = None
-                     ) -> Tuple[List[Tuple[str, str]],
-                                Dict[str, Set[str]]]:
-    wanted: Dict[str, Set[str]] = defaultdict(set)
-    rows: List[Tuple[str, str]] = []
-    # If base_dir provided, resolve relative stream_file paths against it;
-    # otherwise fall back to the CSV's own directory (old behavior).
-    base = base_dir if base_dir else os.path.dirname(csv_path)
+def _collect_requests(csv_path:str,
+                      event_col:str,
+                      streamfile_col:str
+                     ) -> Tuple[List[Tuple[str,str]],
+                                Dict[str,Set[str]]]:
+    wanted : Dict[str,Set[str]] = defaultdict(set)
+    rows   : List[Tuple[str,str]] = []
+    base   = os.path.dirname(csv_path)
 
     with open(csv_path, newline="") as fh:
         for rec in csv.DictReader(fh):
-            evt = rec[event_col].strip()
-            rel = rec[streamfile_col].strip()
-            fpath = rel if os.path.isabs(rel) else os.path.normpath(os.path.join(base, rel))
+            evt   = rec[event_col].strip()
+            fpath = os.path.join(base, rec[streamfile_col].strip())
             wanted[fpath].add(evt)
             rows.append((fpath, evt))
     return rows, wanted
-
 
 # ────────────────────────────────────────────────────────────────────────────────
 # 2.  Parse ONE .stream file – **mmap + bytes** (fast, picklable)
@@ -119,7 +113,6 @@ def _scan_one_file(task:Tuple[str,Set[str]]
 # ────────────────────────────────────────────────────────────────────────────────
 # 3.  Public API
 # ────────────────────────────────────────────────────────────────────────────────
-
 def write_stream_from_filtered_csv(
     filtered_csv_path : str,
     output_stream_path: str,
@@ -128,7 +121,6 @@ def write_stream_from_filtered_csv(
     *,
     mode              : str = "auto",     # "auto"|"threads"|"processes"|"serial"
     max_workers       : int | None = None,
-    base_dir          : str | None = None,   # NEW: resolve relative stream_file paths here
 ):
     """
     Merge selected chunks into one .stream.  `mode`:
@@ -136,14 +128,10 @@ def write_stream_from_filtered_csv(
       threads     – ThreadPoolExecutor            (good for SSD / NFS)
       processes   – ProcessPoolExecutor           (large CPU work)
       auto        – 'threads' if the device looks like SSD/NVMe, else 'serial'
-
-    Relative paths in the CSV's `stream_file` column are resolved against `base_dir`
-    if provided, otherwise against the directory of `filtered_csv_path`.
     """
     # 3.1 CSV
-    rows, wanted_per_file = _collect_requests(
-        filtered_csv_path, event_col, streamfile_col, base_dir=base_dir
-    )
+    rows, wanted_per_file = _collect_requests(filtered_csv_path,
+                                              event_col, streamfile_col)
     if not rows:
         print("CSV is empty:", filtered_csv_path)
         return
@@ -154,9 +142,10 @@ def write_stream_from_filtered_csv(
 
     files = list(wanted_per_file.items())
 
-    cache: Dict[str, Tuple[str, Dict[str, str]]] = {}  # stream→(header,chunks)
+    cache : Dict[str,Tuple[str,Dict[str,str]]] = {}  # stream→(header,chunks)
     print(f"[csv_to_stream]  Parsing {len(files)} stream files  (mode={mode})")
 
+    # Progress bar for scanning files
     if mode == "serial":
         iterator = files
     else:
@@ -178,6 +167,7 @@ def write_stream_from_filtered_csv(
     END_LF_txt   = END_LF.decode()
     END_CRLF_txt = END_CRLF.decode()
 
+    # note: keep default text mode; on Windows '\n' → '\r\n' automatically
     with open(output_stream_path, "w") as out:
         for fpath, evt in tqdm(rows, desc="Writing chunks", unit="chunk"):
             hdr, chunks = cache[fpath]
@@ -193,11 +183,13 @@ def write_stream_from_filtered_csv(
 
             out.write(chunk)
 
+            # FIX: do NOT rstrip() here; just check actual suffix.
+            # Accept both LF and CRLF chunk endings to avoid double-appending.
             if not (chunk.endswith(END_LF_txt) or chunk.endswith(END_CRLF_txt)):
+                # write exactly one terminator line (let OS translate '\n' if needed)
                 out.write(END_LF_txt)
 
     print("[csv_to_stream]  Done →", output_stream_path)
-
 
 # ────────────────────────────────────────────────────────────────────────────────
 # 4.  CLI for ad-hoc use

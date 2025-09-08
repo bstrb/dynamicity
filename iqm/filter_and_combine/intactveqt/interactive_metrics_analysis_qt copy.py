@@ -27,8 +27,6 @@ from __future__ import annotations
 
 import os
 import sys
-import logging
-from datetime import datetime
 from functools import partial
 from typing import List, Dict
 
@@ -143,24 +141,15 @@ class MetricsWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Load failed", str(exc))
             return
 
-        # Setup timestamped output folder + logger on successful load
-        self._setup_run_dir_and_logger(path)
-
         self._csv_file = path
         self._grouped = grouped
         self._all_rows = all_rows
-
-        # default filtered CSV path goes into the run folder
-        self._filtered_csv_path = os.path.join(self._run_dir, "filtered_metrics.csv")  # type: ignore[attr-defined]
-
-        self._log(f"Loaded CSV with {len(all_rows)} rows across {len(grouped)} events.")
-        self._log(f"Planned filtered CSV path: {self._filtered_csv_path}")
+        self._filtered_csv_path = os.path.join(os.path.dirname(path), "filtered_metrics.csv")
 
         if self._analysis is not None:
             self._analysis.setParent(None)
         self._analysis = self._build_analysis_ui()
         self._root.addWidget(self._analysis)
-
 
     # -------------------- 2) Analysis UI --------------------
     def _build_analysis_ui(self) -> QtWidgets.QWidget:
@@ -261,38 +250,12 @@ class MetricsWindow(QtWidgets.QMainWindow):
             thr[m] = mn + (mx - mn) * sld.value() / 1000.0
         return thr
 
-    def _setup_run_dir_and_logger(self, source_csv: str) -> None:
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        base = os.path.dirname(source_csv)
-        run_dir = os.path.join(base, f"metrics_run_{ts}")
-        os.makedirs(run_dir, exist_ok=True)
-
-        log_path = os.path.join(run_dir, "run.log")
-        logger = logging.getLogger(f"metrics_run_{ts}")
-        logger.setLevel(logging.INFO)
-        fh = logging.FileHandler(log_path, encoding="utf-8")
-        fh.setFormatter(logging.Formatter("%(asctime)s — %(levelname)s — %(message)s"))
-        logger.addHandler(fh)
-
-        # attach to instance (created dynamically; not required in __init__)
-        self._run_dir = run_dir
-        self._logger = logger
-        self._log(f"Initialized run folder at: {run_dir}")
-        self._log(f"Source CSV: {source_csv}")
-
-    def _log(self, msg: str) -> None:
-        if getattr(self, "_logger", None):
-            self._logger.info(msg)
-
-
     # ----- Section 1 preview -----
-
     def _preview_separate_histograms(self) -> None:
         if not self._all_rows:
             return
         thr = self._current_separate_thresholds()
         rows = filter_rows(self._all_rows, thr)
-        self._log(f"Preview separate histograms with thresholds: {thr} → surviving rows: {len(rows)}")
         if not rows:
             QtWidgets.QMessageBox.information(self, "No rows", "No rows pass the separate thresholds.")
             return
@@ -307,9 +270,7 @@ class MetricsWindow(QtWidgets.QMainWindow):
         plt.tight_layout()
         plt.show()
 
-
     # ----- Section 2: per-chunk normalize + best per event -----
-
     def _compute_best_per_event(self) -> None:
         if self._grouped is None or self._all_rows is None:
             return
@@ -317,7 +278,6 @@ class MetricsWindow(QtWidgets.QMainWindow):
         # 1) Apply separate thresholds in raw units
         thr = self._current_separate_thresholds()
         surviving = filter_rows(self._all_rows, thr)
-        self._log(f"Apply separate thresholds: {thr} → surviving rows: {len(surviving)}")
         if not surviving:
             QtWidgets.QMessageBox.information(self, "No rows", "No rows after separate thresholds.")
             return
@@ -331,19 +291,16 @@ class MetricsWindow(QtWidgets.QMainWindow):
         # 2) Per-chunk normalization + weights → combined badness + best per event
         method = self._chunk_norm_combo.currentText()
         weights = [float(self._weight_edits[m].text() or 0.0) for m in metrics_in_order]
-        self._log(f"Per-chunk normalization method: {method}; weights={weights}")
 
         grouped_norm = normalize_metrics_per_chunk(grouped, metrics_in_order, method=method)
         best = combine_per_chunk_and_select_best(grouped_norm, metrics_in_order, weights)
 
         if not best:
-            self._log("No best rows could be selected (check weights).")
             QtWidgets.QMessageBox.information(self, "No best rows", "No best rows could be selected (check weights).")
             return
 
         self._grouped_norm = grouped_norm
         self._best_rows = best
-        self._log(f"Selected best row per event: {len(best)} rows.")
 
         # Preview histogram of best-per-event combined_metric
         vals = [r["combined_metric"] for r in best if r.get("combined_metric") is not None]
@@ -361,9 +318,7 @@ class MetricsWindow(QtWidgets.QMainWindow):
             f"Selected best row per event: {len(best)} rows.\nProceed to global normalization."
         )
 
-
     # ----- Section 3: global normalize + filter -----
-
     def _global_normalize_and_filter(self) -> None:
         if not self._best_rows:
             QtWidgets.QMessageBox.warning(self, "Missing step", "Compute best per event first.")
@@ -377,7 +332,6 @@ class MetricsWindow(QtWidgets.QMainWindow):
 
         best_norm, stats = global_normalize_metric(self._best_rows, metric="combined_metric", method=method)
         self._best_rows_global_norm = best_norm
-        self._log(f"Global normalization method: {method}; stats={stats}")
 
         # Plot normalized
         col = "combined_metric__global"
@@ -393,50 +347,38 @@ class MetricsWindow(QtWidgets.QMainWindow):
 
         # Filter by normalized threshold (≤ by default)
         kept = filter_by_global_metric(best_norm, metric_norm_name=col, threshold=thr_val, keep_low=True)
-        self._log(f"Apply global threshold {thr_val} on '{col}' → kept rows: {len(kept)}")
         if not kept:
             QtWidgets.QMessageBox.information(self, "No rows kept", "No rows pass the global threshold.")
             return
 
-        # Write filtered CSV into the run folder
-        out_csv = self._filtered_csv_path or os.path.join(
-            getattr(self, "_run_dir", os.getcwd()), "filtered_metrics.csv"
-        )
+        # Write filtered CSV
+        out_csv = self._filtered_csv_path or os.path.join(os.getcwd(), "filtered_metrics.csv")
         write_filtered_csv(kept, out_csv)
         self._filtered_csv_path = out_csv
-        self._log(f"Wrote filtered CSV: {out_csv}")
-
         QtWidgets.QMessageBox.information(
             self, "Saved",
             f"Wrote filtered CSV:\n{out_csv}\n\nYou can now convert to .stream."
         )
 
     # ----- Convert to stream -----
-    
     def _convert_to_stream(self) -> None:
         if not (self._csv_file and self._filtered_csv_path):
             QtWidgets.QMessageBox.warning(self, "Missing step", "Run global normalization & filter first.")
             return
         try:
-            # Write .stream into the same timestamped run folder
-            out_dir = getattr(self, "_run_dir", None) or os.path.join(os.path.dirname(self._csv_file), "filtered_metrics")
+            out_dir = os.path.join(os.path.dirname(self._csv_file), "filtered_metrics")
             os.makedirs(out_dir, exist_ok=True)
             out_stream = os.path.join(out_dir, "filtered_metrics.stream")
 
-            # NEW: resolve relative stream_file paths against the ORIGINAL CSV's folder
-            base_dir_for_streams = os.path.dirname(self._csv_file)
-
+            # Convert using your helper
             write_stream_from_filtered_csv(
                 filtered_csv_path=self._filtered_csv_path,
                 output_stream_path=out_stream,
                 event_col="event_number",
                 streamfile_col="stream_file",
-                base_dir=base_dir_for_streams,   # <-- key fix
             )
-            self._log(f"Converted CSV → .stream at: {out_stream} (base_dir={base_dir_for_streams})")
             QtWidgets.QMessageBox.information(self, "Done", f"CSV converted to:\n{out_stream}")
         except Exception as exc:
-            self._log(f"Conversion failed: {exc}")
             QtWidgets.QMessageBox.critical(self, "Conversion failed", str(exc))
 
 
