@@ -12,25 +12,18 @@ NEW:
       - Reads listed UVW and their Score.
       - Uses those UVW as the problematic orientations for angle matching.
       - Attaches Score of the chosen axis to each event.
-  • --metric {angle,angle_over_score}: choose sorting metric for --sort-angle and metric/count binning.
+  • --metric {angle,angle_over_score}: choose sorting metric for --sort-angle.
       - angle            : ascending angle to the closest problematic axis (default).
       - angle_over_score : ascending (angle / Score) using the axis Score from CSV.
                            Frames with missing/invalid Score get ∞ and sink to the end.
   • Report shows [u v w], Score, angle, and angle/Score for each indexed event.
-  • Binning modes beyond pure-angle:
-      - --count-bins "0,1000,30000": split (finite-metric) frames by **counts** after sorting by --metric.
-      - --metric-bins "0,5,10,20,90": split by **metric value** (works for angle or angle_over_score).
-      - --metric-split <step>: uniform metric edges (e.g., 5.0 degrees or 0.1 units).
-  • --also-sorted: when using any binning mode, also write a fully sorted copy (by --metric).
 
 Existing:
   • Auto-detect lattice (Bravais) from the stream header (best effort).
   • Or use hard-coded axis sets per lattice (legacy) or manual --axes.
-  • Modes (mutually exclusive, pick one):
-      1) --sort-angle                    : copy of input with events sorted (by --metric; defaults to angle).
-      2) --angle-bins / --angle-split    : split into angle-deviation bins (legacy).
-      3) --count-bins                    : split into N count bins after sorting by --metric.
-      4) --metric-bins / --metric-split  : split by metric value (angle or angle_over_score).
+  • Modes:
+      1) --sort-angle                    : copy of input with events sorted.
+      2) --angle-bins / --angle-split    : split into angle-deviation bins.
 
 Progress:
   • Auto progress bar on TTY; silent in non-interactive mode.
@@ -40,13 +33,13 @@ Conventions
 -----------
 • Each chunk is an event/frame. Missing astar/bstar/cstar ⇒ unindexed (angle = +inf).
 • Angle bins use (low, high] except the first bin, which is [low, high].
-• Sorting ties are broken by original order (seq); metric equality keeps stability.
+• Sorting ties are broken by original order (seq); angle equality keeps stability.
 """
 
 from __future__ import annotations
 import argparse, math, re, unicodedata, csv, sys, time, shutil
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Sequence
+from typing import Dict, List, Tuple, Optional, Sequence, Callable
 import numpy as np
 
 # ---------- stream markers ----------
@@ -99,6 +92,7 @@ class _Progress:
     def close(self):
         if not self.enabled:
             return
+        # Final line with total stats
         total_time = time.monotonic() - self.start_t
         speed = (self.total / 1_048_576) / total_time if total_time > 0 else 0.0
         width = max(shutil.get_terminal_size((80, 20)).columns - 20, 20)
@@ -344,7 +338,7 @@ def index_chunks(
                                 neg = (-best_axis[0], -best_axis[1], -best_axis[2])
                                 sc = axis_score_map.get(neg)
                             cm.best_score = sc
-                            # Derived metric (smaller is better); ∞ if invalid
+                            # Product of normalized angle and (2 - score)
                             if (sc is not None) and math.isfinite(sc) and 0.0 <= sc <= 1.0:
                                 angle_norm = min(cm.angle, 90.0) / 90.0   # cap at 90° → [0,1]
                                 cm.ang_over_score = angle_norm * (2 - sc)
@@ -382,7 +376,7 @@ def index_chunks(
     prog.close()
     return bytes(header), chunks
 
-# ---------- helpers for (angle) bins ----------
+# ---------- helpers for bins ----------
 def parse_angle_bins(split: Optional[float], bins: Optional[Sequence[float]]) -> List[Tuple[float,float]]:
     if split is not None:
         if split <= 0:
@@ -406,22 +400,7 @@ def parse_angle_bins(split: Optional[float], bins: Optional[Sequence[float]]) ->
 def in_bin_float(val: float, low: float, high: float, first: bool) -> bool:
     return (low <= val <= high) if first else (low < val <= high)
 
-# ---------- generic metric helpers ----------
-def _sort_key_for_metric(metric: str):
-    if metric == "angle":
-        return lambda cm: (cm.angle, cm.seq)
-    elif metric == "angle_over_score":
-        return lambda cm: (cm.ang_over_score, cm.seq)
-    raise ValueError(f"Unknown metric: {metric}")
-
-def _metric_value(cm: ChunkMeta, metric: str) -> float:
-    if metric == "angle":
-        return cm.angle
-    elif metric == "angle_over_score":
-        return cm.ang_over_score
-    raise ValueError(f"Unknown metric: {metric}")
-
-# ---------- write: angle-binned outputs (legacy) ----------
+# ---------- write: angle-binned outputs ----------
 def write_angle_bins(
     src_path: Path,
     header: bytes,
@@ -432,7 +411,7 @@ def write_angle_bins(
     *,
     progress_flag: Optional[bool] = None
 ) -> None:
-    # optional text report (legacy)
+    # optional text report
     rep_fh = None
     if report_path is not None:
         rep_fh = report_path.open("w", encoding="utf-8")
@@ -472,6 +451,7 @@ def write_angle_bins(
     # progress based on total bytes to copy
     total_copy = sum(cm.end - cm.start for cm in indexed)
     prog = _make_progress(progress_flag, total_copy, "Writing")
+    copied = 0
 
     with src_path.open("rb") as src:
         for cm in indexed:
@@ -481,7 +461,9 @@ def write_angle_bins(
                 if in_bin_float(cm.angle, low, high, first):
                     dst = get_handle(low, high)
                     src.seek(cm.start)
-                    remaining = cm.end - cm.start
+                    chunk_len = cm.end - cm.start
+                    # Stream copy with progress updates in blocks
+                    remaining = chunk_len
                     block = 1024 * 256
                     while remaining > 0:
                         n = min(block, remaining)
@@ -490,6 +472,7 @@ def write_angle_bins(
                             break
                         dst.write(buf)
                         remaining -= len(buf)
+                        copied += len(buf)
                         prog.update(len(buf))
                     placed = True
                     break
@@ -520,18 +503,24 @@ def write_sorted_by_metric(
     if count_split is not None and count_split <= 0:
         raise ValueError("--count-split must be a positive integer")
 
-    fin = [cm for cm in chunks if math.isfinite(_metric_value(cm, metric))]
-    un  = [cm for cm in chunks if not math.isfinite(_metric_value(cm, metric))]
+    indexed   = [cm for cm in chunks if math.isfinite(cm.angle)]
+    unindexed = [cm for cm in chunks if not math.isfinite(cm.angle)]
 
-    fin.sort(key=_sort_key_for_metric(metric))
-    un.sort(key=lambda cm: cm.seq)
+    if metric == "angle":
+        indexed.sort(key=lambda cm: (cm.angle, cm.seq))
+    elif metric == "angle_over_score":
+        indexed.sort(key=lambda cm: (cm.ang_over_score, cm.seq))
+    else:
+        raise ValueError(f"Unknown metric: {metric}")
+
+    unindexed.sort(key=lambda cm: cm.seq)
 
     if include_unindexed == "start":
-        order = un + fin
+        order = unindexed + indexed
     elif include_unindexed == "end":
-        order = fin + un
+        order = indexed + unindexed
     else:
-        order = fin
+        order = indexed
 
     groups: List[List[ChunkMeta]]
     if count_split is None:
@@ -539,8 +528,10 @@ def write_sorted_by_metric(
     else:
         groups = [order[i:i+count_split] for i in range(0, len(order), count_split)]
 
+    # total bytes for progress across all outputs
     total_copy = sum(cm.end - cm.start for cm in order)
     prog = _make_progress(progress_flag, total_copy, "Writing")
+    copied = 0
 
     with src_path.open("rb") as src:
         for gi, grp in enumerate(groups):
@@ -559,155 +550,8 @@ def write_sorted_by_metric(
                             break
                         dst.write(buf)
                         remaining -= len(buf)
+                        copied += len(buf)
                         prog.update(len(buf))
-    prog.close()
-
-# ---------- write: count-binned outputs (by chosen metric) ----------
-def write_count_bins(
-    src_path: Path,
-    header: bytes,
-    chunks: List[ChunkMeta],
-    out_prefix: Path,
-    count_edges: List[int],
-    *,
-    metric: str = "angle",
-    progress_flag: Optional[bool] = None
-) -> None:
-    """
-    Split into bins by COUNT after sorting frames by the chosen metric.
-    count_edges: ascending non-negative ints (e.g., [0,1000,30000]).
-    Bins are [e0:e1), [e1:e2), ... using only frames with finite metric.
-    """
-    indexed = [cm for cm in chunks if math.isfinite(_metric_value(cm, metric))]
-    indexed.sort(key=_sort_key_for_metric(metric))
-
-    if not count_edges or any(n < 0 for n in count_edges):
-        raise ValueError("--count-bins requires non-negative integer edges")
-    if count_edges != sorted(count_edges):
-        raise ValueError("--count-bins edges must be ascending")
-    if count_edges[0] != 0:
-        count_edges = [0] + count_edges
-    if count_edges[-1] < len(indexed):
-        count_edges = count_edges + [len(indexed)]
-    # dedup adjacent equals
-    dedup = []
-    for n in count_edges:
-        if not dedup or n != dedup[-1]:
-            dedup.append(n)
-    count_edges = dedup
-
-    handles: List[Tuple[Tuple[int,int], Path, "object"]] = []
-
-    def get_handle(lo: int, hi: int):
-        for (l,h), path, fh in handles:
-            if (l,h) == (lo,hi):
-                return fh
-        suffix = f"count_{lo}-{hi}"
-        out_path = out_prefix.with_name(f"{out_prefix.stem}_{suffix}{out_prefix.suffix}")
-        fh = out_path.open("wb"); fh.write(header)
-        handles.append(((lo,hi), out_path, fh))
-        return fh
-
-    selected = []
-    for i in range(len(count_edges) - 1):
-        lo, hi = count_edges[i], count_edges[i+1]
-        lo = max(0, min(lo, len(indexed))); hi = max(0, min(hi, len(indexed)))
-        if hi > lo:
-            selected.extend(indexed[lo:hi])
-    total_copy = sum(cm.end - cm.start for cm in selected)
-    prog = _make_progress(progress_flag, total_copy, "Writing")
-
-    with src_path.open("rb") as src:
-        for i in range(len(count_edges) - 1):
-            lo, hi = count_edges[i], count_edges[i+1]
-            lo = max(0, min(lo, len(indexed))); hi = max(0, min(hi, len(indexed)))
-            if hi <= lo:
-                continue
-            dst = get_handle(lo, hi)
-            for cm in indexed[lo:hi]:
-                src.seek(cm.start)
-                remaining = cm.end - cm.start
-                block = 1024 * 256
-                while remaining > 0:
-                    n = min(block, remaining)
-                    buf = src.read(n)
-                    if not buf:
-                        break
-                    dst.write(buf)
-                    remaining -= len(buf)
-                    prog.update(len(buf))
-
-    for (_, _), path, fh in handles:
-        fh.close()
-        print(f"Wrote → {path}")
-    prog.close()
-
-# ---------- write: metric-value-binned outputs ----------
-def write_metric_bins(
-    src_path: Path,
-    header: bytes,
-    chunks: List[ChunkMeta],
-    out_prefix: Path,
-    edges: List[float],            # ascending edges in metric units
-    metric: str = "angle",
-    *,
-    progress_flag: Optional[bool] = None
-) -> None:
-    """
-    Split into bins by the chosen metric value (angle or angle_over_score).
-    edges define [e0,e1], (e1,e2], ..., last is (e_{n-1}, +inf).
-    """
-    if not edges or edges != sorted(edges):
-        raise ValueError("--metric-bins must be ascending and non-empty")
-    bins = [(edges[i], edges[i+1]) for i in range(len(edges)-1)]
-    bins.append((edges[-1], math.inf))
-
-    handles: List[Tuple[Tuple[float,float], Path, "object"]] = []
-
-    def get_handle(low: float, high: float):
-        for (l,h), path, fh in handles:
-            if l == low and h == high:
-                return fh
-        suffix = f"metric_{low}-{('inf' if math.isinf(high) else high)}"
-        out_path = out_prefix.with_name(f"{out_prefix.stem}_{suffix}{out_prefix.suffix}")
-        fh = out_path.open("wb"); fh.write(header)
-        handles.append(((low,high), out_path, fh))
-        return fh
-
-    indexed = [cm for cm in chunks if math.isfinite(_metric_value(cm, metric))]
-    indexed.sort(key=_sort_key_for_metric(metric))
-
-    total_copy = sum(cm.end - cm.start for cm in indexed)
-    prog = _make_progress(progress_flag, total_copy, "Writing")
-
-    def in_bin(v: float, low: float, high: float, first: bool) -> bool:
-        return (low <= v <= high) if first else (low < v <= high)
-
-    with src_path.open("rb") as src:
-        for cm in indexed:
-            mv = _metric_value(cm, metric)
-            placed = False
-            for j,(low,high) in enumerate(bins):
-                if in_bin(mv, low, high, j == 0):
-                    dst = get_handle(low, high)
-                    src.seek(cm.start)
-                    remaining = cm.end - cm.start
-                    block = 1024 * 256
-                    while remaining > 0:
-                        n = min(block, remaining)
-                        buf = src.read(n)
-                        if not buf:
-                            break
-                        dst.write(buf)
-                        remaining -= len(buf)
-                        prog.update(len(buf))
-                    placed = True
-                    break
-            if not placed:
-                raise RuntimeError(f"No metric bin matched value {mv}")
-    for (_, _), path, fh in handles:
-        fh.close()
-        print(f"Wrote → {path}")
     prog.close()
 
 # ---------- CLI ----------
@@ -734,7 +578,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # Sorting metric selector
     ap.add_argument("--metric", choices=("angle","angle_over_score"),
                     default="angle",
-                    help="Metric for sorting and metric/count binning (default: angle).")
+                    help="Sorting metric for --sort-angle (default: angle).")
 
     # legacy axis selection path (ignored when --from-csv is used)
     ap.add_argument("--lattice", type=str, default="auto",
@@ -745,7 +589,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     ap.add_argument("--printaxes", action="store_true",
                     help="Print the axes that will be used and exit.")
 
-    # Modes (mutually exclusive, one required)
+    # Modes
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--sort-angle", action="store_true",
                       help="Write a copy of the input with chunks sorted by the chosen metric (--metric).")
@@ -753,24 +597,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                       help="Angle bin width in degrees (e.g., 5).")
     mode.add_argument("--angle-bins",  type=str,
                       help="Comma-separated angle edges, e.g., 0,12.5,50")
-    mode.add_argument("--count-bins", type=str,
-                      help="Comma-separated count edges, e.g., 0,1000,30000 (bins after sorting by --metric).")
-    mode.add_argument("--metric-bins", type=str,
-                      help="Comma-separated metric edges, e.g., 0,5,10,20,90 (units depend on --metric).")
-    mode.add_argument("--metric-split", type=float,
-                      help="Uniform metric step; e.g., 5.0 degrees for angle; 0.1 for angle_over_score.")
 
     ap.add_argument("--include-unindexed", choices=("end","start","drop"),
                     default="drop",
-                    help="Where unindexed chunks go in sorted outputs (and --also-sorted). Default: drop.")
+                    help="Where unindexed chunks go in --sort-angle (default: drop).")
     ap.add_argument("--count-split", type=int,
-                    help="After writing a sorted copy, split it into files of N chunks each (optional).")
+                    help="After --sort-angle, split into files of N chunks each (optional).")
     ap.add_argument("--report", action="store_true",
                     help="Write per-chunk report '<img> //<event> -> [uvw] score=… angle=… angle/score=…'.")
-
-    # When in any binning mode, also write a full sorted stream first
-    ap.add_argument("--also-sorted", action="store_true",
-                    help="In binning modes, also write a fully sorted copy (by --metric).")
 
     # Progress flags
     grp_prog = ap.add_mutually_exclusive_group()
@@ -788,7 +622,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # resolve progress preference: None (auto), True, or False
     progress_flag: Optional[bool] = (True if args.progress else (False if args.no_progress else None))
 
-    if args.from_csv if False else args.from_csv:  # robust to typos; real var is args.from_csv
+    if args.from_csv if False else args.from_csv:  # keep accidental typos from breaking; real var is args.from_csv
         stream_from_csv, axes_scores = parse_problematic_csv(args.from_csv)
         if args.input_stream is None:
             if stream_from_csv is None:
@@ -899,88 +733,27 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         if args.output is None:
             print(f"Wrote sorted stream → {out_base}")
     else:
-        # --- BINNING MODES ---
-        # optionally also emit the fully sorted stream first
-        if args.also_sorted:
-            out_base = args.output if (args.output and args.output.suffix) else default_sorted_path
-            if not (args.output and args.output.suffix):
-                # If output is a prefix for bins, still use default name for sorted stream
-                out_base = default_sorted_path
-            write_sorted_by_metric(
-                args.input_stream,
-                header_bytes,
-                chunk_list,
-                out_base=out_base,
-                metric=args.metric,
-                include_unindexed=args.include_unindexed,
-                count_split=args.count_split,
-                progress_flag=progress_flag
-            )
-            if not (args.output and args.output.suffix):
-                print(f"Wrote sorted stream → {out_base}")
-
-        out_prefix = args.output if (args.output and not args.output.suffix) else default_bin_prefix
-
-        if args.count_bins:
-            edges = [int(x) for x in args.count_bins.split(",") if x.strip() != ""]
-            write_count_bins(
-                args.input_stream,
-                header_bytes,
-                chunk_list,
-                out_prefix=out_prefix,
-                count_edges=edges,
-                metric=args.metric,
-                progress_flag=progress_flag
-            )
-            if args.output is None or (args.output and not args.output.suffix):
-                print(f"Wrote count-binned outputs with prefix → {out_prefix}")
-
-        elif args.metric_bins or (args.metric_split is not None):
-            if args.metric_bins:
-                edges = [float(x) for x in args.metric_bins.split(",")]
-            else:
-                step = float(args.metric_split)
-                if step <= 0:
-                    raise SystemExit("--metric-split must be positive")
-                # choose practical default caps
-                max_cap = 90.0 if args.metric == "angle" else 2.0
-                edges = list(np.arange(0.0, max_cap, step)) + [max_cap]
-            write_metric_bins(
-                args.input_stream,
-                header_bytes,
-                chunk_list,
-                out_prefix=out_prefix,
-                edges=edges,
-                metric=args.metric,
-                progress_flag=progress_flag
-            )
-            if args.output is None or (args.output and not args.output.suffix):
-                print(f"Wrote metric-binned outputs with prefix → {out_prefix}")
-
+        # angle binning (uses pure angle)
+        if args.angle_bins:
+            bins = [float(x) for x in args.angle_bins.split(",")]
+            angle_bins = parse_angle_bins(None, bins)
+        elif args.angle_split is not None:
+            angle_bins = parse_angle_bins(args.angle_split, None)
         else:
-            # legacy angle binning (uses pure angle)
-            if args.angle_bins:
-                bins = [float(x) for x in args.angle_bins.split(",")]
-                angle_bins = parse_angle_bins(None, bins)
-            elif args.angle_split is not None:
-                angle_bins = parse_angle_bins(args.angle_split, None)
-            else:
-                raise SystemExit(
-                    "Provide --angle-bins/--angle-split, or --count-bins, or --metric-bins/--metric-split; "
-                    "or use --sort-angle."
-                )
+            raise SystemExit("Provide --angle-bins or --angle-split, or use --sort-angle.")
 
-            write_angle_bins(
-                args.input_stream,
-                header_bytes,
-                chunk_list,
-                out_prefix=out_prefix,
-                bins=angle_bins,
-                report_path=None,
-                progress_flag=progress_flag
-            )
-            if args.output is None or (args.output and not args.output.suffix):
-                print(f"Wrote angle-binned outputs with prefix → {out_prefix}")
+        out_prefix = args.output if args.output is not None else default_bin_prefix
+        write_angle_bins(
+            args.input_stream,
+            header_bytes,
+            chunk_list,
+            out_prefix=out_prefix,
+            bins=angle_bins,
+            report_path=None,
+            progress_flag=progress_flag
+        )
+        if args.output is None:
+            print(f"Wrote angle-binned outputs with prefix → {out_prefix}")
 
 if __name__ == "__main__":
     main()
