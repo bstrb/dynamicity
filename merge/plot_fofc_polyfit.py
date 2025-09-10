@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Fit Fc^2 vs Fo^2 from SHELX CIF-style .fcf and list outliers wrt the fitted line.
+# Fit Fc^2 vs Fo^2 from SHELX CIF-style .fcf, list outliers wrt the fitted line,
+# and (optionally) fit/plot additional polynomial models of selected degrees.
 
 from pathlib import Path
 import numpy as np
@@ -8,13 +9,17 @@ import matplotlib.pyplot as plt
 # ----------------------- Configuration -----------------------
 FCF_PATH = Path("/Users/xiaodong/Downloads/shelx.fcf")  # Path to your .fcf file
 TOP_N = 20                    # How many outliers to list/label
-FORCE_THROUGH_ORIGIN = False  # If True: fit y = b*x; else y = a + b*x
+FORCE_THROUGH_ORIGIN = True  # If True: fit y = b*x; else y = a + b*x
 ROBUST = True                 # Use IRLS with Tukey biweight for robustness
 MAX_IRLS_ITERS = 5            # IRLS iterations
 C_TUKEY = 4.685               # Tukey biweight tuning constant
 POINT_SIZE = 6
 ALPHA = 0.5
 LABEL_FONT_SIZE = 8
+
+# Polynomial options (in addition to the base linear fit that drives outlier detection)
+POLY_DEGREES = [2]         # Extra polynomial degrees to fit/plot (e.g., [2,3,4])
+PLOT_POLY_POINTS = 400        # Resolution for plotting polynomial curves
 # -------------------------------------------------------------
 
 def _to_float(tok):
@@ -156,7 +161,6 @@ def weighted_linfit(x, y, w=None, through_origin=False):
         return a, b
     else:
         X = np.column_stack([np.ones_like(x), x])
-        # Use weighted normal equations in a numerically safe way
         WX = X * w[:, None]
         XT_WX = X.T @ WX
         XT_Wy = WX.T @ y
@@ -183,7 +187,7 @@ def tukey_weights(r, c=C_TUKEY):
 
 def robust_fit(x, y, through_origin=False, max_iters=5):
     """
-    Iteratively Reweighted Least Squares with Tukey's biweight.
+    Iteratively Reweighted Least Squares with Tukey's biweight (linear).
     Returns (a, b), final weights, residuals
     """
     a, b = weighted_linfit(x, y, w=None, through_origin=through_origin)
@@ -204,6 +208,91 @@ def robust_fit(x, y, through_origin=False, max_iters=5):
     r = y - y_pred
     return (a, b), w, r
 
+# --------- Polynomial helpers ---------
+def _design_matrix(x, degree: int, through_origin: bool):
+    """
+    Build a Vandermonde-style design matrix up to 'degree'.
+    If through_origin=True, omit the constant column so the intercept is fixed at 0.
+    Columns are ordered [1, x, x^2, ..., x^degree] (or [x, x^2, ...] if through_origin).
+    """
+    x = np.asarray(x, dtype=float)
+    if degree < 1:
+        raise ValueError("degree must be >= 1")
+    if through_origin:
+        cols = [x**k for k in range(1, degree + 1)]
+    else:
+        cols = [np.ones_like(x)]
+        cols += [x**k for k in range(1, degree + 1)]
+    return np.column_stack(cols)
+
+def _eval_poly(coeffs, x, through_origin: bool):
+    """
+    Evaluate polynomial with given coeffs at x.
+    If through_origin=False, coeffs correspond to [a0, a1, ..., adeg].
+    If through_origin=True, coeffs correspond to [a1, a2, ..., adeg] and a0 is implicitly 0.
+    """
+    x = np.asarray(x, dtype=float)
+    if through_origin:
+        # coeffs[k-1] multiplies x^k, k=1..deg
+        y = np.zeros_like(x, dtype=float)
+        for k, ck in enumerate(coeffs, start=1):
+            y += ck * (x**k)
+        return y
+    else:
+        # coeffs[k] multiplies x^k, k=0..deg
+        y = np.zeros_like(x, dtype=float)
+        for k, ck in enumerate(coeffs):
+            y += ck * (x**k)
+        return y
+
+def weighted_polyfit(x, y, degree: int, w=None, through_origin: bool=False):
+    """
+    Weighted least squares polynomial fit up to 'degree'.
+    Returns coeffs as described in _eval_poly.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    X = _design_matrix(x, degree, through_origin)
+    if w is None:
+        w = np.ones_like(x, dtype=float)
+    else:
+        w = np.asarray(w, dtype=float)
+
+    WX = X * w[:, None]
+    XT_WX = X.T @ WX
+    XT_Wy = WX.T @ y
+    coeffs = np.linalg.solve(XT_WX, XT_Wy)
+    return coeffs
+
+def robust_polyfit(x, y, degree: int, through_origin: bool=False, max_iters: int=5):
+    """
+    IRLS with Tukey biweight for polynomial of given degree.
+    Returns (coeffs, final_weights, residuals)
+    """
+    # start from unweighted solution
+    coeffs = weighted_polyfit(x, y, degree, w=None, through_origin=through_origin)
+    w = np.ones_like(x, dtype=float)
+
+    for _ in range(max_iters):
+        y_pred = _eval_poly(coeffs, x, through_origin)
+        r = y - y_pred
+        w_new = tukey_weights(r)
+        if np.all(w_new < 1e-6):
+            w_new = np.ones_like(x, dtype=float)
+
+        coeffs_new = weighted_polyfit(x, y, degree, w=w_new, through_origin=through_origin)
+        if np.allclose(coeffs, coeffs_new, rtol=0, atol=1e-9):
+            coeffs = coeffs_new
+            w = w_new
+            break
+        coeffs = coeffs_new
+        w = w_new
+
+    y_pred = _eval_poly(coeffs, x, through_origin)
+    r = y - y_pred
+    return coeffs, w, r
+# --------------------------------------
+
 def robust_z_scores(residuals):
     """
     Robust z using MAD: z = 0.6745 * |r - med(r)| / MAD
@@ -222,7 +311,7 @@ def main():
     x = Fo2
     y = Fc2
 
-    # Fit
+    # ---- Base fit (linear) for outlier scoring ----
     if ROBUST:
         (a, b), weights, residuals = robust_fit(
             x, y, through_origin=FORCE_THROUGH_ORIGIN, max_iters=MAX_IRLS_ITERS
@@ -238,33 +327,76 @@ def main():
     ss_tot = np.sum((y - np.mean(y))**2) + 1e-12
     r2 = 1.0 - ss_res/ss_tot
 
-    # Outlier scoring
+    # Outlier scoring based on the base (linear) model
     z = robust_z_scores(residuals)
     order = np.argsort(-z)  # descending by robust z
     top_idx = order[:TOP_N]
 
     # ---- Plot ----
-    xmin, xmax = 0.0, max(1.0, np.max(x))
-    ymin, ymax = 0.0, max(1.0, np.max(y))
-    diag_max = max(xmax, ymax)
+    # Axis limits: from 0 up to (data maximum + 10%)
+    xmax_data = float(np.max(x)) if x.size else 1.0
+    ymax_data = float(np.max(y)) if y.size else 1.0
+    x_max_plot = 1.1 * xmax_data
+    y_max_plot = 1.1 * ymax_data
 
     plt.figure(figsize=(7, 7))
     plt.scatter(x, y, s=POINT_SIZE, alpha=ALPHA)
-    # Fitted line
-    xline = np.linspace(0, diag_max, 200)
-    yline = a + b * xline
-    plt.plot(xline, yline, linestyle="--", label=f"fit: y = {a:.3f} + {b:.3f} x  (R²={r2:.4f})")
 
-    # Axes start from zero and equal aspect
-    plt.xlim(0, 1500)
-    plt.ylim(0, 2500)
+    # Base fitted line
+    xline = np.linspace(0, x_max_plot, 200)
+    yline = a + b * xline
+    if FORCE_THROUGH_ORIGIN:
+        label_base = f"linear: y = {b:.3f} x  (R²={r2:.4f})"
+    else:
+        label_base = f"linear: y = {a:.3f} + {b:.3f} x  (R²={r2:.4f})"
+    plt.plot(xline, yline, linestyle="--", label=label_base)
+
+    # Additional polynomial models
+    poly_summaries = []
+    for deg in sorted(set(d for d in POLY_DEGREES if int(d) >= 2)):
+        deg = int(deg)
+        if ROBUST:
+            coeffs, _, _ = robust_polyfit(x, y, degree=deg,
+                                          through_origin=FORCE_THROUGH_ORIGIN,
+                                          max_iters=MAX_IRLS_ITERS)
+        else:
+            coeffs = weighted_polyfit(x, y, degree=deg,
+                                      w=None, through_origin=FORCE_THROUGH_ORIGIN)
+
+        xpoly = np.linspace(0, x_max_plot, PLOT_POLY_POINTS)
+        ypoly = _eval_poly(coeffs, xpoly, through_origin=FORCE_THROUGH_ORIGIN)
+
+        # Compute unweighted R^2 for this polynomial
+        yhat = _eval_poly(coeffs, x, through_origin=FORCE_THROUGH_ORIGIN)
+        ss_res_p = np.sum((y - yhat)**2)
+        ss_tot_p = np.sum((y - np.mean(y))**2) + 1e-12
+        r2_p = 1.0 - ss_res_p/ss_tot_p
+
+        # Build a concise polynomial label
+        if FORCE_THROUGH_ORIGIN:
+            # y = c1 x + c2 x^2 + ...
+            terms = [f"{coeffs[k-1]:.3f} x^{k}" for k in range(1, deg+1)]
+            poly_lbl = " + ".join(terms)
+            label = f"deg {deg}: y = {poly_lbl} (R²={r2_p:.4f})"
+        else:
+            # y = c0 + c1 x + c2 x^2 + ...
+            terms = [f"{coeffs[0]:.3f}"] + [f"{coeffs[k]:.3f} x^{k}" for k in range(1, deg+1)]
+            poly_lbl = " + ".join(terms)
+            label = f"deg {deg}: y = {poly_lbl} (R²={r2_p:.4f})"
+
+        plt.plot(xpoly, ypoly, label=label)
+        poly_summaries.append((deg, coeffs, r2_p))
+
+    # Axes start from zero and equal aspect; limits tied to data +10%
+    plt.xlim(0, x_max_plot)
+    plt.ylim(0, y_max_plot)
     plt.gca().set_aspect("equal", adjustable="box")
 
     plt.xlabel("Fo² (observed)")
     plt.ylabel("Fc² (calculated)")
     plt.title(f"Fo² vs Fc² fit • {FCF_PATH.name}")
 
-    # Label top outliers
+    # Label top outliers (by robust z wrt base linear fit)
     for i in top_idx:
         hx, hy = x[i], y[i]
         label = f"({hkl[i,0]} {hkl[i,1]} {hkl[i,2]})"
@@ -276,7 +408,7 @@ def main():
     plt.show()
 
     # ---- Print table ----
-    print("\nTop {} outliers w.r.t. fitted line (by robust z-score, MAD-based):".format(TOP_N))
+    print("\nTop {} outliers w.r.t. base linear fit (by robust z-score, MAD-based):".format(TOP_N))
     header = (
         "{:>3s} {:>4s} {:>4s} {:>4s} "
         "{:>12s} {:>12s} {:>12s} {:>10s} {:>8s}"
@@ -288,7 +420,7 @@ def main():
         yfit_i = a + b * x[i]
         print("{:>3d} {:>4d} {:>4d} {:>4d} {:>12.3f} {:>12.3f} {:>12.3f} {:>10.3f} {:>8.2f}".format(
             rank, hkl[i,0], hkl[i,1], hkl[i,2],
-            x[i], y[i], yfit_i, residuals[i], z[i]
+            x[i], y[i], yfit_i, y[i] - yfit_i, z[i]
         ))
 
     # Convenience hint
