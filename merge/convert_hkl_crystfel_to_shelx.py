@@ -97,11 +97,16 @@ def convert_hkl_crystfel_to_shelx(input_dir: str):
 
     print(f"[INFO] Conversion to {os.path.basename(output_filename)} completed successfully in: {os.path.join(os.path.dirname(input_filename))}/shelx")
   
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    input_dir = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_merge"
-    convert_hkl_crystfel_to_shelx(input_dir)
-    input_dir = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_5000_first_xtals_noZOLZ_tol0.1_merge"
-    convert_hkl_crystfel_to_shelx(input_dir)
-    input_dir = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_50000_first_xtals_noZOLZ_tol0.1_merge"
+#     input_dir = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_noZOLZ_tol0.1_merge"
+#     convert_hkl_crystfel_to_shelx(input_dir)
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Convert CrystFEL HKL to SHELX format")
+    parser.add_argument("--input-dir", required=True, help="Path to input folder containing crystfel.hkl")
+    args = parser.parse_args()
+    input_dir = args.input_dir
     convert_hkl_crystfel_to_shelx(input_dir)

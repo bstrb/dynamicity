@@ -10,18 +10,20 @@ set -euo pipefail
 # Hardcoded list of stream files
 #######################################
 STREAMS=(
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_0.5_step_0.2/metrics_run_20250905-084938/filtered_metrics_sorted_1000_first_xtals_noZOLZ_tol0.1.stream"
+  "/home/bubl3932/files/Zheting/1DNEA3D_pHASE1_5_0.0_0.0_TOLERANCE3_origcell_origgeom_sorted_noZOLZ_tol0.1.stream"
 )
 
 #######################################
 # Defaults
 #######################################
+
 THREADS=24
-SYM="4/mmm"
+# SYM="4/mmm"
+SYM="mmm"
 ITERATIONS=5
 
 LOWRES=4
-HIGHRES=0.4
+HIGHRES=0.6
 WILSON="--wilson"   # set to "" to skip
 
 #######################################
@@ -34,11 +36,6 @@ timestamp() { date +"%Y-%m-%dT%H:%M:%S%z"; }
 need python3
 need partialator
 
-SUMMARY_FILE="$(pwd)/merge_qc_summary_$(date +%Y%m%d_%H%M%S).log"
-echo "Multi-stream run started: $(timestamp)" > "$SUMMARY_FILE"
-echo "Streams to process: ${#STREAMS[@]}" >> "$SUMMARY_FILE"
-echo >> "$SUMMARY_FILE"
-
 #######################################
 # Function: process a single stream file
 #######################################
@@ -48,7 +45,7 @@ process_stream() (
   [ -f "$STREAM_FILE" ] || die "Stream file not found: $STREAM_FILE"
 
   local STEM="${STREAM_FILE%.stream}"
-  local MERGE_OUTDIR="${STEM}_merge"
+  local MERGE_OUTDIR="${STEM}_merge_res_${LOWRES}-${HIGHRES}"
   local PR_LOG_DIR="${MERGE_OUTDIR}/pr-logs"
   local CRYSTFEL_HKL="${MERGE_OUTDIR}/crystfel.hkl"
   local PARAMS_JSON="${MERGE_OUTDIR}/parameters.json"
@@ -123,6 +120,11 @@ process_stream() (
     --outdir "$QC_OUTDIR" --lowres "$LOWRES" --highres "$HIGHRES" \
     ${WILSON:+$WILSON}
   echo "[$(timestamp)] qc_report.py: done"
+
+  echo "[$(timestamp)] convert_hkl_crystfel_to_shelx.py: start"
+  python3 "$(dirname "$0")/convert_hkl_crystfel_to_shelx.py" \
+    --input-dir "$MERGE_OUTDIR"
+  echo "[$(timestamp)] convert_hkl_crystfel_to_shelx.py: done"
 
   echo "Run completed: $(timestamp)"
   return "$WARN"

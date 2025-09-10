@@ -107,8 +107,8 @@ def process_stream(inp: Path, outp: Path,
 
         in_crystal = True
         in_reflections = False
-        crystals_seen += 1
         filter_active_for_this_crystal = should_filter_crystal()
+        crystals_seen += 1
 
         # Choose zone from list if available; fallback to global
         if zone_list and (crystals_seen - 1) < len(zone_list):
