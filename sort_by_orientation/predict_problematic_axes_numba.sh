@@ -2,7 +2,7 @@
 set -euo pipefail
 
 python3 predict_problematic_axes_numba.py \
-  --stream "/home/bubl3932/files/Zheting/1DNEA3D_pHASE1_5_0.0_0.0_TOLERANCE3_origcell_origgeom.stream" \
+  --stream "/home/bubl3932/files/CAU23/crystfel/CAU23.stream" \
   --nrows 110 \
   --csv 
 

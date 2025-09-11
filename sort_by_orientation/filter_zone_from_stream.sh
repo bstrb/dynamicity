@@ -3,8 +3,8 @@ set -euo pipefail
 
 # --- USER SETTINGS ---
 
-IN="/home/bubl3932/files/Zheting/1DNEA3D_pHASE1_5_0.0_0.0_TOLERANCE3_origcell_origgeom_sorted.stream"
-ZONE_LIST="/home/bubl3932/files/Zheting/1DNEA3D_pHASE1_5_0.0_0.0_TOLERANCE3_origcell_origgeom_report.txt"
+IN="/home/bubl3932/files/CAU23/crystfel/CAU23_sorted.stream"
+ZONE_LIST="/home/bubl3932/files/CAU23/crystfel/CAU23_report.txt"
 NUM_CRYSTALS=all   # "all" or an integer like 0, 1, 200
 TOL=0.1            # tolerance, e.g. 0, 0.1, 1.5
 # ---------------------
