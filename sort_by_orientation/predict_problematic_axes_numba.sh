@@ -2,7 +2,7 @@
 set -euo pipefail
 
 python3 predict_problematic_axes_numba.py \
-  --stream "/home/bubl3932/files/CAU23/crystfel/CAU23.stream" \
+  --stream "/home/bubl3932/files/MFM300_VIII/20250408/MFM_spot3_streams/filtered_metrics/filtered_metrics.stream" \
   --nrows 110 \
   --csv 
 

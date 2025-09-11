@@ -672,7 +672,7 @@ def main():
 if __name__ == "__main__":
     main()
     
-# python crystfel_center_shift_metrics.py --dir /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2 --output /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/center_shift_metrics.csv
+# python crystfel_center_shift_metrics.py --dir /home/bubl3932/files/MFM300_VIII/20250408/MFM_spot3_streams --output /home/bubl3932/files/MFM300_VIII/20250408/MFM_spot3_streams/center_shift_metrics.csv
 
 
 # python crystfel_center_shift_metrics.py --dir /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_0.5_step_0.2 --output /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_0.5_step_0.2/center_shift_metrics.csv
