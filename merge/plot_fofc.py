@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # ----------------------- Configuration -----------------------
-FCF_PATH = Path("/Users/xiaodong/Downloads/shelx.fcf")  # Path to your .fcf file
+FCF_PATH = Path("/Users/xiaodong/Desktop/MFM300V-III_ZOLZ_ref/MFM300V-III_no_ZOLZ_4-0.4/shelx.fcf")  # Path to your .fcf file
 TOP_N = 20                    # How many outliers to list/label
 FORCE_THROUGH_ORIGIN = False  # If True: fit y = b*x; else y = a + b*x
 ROBUST = True                 # Use IRLS with Tukey biweight for robustness
@@ -256,8 +256,8 @@ def main():
     plt.plot(xline, yline, linestyle="--", label=f"fit: y = {a:.3f} + {b:.3f} x  (R²={r2:.4f})")
 
     # Axes start from zero and equal aspect
-    plt.xlim(0, 1500)
-    plt.ylim(0, 2500)
+    # plt.xlim(0, 2000)
+    # plt.ylim(0, 3500)
     plt.gca().set_aspect("equal", adjustable="box")
 
     plt.xlabel("Fo² (observed)")
@@ -290,11 +290,11 @@ def main():
             rank, hkl[i,0], hkl[i,1], hkl[i,2],
             x[i], y[i], yfit_i, residuals[i], z[i]
         ))
-
-    # Convenience hint
-    if len(top_idx) > 0:
-        h,k,l = hkl[top_idx[0]]
-        print(f"\nTip: In Olex2, omit a reflection via:  omit {h} {k} {l}")
+        
+    for rank, i in enumerate(top_idx, 1):
+        print("OMIT {:>4d} {:>4d} {:>4d}".format(
+            hkl[i,0], hkl[i,1], hkl[i,2],
+        ))
 
 if __name__ == "__main__":
     main()
