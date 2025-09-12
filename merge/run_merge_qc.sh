@@ -10,7 +10,7 @@ set -euo pipefail
 # Hardcoded list of stream files
 #######################################
 STREAMS=(
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_noZOLZ_tol0.1.stream"
+  "/home/bubl3932/files/MFM300_VIII/20250408/MFM_spot3_streams/filtered_metrics/filtered_metrics_sorted.stream"
 )
 
 #######################################
@@ -22,8 +22,8 @@ SYM="4/mmm"
 # SYM="mmm"
 ITERATIONS=5
 
-LOWRES=4
-HIGHRES=0.4
+LOWRES=2
+HIGHRES=0.3
 WILSON="--wilson"   # set to "" to skip
 
 #######################################
@@ -137,15 +137,14 @@ EXITCODE=0
 for s in "${STREAMS[@]}"; do
   echo "=== Processing stream: $s ==="
   if process_stream "$s"; then
-    echo "[OK] $s" | tee -a "$SUMMARY_FILE"
+    echo "[OK] $s"
   else
-    echo "[WARN] $s" | tee -a "$SUMMARY_FILE"
+    echo "[WARN] $s"
     EXITCODE=1
   fi
 done
 
-echo >> "$SUMMARY_FILE"
-echo "Multi-stream run finished: $(timestamp)" >> "$SUMMARY_FILE"
-echo "Summary: $SUMMARY_FILE"
+echo
+echo "Multi-stream run finished: $(timestamp)"
 
 exit "$EXITCODE"

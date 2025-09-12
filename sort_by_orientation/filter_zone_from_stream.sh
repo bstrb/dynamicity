@@ -3,8 +3,8 @@ set -euo pipefail
 
 # --- USER SETTINGS ---
 
-IN="/home/bubl3932/files/CAU23/crystfel/CAU23_sorted.stream"
-ZONE_LIST="/home/bubl3932/files/CAU23/crystfel/CAU23_report.txt"
+IN="/home/bubl3932/files/MFM300_VIII/20250408/MFM_spot3_streams/filtered_metrics/filtered_metrics_sorted.stream"
+ZONE_LIST="/home/bubl3932/files/MFM300_VIII/20250408/MFM_spot3_streams/filtered_metrics/filtered_metrics_report.txt"
 NUM_CRYSTALS=all   # "all" or an integer like 0, 1, 200
 TOL=0.1            # tolerance, e.g. 0, 0.1, 1.5
 # ---------------------
