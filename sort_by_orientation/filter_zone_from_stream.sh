@@ -3,8 +3,8 @@ set -euo pipefail
 
 # --- USER SETTINGS ---
 
-IN="/home/bubl3932/files/MFM300_VIII/20250408/MFM_spot3_streams/filtered_metrics/filtered_metrics_sorted.stream"
-ZONE_LIST="/home/bubl3932/files/MFM300_VIII/20250408/MFM_spot3_streams/filtered_metrics/filtered_metrics_report.txt"
+IN="/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_0.5_step_0.2/metrics_run_20250915-100953/filtered_metrics_sorted.stream"
+ZONE_LIST="/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_0.5_step_0.2/metrics_run_20250915-100953/filtered_metrics_report.txt"
 NUM_CRYSTALS=all   # "all" or an integer like 0, 1, 200
 TOL=0.1            # tolerance, e.g. 0, 0.1, 1.5
 # ---------------------
