@@ -16,12 +16,12 @@ Outputs columns:
   stream_file,weighted_rmsd,fraction_outliers,length_deviation,angle_deviation,peak_ratio,percentage_unindexed
 
 Usage:
-  python crystfel_center_shift_metrics.py \
+  python calc_indexing_metrics.py \
     --dir /path/to/streams \
-    --output /path/to/center_shift_metrics.csv \
-    --match-radius 3.0 \
-    --outlier-sigma 3.0 \
-    --workers 0
+    --output /path/to/center_shift_metrics.csv \ optional
+    --match-radius 3.0 \ optional
+    --outlier-sigma 3.0 \ optional
+    --workers 0 \ optional, 0 = all cores
 """
 
 import argparse
@@ -445,16 +445,30 @@ def _worker_process_stream(args):
 # ------------------------ Main ------------------------
 def main():
     ap = argparse.ArgumentParser(description="CrystFEL metrics with progress bar, parallel, and low RAM")
-    ap.add_argument("--dir", required=True, help="Directory containing .stream files")
-    ap.add_argument("--output", required=True, help="Output CSV path")
+    ap.add_argument(
+        "--dir",
+        required=True,
+        type=Path,
+        help="Directory containing .stream files"
+    )
+    ap.add_argument(
+        "--output", "-o",
+        type=Path,
+        default=None,
+        help="Output CSV path (default: <DIR>/indexing_metrics.csv)"
+    )
     ap.add_argument("--match-radius", type=float, default=4.0, help="Match radius in pixels")
     ap.add_argument("--outlier-sigma", type=float, default=2.0, help="Outlier sigma")
     ap.add_argument("--reference-stream", default=None, help="Optional .stream path for the target cell")
     ap.add_argument("--workers", type=int, default=0, help="Worker processes (0 = all cores)")
-    ap.add_argument("--db", default=None, help="Optional sqlite path (default: <dir>/center_shift_metrics.sqlite3)")
+    ap.add_argument("--db", default=None, help="Optional sqlite path (default: <dir>/indexing_metrics_metrics.sqlite3)")
     ap.add_argument("--batch", type=int, default=200, help="Rows per IPC batch from worker to DB (default 2000)")
     ap.add_argument("--skip-precounter", action="store_true", help="Skip pre-counting chunks (progress shows unknown total)")
     args = ap.parse_args()
+
+    # If --output not provided, default to <DIR>/indexing_metrics.csv
+    if args.output is None:
+        args.output = args.dir / "indexing_metrics.csv"
 
     base_dir = Path(args.dir).expanduser().resolve()
     if not base_dir.is_dir():
@@ -472,7 +486,7 @@ def main():
     tgt_tuple = (tgt.a, tgt.b, tgt.c, tgt.al, tgt.be, tgt.ga)
 
     # DB setup
-    db_path = Path(args.db) if args.db else (base_dir / "center_shift_metrics.sqlite3")
+    db_path = Path(args.db) if args.db else (base_dir / "indexing_metrics_metrics.sqlite3")
     if db_path.exists():
         db_path.unlink()
     conn = sqlite3.connect(str(db_path))
@@ -671,8 +685,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
-# python crystfel_center_shift_metrics.py --dir /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_0.5_step_0.2 --output /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_0.5_step_0.2/center_shift_metrics.csv
-
-
-# python crystfel_center_shift_metrics.py --dir /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_0.5_step_0.2 --output /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_0.5_step_0.2/center_shift_metrics.csv

@@ -10,7 +10,8 @@ set -euo pipefail
 # Hardcoded list of stream files
 #######################################
 STREAMS=(
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/xgandalf_iterations_max_radius_0.5_step_0.2/metrics_run_20250915-100953/filtered_metrics.stream"
+  "/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741/filtered_metrics_sorted_noZOLZ_tol0.1.stream"
+  "/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741/filtered_metrics.stream"
 )
 
 #######################################
@@ -18,12 +19,14 @@ STREAMS=(
 #######################################
 
 THREADS=24
-SYM="4/mmm"
-# SYM="mmm"
+# SYM="4/mmm"
+SYM="mmm"
 ITERATIONS=5
 
-LOWRES=4
-HIGHRES=0.4
+LOWRES=20
+HIGHRES=1.3
+# LOWRES=4
+# HIGHRES=0.4
 WILSON="--wilson"   # set to "" to skip
 
 #######################################

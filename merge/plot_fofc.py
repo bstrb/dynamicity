@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # ----------------------- Configuration -----------------------
-FCF_PATH = Path("/Users/xiaodong/Desktop/MFM300V-III_ZOLZ_ref/MFM300V-III_no_ZOLZ_4-0.4/shelx.fcf")  # Path to your .fcf file
+FCF_PATH = Path("/mnt/c/Users/bubl3932/Downloads/MFM300V-III_no_ZOLZ_4-0.4/MFM300V-III_no_ZOLZ_4-0.4/shelx.fcf")  # Path to your .fcf file
 TOP_N = 20                    # How many outliers to list/label
 FORCE_THROUGH_ORIGIN = False  # If True: fit y = b*x; else y = a + b*x
 ROBUST = True                 # Use IRLS with Tukey biweight for robustness
