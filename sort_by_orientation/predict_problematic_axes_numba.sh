@@ -2,7 +2,7 @@
 set -euo pipefail
 
 python3 predict_problematic_axes_numba.py \
-  --stream "/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741/filtered_metrics.stream" \
+  --stream "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_000/MFM300.stream" \
   --nrows 110 \
   --csv 
 

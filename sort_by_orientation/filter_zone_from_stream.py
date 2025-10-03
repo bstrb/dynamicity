@@ -49,8 +49,8 @@ def parse_args() -> argparse.Namespace:
                    help="Fallback zone axis [u v w] as integers. Default [0 0 1] (ZOLZ -> l == 0).")
     p.add_argument("--zone-list", dest="zone_list", type=str, default=None,
                    help="Path to text file with one [u v w] per line (same order as crystals). Extra text on a line is ignored.")
-    p.add_argument("--tolerance", type=float, default=0.0,
-                   help="Drop if |h*u + k*v + l*w| <= tolerance (float). Default 0.0.")
+    p.add_argument("--tolerance", type=float, default=0.1,
+                   help="Drop if |h*u + k*v + l*w| <= tolerance (float). Default 0.1.")
     p.add_argument("--limit-crystals", type=int, default=None,
                    help="Filter only the first N crystals (counting from the start of the file).")
     return p.parse_args()
