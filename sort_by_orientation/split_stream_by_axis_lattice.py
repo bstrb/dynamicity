@@ -733,8 +733,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     # Sorting metric selector
     ap.add_argument("--metric", choices=("angle","angle_over_score"),
-                    default="angle",
-                    help="Metric for sorting and metric/count binning (default: angle).")
+                    default="angle_over_score",
+                    help="Metric for sorting and metric/count binning (default: angle_over_score).")
 
     # legacy axis selection path (ignored when --from-csv is used)
     ap.add_argument("--lattice", type=str, default="auto",
@@ -790,6 +790,20 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     if args.from_csv if False else args.from_csv:  # robust to typos; real var is args.from_csv
         stream_from_csv, axes_scores = parse_problematic_csv(args.from_csv)
+# #####################
+#         # Build a normalized score map in [0,1] if scores look like raw counts (N > 1)
+#         finite_scores = [sc for (_, sc) in axes_scores if math.isfinite(sc)]
+#         max_sc = max(finite_scores) if finite_scores else float('nan')
+#         if finite_scores and any(sc > 1.0 for sc in finite_scores) and math.isfinite(max_sc) and max_sc > 0:
+#             axis_score_map = {uvw: (sc / max_sc) for (uvw, sc) in axes_scores}
+#         else:
+#             axis_score_map = {uvw: sc for (uvw, sc) in axes_scores}
+
+#         # keep ±axis equivalence
+#         for uvw, sc in list(axis_score_map.items()):
+#             axis_score_map[(-uvw[0], -uvw[1], -uvw[2])] = sc
+#         axes_user = list({uvw for uvw, _ in axes_scores})
+# #####################
         if args.input_stream is None:
             if stream_from_csv is None:
                 raise SystemExit("CSV did not contain a '# Stream: <path>' header; provide input_stream explicitly.")

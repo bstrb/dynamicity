@@ -378,6 +378,15 @@ def main():
 
     if not rows:
         fail("No candidate axes survived (first ring off-panel or no ZOLZ reflections in acceptance).")
+    
+    # ---- Normalize Score to [0,1] from raw N (keep N as-is) ----
+    Nmax = max(r["N"] for r in rows)
+    if Nmax > 0:
+        for r in rows:
+            r["Score"] = r["N"] / Nmax
+    else:
+        for r in rows:
+            r["Score"] = 0.0
 
     eprint(f"[2/2] Reducing & sorting {len(rows)} results...")
 
@@ -394,14 +403,45 @@ def main():
         print(f"{r['u']:>2} {r['v']:>2} {r['w']:>2}  {r['r_px']:7.2f}   {r['g_min_1_over_A']:.4f}     {r['ring_mult']:>3}   {r['N']:>5}   {r['Score']:>7.2f}")
 
     # CSV
+    # if args.csv:
+    #     out_csv = os.path.splitext(args.stream if args.stream != "-" else "stdin.stream")[0] + "_problematic_axes.csv"
+    #     with open(out_csv, "w", newline="") as f:
+    #         w = csv.DictWriter(f, fieldnames=["u","v","w","ring_type","g_min_1_over_A","r_px","ring_mult","N","Score","inside"])
+    #         w.writeheader()
+    #         for r in rows:
+    #             w.writerow(r)
+    #     print(f"\nWrote CSV: {out_csv}")
+        # CSV (with header comments + trailing triplet list like the original)
     if args.csv:
         out_csv = os.path.splitext(args.stream if args.stream != "-" else "stdin.stream")[0] + "_problematic_axes.csv"
         with open(out_csv, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=["u","v","w","ring_type","g_min_1_over_A","r_px","ring_mult","N","Score","inside"])
+            # --- header comments ---
+            f.write("# CrystFEL problematic zone axes prediction\n")
+            f.write(f"# Stream: {args.stream}\n")
+            f.write(f"# Cell: {cell['lattice_type'].upper()} {cell['centering'].upper()} | "
+                    f"a={cell['a']:.4f} Å b={cell['b']:.4f} Å c={cell['c']:.4f} Å "
+                    f"al={cell['al']:.2f}° be={cell['be']:.2f}° ga={cell['ga']:.2f}°\n")
+            f.write(f"# Geom: λ={geom['wavelength_A']} Å, L={geom['clen_m']} m, res={geom['res_px_per_m']} px/m | "
+                    f"panel {nx}×{ny}px | edge r={r_edge_px:.2f}px\n")
+            f.write(f"# Settings: UVW_MAX={args.uvw_max}, g_enum={g_enum:.4f}, g_crowd={g_crowd:.4f}, "
+                    f"tol_g={tol_g} (fixed), Score=N\n")
+
+            # --- table ---
+            w = csv.DictWriter(
+                f,
+                fieldnames=["u","v","w","ring_type","g_min_1_over_A","r_px","ring_mult","N","Score","inside"]
+            )
             w.writeheader()
             for r in rows:
                 w.writerow(r)
+
+            # --- trailing triplet list (quoted, space-separated) ---
+            triplets = [f"\"{r['u']:>2} {r['v']:>2} {r['w']:>2}\"" for r in rows]
+            f.write("\n# Problematic axis triplets listed:\n")
+            f.write("# " + " ".join(triplets) + "\n")
+
         print(f"\nWrote CSV: {out_csv}")
+
 
     eprint("Done.")
 
