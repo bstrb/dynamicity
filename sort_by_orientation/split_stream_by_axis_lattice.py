@@ -765,8 +765,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     help="Where unindexed chunks go in sorted outputs (and --also-sorted). Default: drop.")
     ap.add_argument("--count-split", type=int,
                     help="After writing a sorted copy, split it into files of N chunks each (optional).")
-    ap.add_argument("--report", action="store_true",
-                    help="Write per-chunk report '<img> //<event> -> [uvw] score=… angle=… angle/score=…'.")
+    ap.add_argument("--report", action="store_true", default=True,
+                    help="Write per-chunk report '<img> //<event> -> [uvw] score=… angle=… angle/score=…'. (default: True)")
 
     # When in any binning mode, also write a full sorted stream first
     ap.add_argument("--also-sorted", action="store_true",

@@ -10,8 +10,16 @@ set -euo pipefail
 # Hardcoded list of stream files
 #######################################
 STREAMS=(
-  "/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741/filtered_metrics_sorted_noZOLZ_tol0.1.stream"
-  "/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741/filtered_metrics.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_part1.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_part2.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_part3.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_part4.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_part5.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_part6.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_part7.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_part8.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_part9.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/xgandalf_iterations_max_radius_0.5_step_0.2/zero_fitering/filtered_metrics_sorted_part10.stream"
 )
 
 #######################################
@@ -23,10 +31,10 @@ THREADS=24
 SYM="mmm"
 ITERATIONS=5
 
-LOWRES=20
-HIGHRES=1.3
-# LOWRES=4
-# HIGHRES=0.4
+# LOWRES=20
+# HIGHRES=1.3
+LOWRES=4
+HIGHRES=0.4
 WILSON="--wilson"   # set to "" to skip
 
 #######################################
@@ -104,7 +112,7 @@ process_stream() (
     --max-adu=inf
     --min-res=inf
     --push-res=inf
-    --no-Bscale
+    # --no-Bscale
     --no-pr
     --iterations="$ITERATIONS"
     --harvest-file="$PARAMS_JSON"
