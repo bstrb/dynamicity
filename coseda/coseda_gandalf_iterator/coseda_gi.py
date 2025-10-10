@@ -248,28 +248,6 @@ def list_h5_files(input_path):
     
     return listfile_path
 
-# def run_indexamajig(geomfile_path, listfile_path, cellfile_path, output_path, num_threads, extra_flags=None):
-
-#     if extra_flags is None:
-#         extra_flags = []
-
-#     # Create a list of command parts
-#     command_parts = [
-#         "indexamajig",
-#         "-g", geomfile_path,
-#         "-i", listfile_path,
-#         "-o", output_path,
-#         "-p", cellfile_path,
-#         "-j", str(num_threads)
-#     ]
-
-#     # Append any extra flags provided by the user.
-#     command_parts.extend(extra_flags)
-
-#     # Join the parts into a single command string.
-#     base_command = " ".join(command_parts)
-#     subprocess.run(base_command, shell=True, check=True)
-
 def run_indexamajig(geomfile_path, listfile_path, cellfile_path, output_path, num_threads, extra_flags=None):
     if extra_flags is None:
         extra_flags = []
@@ -841,7 +819,9 @@ class GandalfWindow(QMainWindow):
             pass
 
         # Create a tiny runner script on the fly
-        import tempfile
+        import tempfile, os, textwrap
+
+        # build runner_code exactly as before (with triple quotes)
         runner_code = """
         import sys, os, argparse, importlib.util
         os.environ.setdefault("PYTHONUNBUFFERED", "1")
@@ -853,8 +833,9 @@ class GandalfWindow(QMainWindow):
             return mod
 
         def main():
-            ap = argparse.ArgumentParser()
-            ap.add_argument("--host", required=True)  # path to *this* GUI script
+            # Use parse_known_args so any extra --flags go through to gandalf_iterator
+            ap = argparse.ArgumentParser(allow_abbrev=False)
+            ap.add_argument("--host", required=True)
             ap.add_argument("--geom",    required=True)
             ap.add_argument("--cell",    required=True)
             ap.add_argument("--input",   required=True)
@@ -862,23 +843,23 @@ class GandalfWindow(QMainWindow):
             ap.add_argument("--threads", required=True, type=int)
             ap.add_argument("--radius",  required=True, type=float)
             ap.add_argument("--step",    required=True, type=float)
-            ap.add_argument("extra", nargs="*")
-            a = ap.parse_args()
 
-            mod = load_module_from_path(a.host)
+            args, extra = ap.parse_known_args()   # <— key change
+
+            mod = load_module_from_path(args.host)
             if not hasattr(mod, "gandalf_iterator"):
                 sys.stderr.write("gandalf_iterator not found in host file\\n")
                 sys.exit(2)
 
             rc = mod.gandalf_iterator(
-                geomfile_path=a.geom,
-                cellfile_path=a.cell,
-                input_path=a.input,
-                output_file_base=a.outbase,
-                num_threads=a.threads,
-                max_radius=a.radius,
-                step=a.step,
-                extra_flags=a.extra or None,
+                geomfile_path=args.geom,
+                cellfile_path=args.cell,
+                input_path=args.input,
+                output_file_base=args.outbase,
+                num_threads=args.threads,
+                max_radius=args.radius,
+                step=args.step,
+                extra_flags=extra or None,        # <— pass unknown tokens through
             )
             sys.exit(int(rc) if isinstance(rc, int) else 0)
 
@@ -886,21 +867,32 @@ class GandalfWindow(QMainWindow):
             main()
         """
 
-        tmp = tempfile.NamedTemporaryFile("w", delete=False, prefix="run_gandalf_", suffix=".py")
-        tmp.write(runner_code)
-        tmp.flush()
-        tmp.close()
-        self._runner_path = tmp.name
+                
+        # create a fresh temp file path for this run
+        fd, tmp_path = tempfile.mkstemp(prefix="run_gandalf_", suffix=".py")
+        os.close(fd)
+        self._runner_path = tmp_path  # << set the attribute used below
+
+        # --- here’s the key line ---
+        with open(self._runner_path, "w", encoding="utf-8") as f:
+            f.write(textwrap.dedent(runner_code))
 
         # Build child argv (all strings)
         argv = [
             sys.executable,
             self._runner_path,
-            "--host", os.path.abspath(__file__),   # NEW: pass this script path
-            str(geom), str(cell), str(input_folder), str(output_base),
-            str(threads), str(max_radius), str(step),
-            *[str(f) for f in extra_flags],
+            "--host", os.path.abspath(__file__),
+            "--geom", geom,
+            "--cell", cell,
+            "--input", input_folder,
+            "--outbase", output_base,
+            "--threads", str(threads),
+            "--radius", str(max_radius),
+            "--step", str(step),
+            *[str(f) for f in extra_flags],  # these are the indexamajig flags
         ]
+
+
 
 
         # Create QProcess and merge stderr into stdout
