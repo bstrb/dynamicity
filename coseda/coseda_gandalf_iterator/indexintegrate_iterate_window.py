@@ -19,7 +19,6 @@ import math
 import json
 import time
 import shutil
-import data
 import h5py
 import shlex
 import signal
@@ -35,12 +34,12 @@ from typing import List, Optional
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer
 )
-from PyQt6.QtGui import QFont
+# from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QMessageBox,
     QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout, QLabel, QLineEdit,
     QPlainTextEdit, QPushButton, QSpinBox, QDoubleSpinBox, QSplitter, QListWidgetItem,
-    QGroupBox, QTabWidget, QProgressBar, QComboBox, QTextEdit
+    QGroupBox, QTabWidget, QProgressBar, QComboBox, QTextEdit, QScrollArea
 )
 
 # ==========================
@@ -439,7 +438,7 @@ if __name__ == "__main__":
     main()
 """
 
-# Peakfinder presets
+# ---- Peakfinder presets (module-level) ----
 default_peakfinder_options = {
     "cxi": "--peaks=cxi",
     "peakfinder9": """--peaks=peakfinder9
@@ -458,6 +457,7 @@ default_peakfinder_options = {
 --min-res=0
 --max-res=1200""",
 }
+# -------------------------------------------
 
 
 # =============
@@ -653,6 +653,7 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self.setCentralWidget(self.splitter)
+        QTimer.singleShot(0, lambda: self._update_command_preview(None))
 
         # State
         self.run_root = Path.cwd() / "runs"
@@ -1098,53 +1099,67 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
     # -----------------
     # UI: Settings tab
     # -----------------
+
     def _update_peak_params(self, name: str):
+        """
+        Fill the Peakfinder params editor based on the selected preset.
+        Safe during early init: only triggers preview if txt_preview exists.
+        """
         txt = default_peakfinder_options.get(name, "")
-        # Don't trigger two textChanged updates; block signals during setPlainText
         try:
             self.peak_params_edit.blockSignals(True)
             self.peak_params_edit.setPlainText(txt)
         finally:
             self.peak_params_edit.blockSignals(False)
-        self._update_command_preview(None)
+        if hasattr(self, "txt_preview") and self.txt_preview:
+            self._update_command_preview(None)
+            
+    def _toggle_peak_params_visibility(self, name: str):
+        """
+        Hide the params editor for 'cxi' (only needs --peaks=cxi),
+        show it for 'peakfinder9'/'peakfinder8'.
+        """
+        show = name in ("peakfinder9", "peakfinder8")
+        self.peak_params_edit.setVisible(show)
 
     def _build_settings_tab(self):
         w = self.settings_tab
-        outer = QVBoxLayout(w)
 
+        # Make the whole settings page scrollable (helps on macOS/smaller windows)
+        scroll = QScrollArea(w)
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        scroll.setWidget(content)
+        outer = QVBoxLayout(content)  # build page on 'content'
+
+        # ----------------------
         # Files group
+        # ----------------------
         files_group = QGroupBox("Files")
         files_form = QFormLayout(files_group)
-        self.edit_idxmj = QLineEdit("")  # optional full path to indexamajig
+
+        # Optional full path to indexamajig
+        self.edit_idxmj = QLineEdit("")
         files_form.addRow("indexamajig path (optional):", self.edit_idxmj)
 
-
-
-        ################################################
-        # Pre-fill from default if available (for dev/debug)
+        # Geometry / Cell / Input
         self.edit_geom = QLineEdit()
-        if self.default_geom and self.default_geom.exists():
+        if getattr(self, "default_geom", None) and self.default_geom.exists():
             self.edit_geom.setText(str(self.default_geom))
-
-        self.edit_cell = QLineEdit()
-        if self.default_cell and self.default_cell.exists():
-            self.edit_cell.setText(str(self.default_cell))
-
-        self.edit_input_dir = QLineEdit()
-        if self.default_input and self.default_input.exists():
-            self.edit_input_dir.setText(str(self.default_input))
-        ################################################
-
         btn_geom = QPushButton("Browse…")
         btn_geom.clicked.connect(lambda: self._browse_to(self.edit_geom, "Geometry (*.geom)"))
         files_form.addRow("Geometry (.geom):", self._hpair(self.edit_geom, btn_geom))
 
-        # self.edit_cell = QLineEdit()
+        self.edit_cell = QLineEdit()
+        if getattr(self, "default_cell", None) and self.default_cell.exists():
+            self.edit_cell.setText(str(self.default_cell))
         btn_cell = QPushButton("Browse…")
         btn_cell.clicked.connect(lambda: self._browse_to(self.edit_cell, "Cell (*.cell)"))
         files_form.addRow("Cell (.cell):", self._hpair(self.edit_cell, btn_cell))
 
-        # self.edit_input_dir = QLineEdit()
+        self.edit_input_dir = QLineEdit()
+        if getattr(self, "default_input", None) and self.default_input.exists():
+            self.edit_input_dir.setText(str(self.default_input))
         btn_input = QPushButton("Browse…")
         btn_input.clicked.connect(lambda: self._browse_dir(self.edit_input_dir))
         files_form.addRow("Input folder (HDF5s):", self._hpair(self.edit_input_dir, btn_input))
@@ -1154,7 +1169,9 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
 
         outer.addWidget(files_group)
 
-        # Compute/Indexing group
+        # ----------------------
+        # Indexing & Integration
+        # ----------------------
         idx_group = QGroupBox("Indexing & Integration")
         idx_form = QFormLayout(idx_group)
 
@@ -1163,7 +1180,6 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         self.spin_threads.setValue(max(1, os.cpu_count() or 8))
         idx_form.addRow("Threads:", self.spin_threads)
 
-        # SerialED grid controls
         grid_title = QLabel("SerialED Grid")
         grid_title.setStyleSheet("font-weight:600;")
         idx_form.addRow(grid_title)
@@ -1184,38 +1200,41 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
 
         outer.addWidget(idx_group)
 
-        # Flags group
+        # ----------------------
+        # Flags (Peakfinder + Advanced + Other)
+        # ----------------------
         flags_group = QGroupBox("Flags")
         flags_layout = QGridLayout(flags_group)
 
-        # Peakfinder preset
-        # flags_layout.addWidget(QLabel("Peakfinder preset:"), 0, 0)
-        # self.edit_peakfinder = QLineEdit("peakfinder9")
-        # flags_layout.addWidget(self.edit_peakfinder, 0, 1)
-        # Peakfinder -----------------------------------------------------
+        # Peakfinder block (dropdown + multiline params)
         peak_group = QGroupBox("Peakfinder Options")
         pg = QGridLayout(peak_group)
 
         pg.addWidget(QLabel("Peakfinder:"), 0, 0)
         self.peak_combo = QComboBox()
         self.peak_combo.addItems(["cxi", "peakfinder9", "peakfinder8"])
+        # width adapts to content
+        self.peak_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         pg.addWidget(self.peak_combo, 0, 1)
 
         pg.addWidget(QLabel("Peakfinder Params:"), 1, 0, Qt.AlignmentFlag.AlignTop)
         self.peak_params_edit = QTextEdit()
         self.peak_params_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.peak_params_edit.setMinimumHeight(100)  # make it clearly visible
         pg.addWidget(self.peak_params_edit, 1, 1)
 
-        # initial text + live updates
+        # initial text and live updates
         self._update_peak_params(self.peak_combo.currentText())
+        self._toggle_peak_params_visibility(self.peak_combo.currentText())
         self.peak_combo.currentTextChanged.connect(self._update_peak_params)
+        self.peak_combo.currentTextChanged.connect(self._toggle_peak_params_visibility)
         self.peak_params_edit.textChanged.connect(lambda: self._update_command_preview(None))
 
-        # add the group to your settings layout (use whichever layout var is appropriate)
+        # add peakfinder group to flags grid
         flags_layout.addWidget(peak_group, flags_layout.rowCount(), 0, 1, 2)
 
         # Advanced flags (multi-line)
-        flags_layout.addWidget(QLabel("Advanced flags:"), 1, 0)
+        flags_layout.addWidget(QLabel("Advanced flags:"), flags_layout.rowCount(), 0)
         self.txt_advanced = QPlainTextEdit()
         self.txt_advanced.setPlainText(
             "--min-peaks=15\n"
@@ -1226,10 +1245,10 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
             "--int-radius=4,5,9\n"
         )
         self.txt_advanced.setMinimumHeight(110)
-        flags_layout.addWidget(self.txt_advanced, 1, 1)
+        flags_layout.addWidget(self.txt_advanced, flags_layout.rowCount() - 1, 1)
 
         # Other flags (multi-line)
-        flags_layout.addWidget(QLabel("Other flags:"), 2, 0)
+        flags_layout.addWidget(QLabel("Other flags:"), flags_layout.rowCount(), 0)
         self.txt_other = QPlainTextEdit()
         self.txt_other.setPlainText(
             "--no-revalidate\n"
@@ -1242,20 +1261,26 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
             "--integration=rings\n"
         )
         self.txt_other.setMinimumHeight(110)
-        flags_layout.addWidget(self.txt_other, 2, 1)
+        flags_layout.addWidget(self.txt_other, flags_layout.rowCount() - 1, 1)
 
         outer.addWidget(flags_group)
+
         # Live preview updates when settings change
         for wdg in (self.edit_geom, self.edit_cell, self.edit_input_dir, self.edit_out_base):
             wdg.textChanged.connect(lambda *_: self._update_command_preview(None))
         self.spin_threads.valueChanged.connect(lambda *_: self._update_command_preview(None))
         self.spin_max_radius.valueChanged.connect(lambda *_: self._update_command_preview(None))
         self.spin_step.valueChanged.connect(lambda *_: self._update_command_preview(None))
-        # self.edit_peakfinder.textChanged.connect(lambda *_: self._update_command_preview(None))
         self.txt_advanced.textChanged.connect(lambda *_: self._update_command_preview(None))
         self.txt_other.textChanged.connect(lambda *_: self._update_command_preview(None))
 
         outer.addStretch(1)
+
+        # Mount the scroll area into the tab widget
+        tab_layout = QVBoxLayout(w)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(scroll)
+
 
     # ---------------
     # UI: Start tab
@@ -1908,7 +1933,6 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
             "threads": int(self.spin_threads.value()),
             "max_radius": float(self.spin_max_radius.value()),
             "step": float(self.spin_step.value()),
-            "peakfinder": self.edit_peakfinder.text().strip(),
             "advanced_flags": self.txt_advanced.toPlainText(),
             "other_flags": self.txt_other.toPlainText(),
             "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -1936,9 +1960,15 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         if "step" in data:
             try: self.spin_step.setValue(float(data["step"]))
             except: pass
+            
+        if "peakfinder" in data and "peakfinder_params" not in data:
+            legacy = str(data["peakfinder"]).strip()
+            if legacy in default_peakfinder_options:
+                self.peak_combo.setCurrentText(legacy)
+                self.peak_params_edit.setPlainText(default_peakfinder_options[legacy])
+            else:
+                self.peak_params_edit.setPlainText(legacy)
 
-        if "peakfinder" in data and isinstance(data["peakfinder"], str):
-            self.edit_peakfinder.setText(data["peakfinder"])
         if "peakfinder_choice" in data and isinstance(data["peakfinder_choice"], str):
             self.peak_combo.setCurrentText(data["peakfinder_choice"])
 
@@ -1977,40 +2007,51 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
             " ".join(base) + (f" {extras}" if extras else "") +
             f"\n[grid] R={ctx.max_radius:g}px, step={ctx.step:g}px → ~{ctx.estimated_passes} passes"
         )
-    
-    def _update_command_preview(self, ctx: Optional[RunContext] = None):
+        
+    def _update_command_preview(self, _evt):
+        """
+        Rebuild the command preview. Early during __init__, the Start tab (and txt_preview)
+        may not be built yet; in that case, just return silently.
+        """
         try:
-            if ctx is None:
-                # Build a lightweight preview from current UI state (no run dir required)
-                geom = Path(self.edit_geom.text().strip())
-                cell = Path(self.edit_cell.text().strip())
-                input_dir = Path(self.edit_input_dir.text().strip())
-                out_base = self.edit_out_base.text().strip() or "output"
-                threads = int(self.spin_threads.value())
-                max_radius = float(self.spin_max_radius.value())
-                step = float(self.spin_step.value())
-                extra_flags = self._compose_extra_flags()
-
-                # Try a reasonable list path for preview text
-                list_hint = (self.run_root / "input.lst").as_posix()
-                base = [
-                    "indexamajig",
-                    "-g", geom.as_posix() if geom else "<geom>",
-                    "-i", list_hint,
-                    "-o", f"{out_base}.stream",
-                    "-p", cell.as_posix() if cell else "<cell>",
-                    "-j", str(threads),
-                ]
-                extras = " ".join(extra_flags)
-                grid_info = f"[grid] R={max_radius:g}px, step={step:g}px → ~{estimate_grid_points(max_radius, step)} passes"
-                txt = " ".join(base) + (f" {extras}" if extras else "") + f"\n{grid_info}"
-                self.txt_preview.setPlainText(txt)
+            # If preview widget not ready yet, bail out quietly
+            if not hasattr(self, "txt_preview") or self.txt_preview is None:
                 return
 
-            # If we have a real context (run_dir exists), use the precise preview
-            self.txt_preview.setPlainText(self._build_command_preview(ctx))
+            geom = self.edit_geom.text().strip()
+            cell = self.edit_cell.text().strip()
+            out_base = self.edit_out_base.text().strip()
+            threads = str(self.spin_threads.value())
+
+            # Prefer the run's list file if we use one; fall back to input folder
+            lst = ""
+            if hasattr(self, "current_run") and self.current_run and getattr(self.current_run, "list_path", None):
+                lst = str(self.current_run.list_path)
+            elif hasattr(self, "selected_run_dir") and self.selected_run_dir:
+                cand = self.selected_run_dir / "input.lst"
+                lst = str(cand) if cand.exists() else self.edit_input_dir.text().strip()
+            else:
+                lst = self.edit_input_dir.text().strip()
+
+            flags = self._compose_extra_flags()
+            base = f"indexamajig -g {geom} -i {lst} -o {out_base}.stream -p {cell} -j {threads}"
+            if flags:
+                base += " " + " ".join(flags)
+
+            # Append grid summary line (if available)
+            try:
+                R = float(self.spin_max_radius.value())
+                S = float(self.spin_step.value())
+                passes = 1 if R <= 0 or S <= 0 else max(1, int(round(2 * 3.14159 * R / max(S, 1e-6))))
+                base += f" | [grid] R={R:g}px, step={S:g}px → ~{passes} passes"
+            except Exception:
+                pass
+
+            self.txt_preview.setPlainText(base)
         except Exception as e:
-            self.txt_preview.setPlainText(f"[preview error] {e}")
+            # If preview not present yet, do nothing; otherwise show error text
+            if hasattr(self, "txt_preview") and self.txt_preview:
+                self.txt_preview.setPlainText(f"[preview error] {e}")
 
     def _preflight_validate(self) -> bool:
         """Check that required paths exist and are writable; warn user if not."""
@@ -2602,7 +2643,8 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
 # =========
 
 def main():
-    os.environ["QT_QPA_PLATFORM"] = "xcb"
+    # os.environ["QT_QPA_PLATFORM"] = "xcb"
+    os.environ["QT_QPA_PLATFORM"] = "cocoa"
     app = QApplication(sys.argv)
     w = SerialEDIndexIntegrateWindow()
     w.show()
