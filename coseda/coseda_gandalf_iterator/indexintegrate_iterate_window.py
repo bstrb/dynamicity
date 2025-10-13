@@ -2643,8 +2643,8 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
 # =========
 
 def main():
-    # os.environ["QT_QPA_PLATFORM"] = "xcb"
-    os.environ["QT_QPA_PLATFORM"] = "cocoa"
+    os.environ["QT_QPA_PLATFORM"] = "xcb" #LINUX
+    # os.environ["QT_QPA_PLATFORM"] = "cocoa" #MAC
     app = QApplication(sys.argv)
     w = SerialEDIndexIntegrateWindow()
     w.show()
