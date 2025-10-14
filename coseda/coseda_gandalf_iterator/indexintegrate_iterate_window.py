@@ -15,17 +15,17 @@ from __future__ import annotations
 
 import os
 import sys
-import math
 import json
 import time
+import math
 import shutil
 import h5py
 import shlex
 import signal
 import tempfile
 import textwrap
-from configparser import ConfigParser
 import subprocess
+from configparser import ConfigParser
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -34,7 +34,6 @@ from typing import List, Optional
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer
 )
-# from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QMessageBox,
     QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout, QLabel, QLineEdit,
@@ -64,16 +63,20 @@ def gandalf_iterator(
     extra_flags=None,
 ):
     """
-    Streamed runner for indexamajig over a radial grid.
-    - Streams stdout line-by-line so the parent GUI updates immediately.
-    - Respects absolute output_file_base (GUI) or uses a subdir (CLI).
-    - Emits [XY-PASS] i/N markers so the GUI can update pass label.
+    Run CrystFEL 'indexamajig' over a filled circular grid of center shifts.
+
+    For each (dx, dy) in *pixels*:
+      1) Convert to millimeters using geometry 'res' (mm/px = 1000/res).
+      2) Apply det_shift_x_mm += dx_mm and det_shift_y_mm += dy_mm (in-place) to all HDF5s listed.
+      3) Run indexamajig to write a unique .stream for this pass.
+      4) Revert the applied shifts (subtract the same deltas), even on errors.
+
+    Emits progress lines and [XY-PASS] i/N markers for the GUI.
     """
-    import subprocess, math, time
+    import sys, subprocess, math
     from pathlib import Path
 
-    extra_flags = list(extra_flags or [])
-
+    # ---- Validate required inputs ----
     geom = Path(geomfile_path)
     cell = Path(cellfile_path)
     input_p = Path(input_path)
@@ -85,7 +88,7 @@ def gandalf_iterator(
     if not input_p.exists():
         print(f"ERROR: input path missing: {input_p}", file=sys.stderr); return 2
 
-    # ---- Resolve output directory & base name
+    # ---- Output directory & base name ----
     outbase = Path(output_file_base)
     if outbase.is_absolute():
         out_dir = outbase.parent
@@ -97,7 +100,7 @@ def gandalf_iterator(
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Resulting streamfiles will be saved in {out_dir}")
 
-    # ---- list.lst (use given list file if input_path is a file; else create under input dir)
+    # ---- Prepare list.lst (or accept provided list file) ----
     if input_p.is_file():
         list_path = input_p
         print(f"Using provided list file: {list_path}")
@@ -105,135 +108,148 @@ def gandalf_iterator(
         list_path = input_p / "list.lst"
         try:
             if not list_path.exists():
-                list_path.write_text(str(input_p.resolve()) + "\n", encoding="utf-8")
-            print(f"'list.lst' has been created with 1 entries at {list_path}")
+                exts = ("*.h5", "*.hdf5", "*.cxi")
+                hits = []
+                for ext in exts:
+                    hits.extend(sorted(input_p.glob(ext)))
+                hits = [str(p.resolve()) for p in hits]
+                list_path.write_text("\n".join(hits) + ("\n" if hits else ""), encoding="utf-8")
+                print(f"'list.lst' has been created with {len(hits)} entries at {list_path}")
+            else:
+                print(f"Using existing list file: {list_path}")
         except Exception as e:
             print(f"WARNING: could not write list.lst: {e}", file=sys.stderr)
 
-    # ---- Build grid
+    # ---- Build grid: step-lattice points inside circle, sorted radially ----
     grid_pts: list[tuple[float, float]] = []
     if max_radius <= 0 or step <= 0:
         grid_pts = [(0.0, 0.0)]
     else:
-        num_angles = max(1, int(round(2 * math.pi * max_radius / max(step, 1e-6))))
-        angles = [2 * math.pi * i / num_angles for i in range(num_angles)]
-        for ang in angles:
-            dx = round((max_radius * math.cos(ang)) / step) * step
-            dy = round((max_radius * math.sin(ang)) / step) * step
-            grid_pts.append((dx, dy))
-        if (0.0, 0.0) not in grid_pts:
+        try:
+            decimals = max(0, -int(math.floor(math.log10(step)))) if step > 0 else 6
+            decimals = min(6, decimals)
+        except Exception:
+            decimals = 6
+
+        limit = int(math.ceil(max_radius / step))
+        R2 = max_radius * max_radius
+        pts_set = set()
+        for i in range(-limit, limit + 1):
+            xi = round(i * step, decimals)
+            xi2 = xi * xi
+            if xi2 > R2 + 1e-12:
+                continue
+            for j in range(-limit, limit + 1):
+                yj = round(j * step, decimals)
+                if xi2 + yj * yj <= R2 + 1e-12:
+                    pts_set.add((xi, yj))
+
+        grid_pts = sorted(
+            pts_set,
+            key=lambda p: (p[0]*p[0] + p[1]*p[1], abs(p[0]) + abs(p[1]), p[0], p[1])
+        )
+        if (0.0, 0.0) in grid_pts:
+            grid_pts.remove((0.0, 0.0))
             grid_pts.insert(0, (0.0, 0.0))
+
     print(f"Generated {len(grid_pts)} grid points in the circle.")
 
-    # ---- indexamajig binary (optional --indexamajig-path=...)
+    # ---- Convert px→mm using geometry 'res' ----
+    try:
+        res = extract_resolution(str(geom))  # expects a line "res = <float>"
+        mm_per_pixel = 1000.0 / float(res)
+        print(f"[geom] res={res} → mm_per_pixel={mm_per_pixel}")
+    except Exception as e:
+        print(f"ERROR: failed to read 'res' from geometry: {e}", file=sys.stderr)
+        return 2
+
+    # ---- Handle optional indexamajig path flag; pass through remaining flags ----
+    extra_flags = list(extra_flags or [])
     idxamajig_bin = "indexamajig"
-    for f in list(extra_flags):
+    pruned_flags: list[str] = []
+    for f in extra_flags:
         if f.startswith("--indexamajig-path="):
             idxamajig_bin = f.split("=", 1)[1].strip() or idxamajig_bin
-            extra_flags.remove(f)
-            break
+        else:
+            pruned_flags.append(f)
+    extra_flags = pruned_flags
 
-    # ---- Run each pass (streaming)
+    # ---- Main loop: apply shift, run, revert ----
     total = len(grid_pts)
     passes_done = 0
 
-    for (dx, dy) in grid_pts:
-        print(f"Running for pixel shifts x = {dx}, y = {dy}")
-        print(f"  => Applied x shift of {dx} mm, y shift of {dy} mm")
+    for (dx_px, dy_px) in grid_pts:
+        print(f"Running for pixel shifts x = {dx_px}, y = {dy_px}")
+        # Convert pixel shifts to millimeters
+        sx_mm = float(dx_px) * mm_per_pixel
+        sy_mm = float(dy_px) * mm_per_pixel
+        print(f"  => Applying det_shift Δx={sx_mm} mm, Δy={sy_mm} mm")
 
-        stream_name = f"{out_base_name}_{dx:.3f}_{dy:.3f}.stream".replace("+", "").replace("-0.000", "0.000")
+        stream_name = (
+            f"{out_base_name}_{dx_px:.3f}_{dy_px:.3f}.stream"
+            .replace("+", "")
+            .replace("-0.000", "0.000")
+        )
         stream_path = (out_dir / stream_name).resolve()
 
-        cmd = [
-            idxamajig_bin,
-            "-g", str(geom),
-            "-i", str(list_path),
-            "-o", str(stream_path),
-            "-p", str(cell),
-            "-j", str(num_threads),
-            *extra_flags,
-        ]
-
-        # Stream stdout line-by-line
+        # 1) Apply in-place shift
         try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-        except FileNotFoundError:
-            print(f"ERROR: '{idxamajig_bin}' not found. Set it on PATH or use --indexamajig-path=...", file=sys.stderr)
-            return 2
+            perturb_det_shifts(str(list_path), sx_mm, sy_mm)
         except Exception as e:
-            print(f"ERROR: failed to launch indexamajig: {e}", file=sys.stderr)
-            return 2
-
-        # Forward output as it arrives (so GUI updates live)
-        try:
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                # Pass through exactly as produced (GUI listens for "images processed")
-                print(line.rstrip())
-        except Exception as e:
-            print(f"WARNING: error while reading indexamajig output: {e}", file=sys.stderr)
-
-        rc = proc.wait()
-        if rc != 0:
-            print(f"Error during indexamajig execution (exit {rc}).", file=sys.stderr)
-            # keep going to next pass
+            print(f"ERROR: failed to apply det_shift ({sx_mm},{sy_mm}) mm: {e}", file=sys.stderr)
+            # skip this pass and continue with the next
             continue
 
-        passes_done += 1
-        print(f"[XY-PASS] {passes_done}/{total} completed -> {stream_path}")
+        # 2) Run indexamajig and 3) Revert in finally
+        try:
+            cmd = [
+                idxamajig_bin,
+                "-g", str(geom),
+                "-i", str(list_path),
+                "-o", str(stream_path),
+                "-p", str(cell),
+                "-j", str(num_threads),
+                *extra_flags,
+            ]
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+            except FileNotFoundError:
+                print(f"ERROR: '{idxamajig_bin}' not found. Set it on PATH or use --indexamajig-path=...", file=sys.stderr)
+                return 2
+            except Exception as e:
+                print(f"ERROR: failed to launch indexamajig: {e}", file=sys.stderr)
+                return 2
+
+            try:
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    print(line.rstrip())
+            except Exception as e:
+                print(f"WARNING: error while reading indexamajig output: {e}", file=sys.stderr)
+
+            rc = proc.wait()
+            if rc != 0:
+                print(f"Error during indexamajig execution (exit {rc}).", file=sys.stderr)
+            else:
+                passes_done += 1
+                print(f"[XY-PASS] {passes_done}/{total} completed -> {stream_path}")
+
+        finally:
+            # Always revert the applied shift
+            try:
+                perturb_det_shifts(str(list_path), -sx_mm, -sy_mm)
+                print(f"  => Reverted det_shift Δx={-sx_mm} mm, Δy={-sy_mm} mm")
+            except Exception as e:
+                print(f"WARNING: failed to revert det_shift: {e}", file=sys.stderr)
 
     return 0
 
-def grid_points_in_circle(x_center, y_center, max_radius, step=0.5):
-    """
-    Generate all grid points inside a circle with the given center and maximum radius.
-    The grid is defined by the specified step size (granularity) and the coordinates are 
-    rounded to a number of decimals determined by the step size.
-    
-    Args:
-        x_center, y_center: Coordinates of the circle center.
-        max_radius: Maximum radius from the center.
-        step: Grid spacing.
-        
-    Returns:
-        A list of (x, y) tuples that lie within the circle.
-    """
-    # Determine the number of decimals for rounding based on the step size.
-    decimals = max(0, -int(math.floor(math.log10(step))))
-    
-    points = []
-    max_i = int(math.ceil(max_radius / step))
-    
-    for i in range(-max_i, max_i + 1):
-        for j in range(-max_i, max_i + 1):
-            # Compute and round the grid coordinates
-            x = round(x_center + i * step, decimals)
-            y = round(y_center + j * step, decimals)
-            # Check if the point is within the circle
-            if (x - x_center) ** 2 + (y - y_center) ** 2 <= max_radius ** 2:
-                points.append((x, y))
-    return points
-
-def generate_sorted_grid_points(max_radius, step=0.5):
-    """
-    Generate all grid points (with the given granularity) within a circle defined by max_radius,
-    round them based on the step size, and sort them in order of increasing radial distance from the center.
-    
-    Returns:
-        List of (x, y) tuples sorted from the center outward.
-    """
-    x_center, y_center = 0,0
-    points = grid_points_in_circle(x_center, y_center, max_radius, step)
-    # Sort by the squared distance from the center (no need for square roots)
-    points.sort(key=lambda pt: (pt[0] - x_center) ** 2 + (pt[1] - y_center) ** 2)
-    print(f"Generated {len(points)} grid points in the circle.")
-    return points
 
 def extract_resolution(geom_file_path: str) -> float:
     """
@@ -482,38 +498,59 @@ class RunContext:
 # ==========
 # Utilities
 # ==========
+
 def estimate_grid_points(max_radius_px: float, step_px: float) -> int:
+    """
+    Estimate EXACT number of step-lattice points (x=i*step, y=j*step)
+    satisfying x^2 + y^2 <= R^2. Matches gandalf_iterator's grid rule.
+    """
+    import math
+
     if step_px <= 0.0 or max_radius_px < 0.0:
         return 0
     if max_radius_px == 0.0:
-        return 1
-    r2 = max_radius_px * max_radius_px
-    step = step_px
-    count = 1  # origin
-    x = step
-    while x <= max_radius_px + 1e-9:
-        y_max = math.sqrt(max(0.0, r2 - x*x))
-        n_y = int(y_max // step)
-        if n_y > 0:
-            count += 4 * n_y
-        count += 2  # (±x, 0)
-        x += step
+        return 1  # origin only
+
+    try:
+        decimals = max(0, -int(math.floor(math.log10(step_px)))) if step_px > 0 else 6
+        decimals = min(6, decimals)
+    except Exception:
+        decimals = 6
+
+    limit = int(math.ceil(max_radius_px / step_px))
+    R2 = max_radius_px * max_radius_px
+    count = 0
+
+    for i in range(-limit, limit + 1):
+        x = round(i * step_px, decimals)
+        x2 = x * x
+        if x2 > R2 + 1e-12:
+            continue
+        # span allowed j for this x
+        for j in range(-limit, limit + 1):
+            y = round(j * step_px, decimals)
+            if x2 + y * y <= R2 + 1e-12:
+                count += 1
+
     return count
 
-
 def count_images_in_h5_folder(folder: Path) -> int:
+    """
+    Count images across *.h5/*.hdf5/*.cxi files by summing the first
+    dimension of /entry/data/images datasets (when at least 3-D).
+    """
     total = 0
-    for h5path in folder.glob("*.h5"):
-        try:
-            with h5py.File(h5path, "r") as h5f:
-                if "/entry/data/images" in h5f:
-                    ds = h5f["/entry/data/images"]
-                    if ds.ndim >= 3:
-                        total += int(ds.shape[0])
-        except Exception as e:
-            print(f"[warn] failed to read {h5path}: {e}")
+    for ext in ("*.h5", "*.hdf5", "*.cxi"):
+        for h5path in folder.glob(ext):
+            try:
+                with h5py.File(h5path, "r") as h5f:
+                    if "/entry/data/images" in h5f:
+                        ds = h5f["/entry/data/images"]
+                        if ds.ndim >= 3:
+                            total += int(ds.shape[0])
+            except Exception as e:
+                print(f"[warn] failed to read {h5path}: {e}")
     return total
-
 
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
@@ -542,20 +579,18 @@ def append_line(widget, text: str) -> None:
 # Main Window
 # ===========
 class SerialEDIndexIntegrateWindow(QMainWindow):
+        
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Index & Integrate (SerialED Grid)")
         self.resize(1200, 800)
-        # --- core paths/state init (must precede building panels) ---
-        # Defaults
+
+        # -------- Core paths / defaults --------
         self.run_root = Path.home() / "indexing_runs"
         self.workspace_root = self.run_root
-
-        # Ensure default run root exists
         ensure_dir(self.run_root)
 
-        ################################################
-        # --- temporary defaults for debugging ---
+        # Optional debug defaults for quick testing
         if os.getenv("DEBUG_DEFAULTS", "1") == "1":
             self.default_geom = Path("/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_001/4135627.geom")
             self.default_cell = Path("/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_001/4135627.cell")
@@ -564,59 +599,55 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
             self.default_geom = None
             self.default_cell = None
             self.default_input = None
-        # ----------------------------------------
-        ################################################
 
-        # Load user prefs (if present) to override defaults
+        # Load user prefs once (may override paths above)
         try:
-            self._load_prefs()  # may update self.run_root / self.workspace_root
+            self._load_prefs()
         except Exception:
             pass
 
-        # Keep handy references used by multiple panels
+        # -------- State (single source of truth) --------
         self.selected_run_dir: Optional[Path] = None
         self.selected_ini: Optional[Path] = None
 
         # Progress bookkeeping
         self.per_pass_images = 0
         self.seen_passes = 0
-        self.estimated_passes = 0
+        self.estimated_passes = 1
+        self.processed_images_total = 0
         self.last_seen_processed = 0
 
         # Timing / rate (EMA)
         self.run_start_time = None
-        self.ema_rate = None
+        self.ema_rate = None  # images/sec
         self.ema_alpha = 0.3
 
-        # Batch state
-        self.batch_queue = []
+        # Batch state (manual queue)
+        self.batch_queue: list[dict] = []
         self.batch_active = False
 
         # Workspace batch state
         self._ws_batch_queue: list[Path] = []
         self._ws_batch_mode = False
         self._ws_chain_on_finish = False
-        # --- end core paths/state init ---
 
-        # Process / threads
+        # Child process / runner handles
         self.proc: Optional[subprocess.Popen] = None
         self.proc_thread: Optional[ProcessOutputThread] = None
         self.proc_runner_path: Optional[Path] = None
 
-        # Widgets
+        # -------- UI skeleton --------
         self.tabs = QTabWidget()
         self.settings_tab = QWidget()
         self.start_tab = QWidget()
 
-        # Build UI
+        # Build main tabs first (these create widgets like txt_output used elsewhere)
         self._build_settings_tab()
         self._build_start_tab()
-
-        # Add main tabs first
         self.tabs.addTab(self.settings_tab, "Settings")
         self.tabs.addTab(self.start_tab, "Start")
 
-        # Now add Cell and Geom editor tabs
+        # Editors
         self.cell_tab = QWidget()
         self.geom_tab = QWidget()
         self._build_cell_tab()
@@ -624,58 +655,42 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         self.tabs.addTab(self.cell_tab, "Cell")
         self.tabs.addTab(self.geom_tab, "Geom")
 
+        # Left-side panels: Workspace + Runs
         self.splitter = QSplitter()
-
-        # Left: a container with Workspace (top) + Runs (bottom)
         self.left_container = QWidget()
         left_v = QVBoxLayout(self.left_container)
         left_v.setContentsMargins(0, 0, 0, 0)
-        # After UI is built and workspace tree is populated, auto-pick first INI/newest run
-        QTimer.singleShot(0, self._workspace_autoload_latest_on_startup)
-        self.setCentralWidget(self.splitter)
 
-
-
-        # Workspace panel (new)
+        # Workspace panel
         self.workspace_panel = QWidget()
         self._build_workspace_panel()
         left_v.addWidget(self.workspace_panel, 2)
 
-        # Existing Runs panel
+        # Runs panel
         self.runs_panel = QWidget()
         self._build_runs_panel()
         left_v.addWidget(self.runs_panel, 3)
 
+        # Assemble splitter and set as central widget (once)
         self.splitter.addWidget(self.left_container)
         self.splitter.addWidget(self.tabs)
-
-
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self.setCentralWidget(self.splitter)
+
+        # Ensure current paths visible in UI (and preview built)
+        # _build_workspace_panel() already populated the tree; refresh once more just in case.
+        try:
+            self._refresh_workspace_tree()
+        except Exception:
+            pass
+
+        # Kick initial previews after the event loop starts
         QTimer.singleShot(0, lambda: self._update_command_preview(None))
 
-        # State
-        self.run_root = Path.cwd() / "runs"
-        ensure_dir(self.run_root)
-        self._load_prefs()
-        self._refresh_workspace_tree()
-        self.current_run: Optional[RunContext] = None
+        # After workspace tree exists, try autoloading first INI's latest run
+        QTimer.singleShot(0, self._workspace_autoload_latest_on_startup)
 
-        # Progress bookkeeping
-        self.per_pass_images = 0
-        self.estimated_passes = 1
-        self.processed_images_total = 0
-        self.last_seen_processed = 0
-        self.seen_passes = 0
-        # Timing / rate (EMA)
-        self.run_start_time = None
-        self.ema_rate = None   # images/sec
-        self.ema_alpha = 0.3
-
-        # Batch state
-        self.batch_queue = []
-        self.batch_active = False
 
     def _build_workspace_panel(self):
         """Workspace section: choose a workspace root, show INIs and their runs, batch/create actions."""
@@ -1991,43 +2006,45 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
             append_line(self.txt_output, f"[warn] failed to save settings: {e}")
 
     def _build_command_preview(self, ctx: RunContext) -> str:
-        # Preview the base indexamajig call and grid info;
-        # The actual multi-pass orchestration happens inside gandalf_iterator.
-        base = [
-            "indexamajig",
-            "-g", str(ctx.geom_path),
-            "-i", str(ctx.list_path),  # inside run_dir
-            "-o", f"{ctx.out_base}.stream",
-            "-p", str(ctx.cell_path),
-            "-j", str(ctx.threads),
-        ]
-        # Join extra flags for display only (don’t re-escape)
-        extras = " ".join(ctx.extra_flags)
-        return (
-            " ".join(base) + (f" {extras}" if extras else "") +
-            f"\n[grid] R={ctx.max_radius:g}px, step={ctx.step:g}px → ~{ctx.estimated_passes} passes"
+        flags = self._compose_extra_flags()
+        base = (
+            f"indexamajig -g {ctx.geom_path} -i {ctx.list_path} "
+            f"-o {(ctx.run_dir / 'streams' / ctx.out_base)}.stream "
+            f"-p {ctx.cell_path} -j {ctx.threads}"
         )
-        
+        if flags:
+            base += " " + " ".join(flags)
+        passes = estimate_grid_points(ctx.max_radius, ctx.step)
+        base += f" | [grid] R={ctx.max_radius:g}px, step={ctx.step:g}px → {passes} passes"
+        return base
+
     def _update_command_preview(self, _evt):
         """
-        Rebuild the command preview. Early during __init__, the Start tab (and txt_preview)
-        may not be built yet; in that case, just return silently.
+        Rebuild the command preview so it matches the filled step-lattice circle used
+        by gandalf_iterator and estimate_grid_points. If a RunContext exists, show
+        the precise per-run preview (streams path + exact pass count).
         """
         try:
-            # If preview widget not ready yet, bail out quietly
             if not hasattr(self, "txt_preview") or self.txt_preview is None:
                 return
 
+            # If we have an active RunContext, show the precise command + grid info.
+            if getattr(self, "current_run", None):
+                try:
+                    self.txt_preview.setPlainText(self._build_command_preview(self.current_run))
+                    return
+                except Exception as e:
+                    self.txt_preview.setPlainText(f"[preview error] {e}")
+                    return
+
+            # Fallback simplified preview (no RunContext yet)
             geom = self.edit_geom.text().strip()
             cell = self.edit_cell.text().strip()
             out_base = self.edit_out_base.text().strip()
             threads = str(self.spin_threads.value())
 
-            # Prefer the run's list file if we use one; fall back to input folder
-            lst = ""
-            if hasattr(self, "current_run") and self.current_run and getattr(self.current_run, "list_path", None):
-                lst = str(self.current_run.list_path)
-            elif hasattr(self, "selected_run_dir") and self.selected_run_dir:
+            # Prefer run's list file if available; else input folder path as entered
+            if getattr(self, "selected_run_dir", None):
                 cand = self.selected_run_dir / "input.lst"
                 lst = str(cand) if cand.exists() else self.edit_input_dir.text().strip()
             else:
@@ -2038,20 +2055,20 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
             if flags:
                 base += " " + " ".join(flags)
 
-            # Append grid summary line (if available)
+            # Exact grid count for step-lattice points within the circle
             try:
                 R = float(self.spin_max_radius.value())
                 S = float(self.spin_step.value())
-                passes = 1 if R <= 0 or S <= 0 else max(1, int(round(2 * 3.14159 * R / max(S, 1e-6))))
-                base += f" | [grid] R={R:g}px, step={S:g}px → ~{passes} passes"
+                passes = estimate_grid_points(R, S)
+                base += f" | [grid] R={R:g}px, step={S:g}px → {passes} passes"
             except Exception:
                 pass
 
             self.txt_preview.setPlainText(base)
         except Exception as e:
-            # If preview not present yet, do nothing; otherwise show error text
             if hasattr(self, "txt_preview") and self.txt_preview:
                 self.txt_preview.setPlainText(f"[preview error] {e}")
+
 
     def _preflight_validate(self) -> bool:
         """Check that required paths exist and are writable; warn user if not."""
@@ -2272,18 +2289,21 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
     # ======================
     # Create list and count
     # ======================
+
     def _write_input_list(self, in_dir: Path, list_path: Path) -> int:
         """
         Writes an indexamajig-style input list with absolute HDF5 paths.
         Returns total image count for progress scaling.
         """
         lines: List[str] = []
-        for h5path in sorted(in_dir.glob("*.h5")):
-            lines.append(str(h5path.resolve()))
+        for ext in ("*.h5", "*.hdf5", "*.cxi"):
+            for h5path in sorted(in_dir.glob(ext)):
+                lines.append(str(h5path.resolve()))
         write_text(list_path, "\n".join(lines) + ("\n" if lines else ""))
         total = count_images_in_h5_folder(in_dir)
-        append_line(self.txt_output, f"[scan] detected {total} images across {len(lines)} .h5 files")
+        append_line(self.txt_output, f"[scan] detected {total} images across {len(lines)} files")
         return total
+
 
     # ==============
     # Runner launch
@@ -2404,29 +2424,45 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
     # =====================
     # Process output hooks
     # =====================
-    
+
     def _on_proc_line(self, text: str):
-        # Mirror to UI
-        append_line(self.txt_output, text.rstrip("\n"))
-        # Mirror to run log
+        line = text.rstrip("\n")
+
+        # --- Selective mirroring to GUI log ---
+        should_show = True
+        if not getattr(self, "_mirror_stdout", True):
+            should_show = False
+        elif getattr(self, "_mirror_only_progress", True):
+            low = line.lower()
+            # Show progress lines AND anything that looks like an error/failure
+            should_show = (
+                ("images processed" in low)
+                or ("error" in low)
+                or ("failed" in low)
+                or ("fatal" in low)
+                or low.startswith("[xy-pass]")
+            )
+
+        if should_show:
+            append_line(self.txt_output, line)
+
+        # --- Always write complete raw output to log file ---
         try:
             self.run_log_fp.write(text)
             self.run_log_fp.flush()
         except Exception:
             pass
 
-        # Progress parsing: look for "<N> images processed"
+        # --- Progress parsing ---
         n = self._parse_images_processed(text)
         if n is not None:
-            # handle pass reset
             if n < self.last_seen_processed:
                 self.seen_passes += 1
             self.last_seen_processed = n
-            # absolute progress across passes
             total_so_far = self.seen_passes * self.per_pass_images + n
             self.progress.setValue(max(self.progress.value(), total_so_far))
 
-        # Optional explicit pass marker: "[XY-PASS] i/N ..."
+        # --- Pass label updates ---
         if text.startswith("[XY-PASS]"):
             parts = text.split()
             try:
@@ -2434,30 +2470,48 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
                 i, N = frac.split("/")
                 self.seen_passes = max(self.seen_passes, int(i) - 1)
                 self.estimated_passes = max(self.estimated_passes, int(N))
-                self._reset_progress_bar()
+                # Expand max without dropping current progress
+                old_val = self.progress.value()
+                new_max = max(1, self.estimated_passes * max(1, self.per_pass_images))
+                self.progress.setMaximum(new_max)
+                self.progress.setValue(min(old_val, new_max))
             except Exception:
                 pass
-        # Update pass label (best effort)
-        self.lbl_pass.setText(f"Pass: {min(self.seen_passes+1, max(1,self.estimated_passes))}/{max(1,self.estimated_passes)}")
 
-        # --- Rate / ETA estimation ---
+        self.lbl_pass.setText(
+            f"Pass: {min(self.seen_passes + 1, max(1, self.estimated_passes))}/{max(1, self.estimated_passes)}"
+        )
+
+        # --- Rate / ETA ---
         now = time.time()
         if self.run_start_time:
-            # try parse "... images/sec"
             rate_in_line = self._parse_images_per_sec(text)
             cur = self.progress.value()
             if rate_in_line and rate_in_line > 0:
-                self.ema_rate = (self.ema_alpha * rate_in_line +
-                                (1 - self.ema_alpha) * (self.ema_rate or rate_in_line))
+                self.ema_rate = (
+                    self.ema_alpha * rate_in_line +
+                    (1 - self.ema_alpha) * (self.ema_rate or rate_in_line)
+                )
             else:
-                # derive from elapsed
                 elapsed = max(1e-3, now - self.run_start_time)
                 derived = cur / elapsed
                 if derived > 0:
-                    self.ema_rate = (self.ema_alpha * derived +
-                                    (1 - self.ema_alpha) * (self.ema_rate or derived))
-            # UI labels
+                    self.ema_rate = (
+                        self.ema_alpha * derived +
+                        (1 - self.ema_alpha) * (self.ema_rate or derived)
+                    )
             self._update_time_labels(now, cur)
+
+
+    def _on_toggle_mirror(self, checked: bool):
+        self._mirror_stdout = bool(checked)
+        try:
+            self.mirror_progress_only_chk.setEnabled(bool(checked))
+        except Exception:
+            pass
+
+    def _on_toggle_mirror_only_progress(self, checked: bool):
+        self._mirror_only_progress = bool(checked)
 
 
     def _parse_images_processed(self, line: str) -> Optional[int]:
@@ -2563,6 +2617,11 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         # Batch continuation
         if self.batch_active:
             QTimer.singleShot(150, self._batch_next)
+        if getattr(self, "_ws_chain_on_finish", False):
+            self._ws_chain_on_finish = False
+            if getattr(self, "_ws_batch_mode", False):
+                QTimer.singleShot(200, self._ws_start_next_in_batch)
+
 
     # =========
     # Cleanup
@@ -2582,14 +2641,19 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
                 if self.proc.poll() is None:
                     self.proc.terminate()
             else:
-                # POSIX: kill the whole group
-                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
-                self.proc.wait(timeout=2)
+                # POSIX: try graceful group kill, then hard-kill
+                pgid = os.getpgid(self.proc.pid)
+                os.killpg(pgid, signal.SIGTERM)
+                try:
+                    self.proc.wait(timeout=2)
+                except Exception:
+                    os.killpg(pgid, signal.SIGKILL)
         except Exception:
             try:
                 self.proc.terminate()
             except Exception:
                 pass
+
 
     def _prefs_path(self) -> Path:
         return Path.home() / ".indexintegrate_iterate_window.json"
