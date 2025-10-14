@@ -17,7 +17,7 @@ import os
 import sys
 import json
 import time
-import math
+# import math
 import shutil
 import h5py
 import shlex
@@ -49,7 +49,7 @@ from PyQt6.QtWidgets import (
 # output_file_base, num_threads, max_radius, step, extra_flags=None)`.
 # It should run multiple indexamajig passes (one per (x,y) shift), print progress
 # lines to stdout, and return 0 on success.
-#
+
 # --- VENDORED GANDALF ITERATOR BEGIN ---
 
 def gandalf_iterator(
@@ -369,7 +369,7 @@ def list_h5_files(input_path):
     
     return listfile_path
 
-# --- VENDORED GANDALF ITERATOR END ---
+# # --- VENDORED GANDALF ITERATOR END ---
 
 # =====================
 # Process output reader
@@ -578,6 +578,7 @@ def append_line(widget, text: str) -> None:
 # ===========
 # Main Window
 # ===========
+
 class SerialEDIndexIntegrateWindow(QMainWindow):
         
     def __init__(self, parent=None):
