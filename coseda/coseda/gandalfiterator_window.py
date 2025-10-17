@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-IndexIntegrate (SerialED Grid) – COSEDA-style window
+IndexIntegrate (Iterative Indexing Grid with wRMSD Selection) – COSEDA-style window
 Part 1: Core window, UI (Settings/Start), runner, progress, run dir, flags surface.
 - PyQt6 single-file app
 - Self-importing runner with parse_known_args (passes unknown --flags through)
-- SerialED grid controls (max radius, step)
+- Iterative Indexing Grid with wRMSD Selection controls (max radius, step)
 - Peakfinder/Advanced/Other flags surface
 - HDF5 image counting (/entry/data/images)
 - Start/Stop with process-group kill and live log
@@ -69,6 +69,21 @@ except Exception:
 # Re-export so GANDALF_RUNNER_CODE can `getattr(mod, "gandalf_iterator")`
 gandalf_iterator = _gandalf_iterator
 
+# ==========
+# Utilities
+# ==========
+
+from gi_util import (
+    estimate_grid_points, count_images_in_h5_folder, ensure_dir,
+    timestamp_run_dir, write_text, append_line
+)
+
+# =========================
+# Self-importing runner src
+# =========================
+
+from gandalf_runner import GANDALF_RUNNER_CODE
+
 # =====================
 # Process output reader
 # =====================
@@ -83,20 +98,84 @@ class ProcessOutputThread(QThread):
 
     def run(self):
         try:
-            for line in iter(self.process.stdout.readline, b''):
-                try:
-                    self.output_received.emit(line.decode("utf-8", errors="replace"))
-                except Exception:
-                    self.output_received.emit(str(line))
+            stdout = self.process.stdout
+            if stdout is None:
+                # Nothing to read (shouldn't happen with PIPE, but be safe)
+                rc = self.process.wait()
+                self.finished.emit(int(rc))
+                return
+
+            # In text mode: readline returns "" on EOF
+            for line in iter(stdout.readline, ""):
+                # Pass lines through as-is (including newline)
+                self.output_received.emit(line)
+        except Exception as e:
+            # Optional: surface reader errors to the log
+            try:
+                self.output_received.emit(f"[reader] {e}\n")
+            except Exception:
+                pass
         finally:
             rc = self.process.wait()
             self.finished.emit(int(rc))
 
-# =========================
-# Self-importing runner src
-# =========================
 
-from gandalf_runner import GANDALF_RUNNER_CODE
+# --- Put near ProcessOutputThread ---
+class WRMSDWorker(QThread):
+    progress = pyqtSignal(int, int)     # cur, total
+    status   = pyqtSignal(str)
+    log      = pyqtSignal(str)
+    done     = pyqtSignal(object)       # exc or None
+
+    def __init__(self, streams_dir: Path):
+        super().__init__()
+        self.streams_dir = streams_dir
+
+    def run(self):
+        try:
+            from lowest_wrmsd import stage_calc, stage_select, stage_write
+            import lowest_wrmsd as _lw
+
+            # tqdm shim -> emit signals
+            class _GuiTqdm:
+                def __call__(self, total=None, desc=None, unit=None, dynamic_ncols=None):
+                    self.total = int(total or 0)
+                    self.cur = 0
+                    self.status.emit(f"{desc or ''}")
+                    self.progress.emit(0, self.total)
+                    return self
+                def update(self, n=1):
+                    self.cur += int(n)
+                    self.progress.emit(self.cur, self.total)
+                def close(self): pass
+
+            shim = _GuiTqdm()
+            # Bind shim methods to instance signals
+            shim.progress = self.progress
+            shim.status = self.status
+
+            prev = getattr(_lw, "tqdm", None)
+            _lw.tqdm = shim
+            try:
+                metrics_dir  = self.streams_dir / "metrics"
+                winners_path = self.streams_dir / "winners.jsonl.gz"
+
+                stage_calc(streams_dir=self.streams_dir, metrics_dir=metrics_dir,
+                           workers=0, match_radius=4.0, outlier_sigma=2.0,
+                           min_peaks=1, min_reflections=1, resume=True, precount=True)
+                self.log.emit("[wRMSD] calc done")
+
+                stage_select(metrics_dir=metrics_dir, winners_path=winners_path)
+                self.log.emit("[wRMSD] select done")
+
+                stage_write(streams_dir=self.streams_dir, winners_path=winners_path,
+                            out_path=None, write_workers=0)
+                self.log.emit("[wRMSD] write done (merged stream in lowest_wrmsd/)")
+                self.done.emit(None)
+            finally:
+                _lw.tqdm = prev
+        except Exception as e:
+            self.done.emit(e)
 
 # ---- Peakfinder presets (module-level) ----
 default_peakfinder_options = {
@@ -138,16 +217,6 @@ class RunContext:
     total_images: int = 0
     estimated_passes: int = 1
 
-
-# ==========
-# Utilities
-# ==========
-
-from gi_util import (
-    estimate_grid_points, count_images_in_h5_folder, ensure_dir,
-    timestamp_run_dir, write_text, append_line
-)
-
 # ===========
 # Main Window
 # ===========
@@ -156,7 +225,7 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Index & Integrate (SerialED Grid)")
+        self.setWindowTitle("Index & Integrate (Iterative Indexing Grid with wRMSD Selection)")
         self.resize(1200, 800)
 
         # -------- Core paths / defaults --------
@@ -362,18 +431,19 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
 
     def _run_wrmsd_selection(self):
         """
-        Run lowest-wRMSD (calc -> select -> write) and mirror its progress into the GUI:
-        - A dedicated wRMSD progress bar below the indexing bar
-        - Lines that lowest_wrmsd writes to stderr appear in the output pane
+        Threaded wRMSD (calc → select → write).
+        Uses WRMSDWorker (QThread) to keep the UI responsive.
+        Expects WRMSDWorker(streams_dir: Path) with signals:
+            progress(int,int), status(str), log(str), done(object)
         """
+        # --- verify we can import the module before launching ---
         try:
-            from lowest_wrmsd import stage_calc, stage_select, stage_write
-            import lowest_wrmsd as _lw
+            import lowest_wrmsd as _lw  # noqa: F401
         except Exception as e:
             QMessageBox.critical(self, "wRMSD", f"Could not import lowest_wrmsd: {e}")
             return
 
-        # Detect streams dir (support: direct streams folder OR run folder with streams/)
+        # --- detect streams dir (prefer active run; fall back to last_out_dir) ---
         try:
             candidate = getattr(self, "last_out_dir", None)
             if candidate:
@@ -388,19 +458,15 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
                 return
 
             streams_dir = self._detect_streams_dir_from(Path(candidate)) or Path(candidate)
-            if not streams_dir.exists() or not any(streams_dir.glob("*.stream")):
+            if (not streams_dir.exists()) or (not any(streams_dir.glob("*.stream"))):
                 QMessageBox.warning(self, "No streams found",
                                     f"No .stream files in:\n{candidate}")
                 return
-
-            metrics_dir = streams_dir / "metrics"
-            winners_path = streams_dir / "winners.jsonl.gz"
         except Exception as e:
             QMessageBox.critical(self, "wRMSD", str(e))
             return
 
-
-        # --- Hook up a tqdm shim that talks to the two new widgets ---
+        # --- helpers to drive the progress/ETA UI (same behavior as before) ---
         def _set_total(total):
             try:
                 self.wrmsd_progress.setMaximum(max(1, int(total)))
@@ -420,7 +486,7 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
                 cur = max(0, min(int(cur), total))
                 self.wrmsd_progress.setMaximum(total)
                 self.wrmsd_progress.setValue(cur)
-                self.wrmsd_status.setText(f"wRMSD: {cur}/{total}")
+                self.wrmsd_status.setText(f"wRMSD : {cur}/{total}")
 
                 # timing/ETA
                 if self.wrmsd_start_time:
@@ -434,11 +500,18 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
                             a = getattr(self, "wrmsd_alpha", 0.3)
                             self.wrmsd_ema_rate = a * inst_rate + (1 - a) * self.wrmsd_ema_rate
 
-                    self.wrmsd_lbl_elapsed.setText(f"Elapsed: {self._fmt_hms(int(elapsed))}")
+                    # labels
+                    def _fmt_hms(seconds: int) -> str:
+                        h = seconds // 3600
+                        m = (seconds % 3600) // 60
+                        s = seconds % 60
+                        return f"{h:02d}:{m:02d}:{s:02d}"
+
+                    self.wrmsd_lbl_elapsed.setText(f"Elapsed: {_fmt_hms(int(elapsed))}")
                     if self.wrmsd_ema_rate and self.wrmsd_ema_rate > 0:
                         remaining = max(0, total - cur)
                         eta_sec = int(remaining / self.wrmsd_ema_rate)
-                        self.wrmsd_lbl_eta.setText(f"ETA: {self._fmt_hms(eta_sec)}")
+                        self.wrmsd_lbl_eta.setText(f"ETA: {_fmt_hms(eta_sec)}")
                         self.wrmsd_lbl_rate.setText(f"Rate: {self.wrmsd_ema_rate:.2f} chunks/s")
                     else:
                         self.wrmsd_lbl_eta.setText("ETA: --:--:--")
@@ -448,67 +521,14 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
 
         def _set_desc(text):
             try:
-                self.wrmsd_status.setText(f"wRMSD: {text}")
+                self.wrmsd_status.setText(f"wRMSD calculation: {text}")
             except Exception:
                 pass
 
-        
-    # ----- tqdm shim to surface progress into the PyQt UI -----
-        class _GuiTqdm:
-            def __init__(self, *, set_total, update_val, set_desc):
-                self._total = 0
-                self._cur = 0
-                self._set_total = set_total
-                self._update_val = update_val
-                self._set_desc = set_desc
-
-            def __call__(self, total=None, desc=None, unit=None, dynamic_ncols=None):
-                # Support tqdm(...) call style used by lowest_wrmsd
-                if total is None:
-                    total = 0
-                self._total = int(total)
-                self._cur = 0
-                self._set_total(self._total)
-                if desc:
-                    self._set_desc(str(desc))
-                return self
-
-            def update(self, n=1):
-                self._cur += int(n)
-                self._update_val(self._cur, self._total)
-
-            def close(self):
-                pass
-            
-        gui_tqdm = _GuiTqdm(set_total=_set_total, update_val=_update_val, set_desc=_set_desc)
-
-        # Monkeypatch the module-level 'tqdm' symbol that lowest_wrmsd uses.
-        # lowest_wrmsd does: "from tqdm import tqdm" then stores it in the module var 'tqdm'.
-        # We replace that symbol with our shim; stage_calc/write will use it.
-        _prev_tqdm = getattr(_lw, "tqdm", None)
-        _lw.tqdm = gui_tqdm
-
-        class _StderrToGui(stdio.TextIOBase):
-            def __init__(self, append_fn):
-                self._append_fn = append_fn
-
-            def write(self, s):
-                s = str(s)
-                if s.strip():
-                    self._append_fn(s.rstrip("\n"))
-                return len(s)
-
-            def flush(self):
-                pass
-
-        old_stderr = sys.stderr
-        sys.stderr = _StderrToGui(lambda msg: append_line(self.txt_output, msg))
-
-
-        # UI: reset widgets
+        # --- reset UI prior to launch ---
         self.wrmsd_progress.setMaximum(100)
         self.wrmsd_progress.setValue(0)
-        self.wrmsd_status.setText("wRMSD: starting…")
+        self.wrmsd_status.setText("wRMSD calculation: starting…")
         append_line(self.txt_output, f"[wRMSD] Starting selection in: {streams_dir}")
 
         self.wrmsd_lbl_elapsed.setText("Elapsed: 00:00:00")
@@ -517,48 +537,72 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         self.wrmsd_start_time = time.time()
         self.wrmsd_ema_rate = None
 
+        # Give the progress bar its initial total once we know it
+        _set_total(0)
 
+        # Disable the button while running (optional)
         try:
-            # Stage 1: calc (shows "Calculating wRMSD" progress via our shim)
-            stage_calc(
-                streams_dir=streams_dir,
-                metrics_dir=metrics_dir,
-                workers=0,          # 0 = auto
-                match_radius=4.0,
-                outlier_sigma=2.0,
-                min_peaks=1,
-                min_reflections=1,
-                resume=True,        # skip already-done files on re-run
-                precount=True       # enables ETA-sized totals
-            )
-            append_line(self.txt_output, "[wRMSD] calc done")
+            if hasattr(self, "btn_wrmsd"):
+                self.btn_wrmsd.setEnabled(False)
+        except Exception:
+            pass
 
-            # Stage 2: select (no tqdm, but prints summary to stderr -> GUI)
-            stage_select(
-                metrics_dir=metrics_dir,
-                winners_path=winners_path
-            )
-            append_line(self.txt_output, "[wRMSD] select done")
+        # --- create and keep a strong reference to the worker so it won't be GC'd ---
+        try:
+            self._wrmsd_worker = WRMSDWorker(streams_dir)  # type: ignore[name-defined]
+        except NameError:
+            QMessageBox.critical(self, "wRMSD", "WRMSDWorker class is not defined. Paste it into the module first.")
+            return
 
-            # Stage 3: write (shows "Writing winners" progress via our shim)
-            stage_write(
-                streams_dir=streams_dir,
-                winners_path=winners_path,
-                out_path=None,      # None => streams_dir/lowest_wrmsd/<prefix>.stream
-                write_workers=0
-            )
-            append_line(self.txt_output, "[wRMSD] write done (merged stream in lowest_wrmsd/)")
-            QMessageBox.information(self, "wRMSD selection",
-                                    "Finished selecting & merging lowest-wRMSD chunks.")
-        except Exception as e:
-            QMessageBox.critical(self, "wRMSD selection failed", str(e))
-        finally:
-            # restore stderr and tqdm
-            sys.stderr = old_stderr
-            _lw.tqdm = _prev_tqdm
-            # mark finished
-            self.wrmsd_status.setText("wRMSD: done")
+        worker = self._wrmsd_worker
 
+        # --- signal wiring ---
+        def _on_progress(cur: int, total: int):
+            # First time we see total>0, initialize the bar properly
+            if self.wrmsd_progress.maximum() in (0, 100) and total > 0:
+                _set_total(total)
+            _update_val(cur, total)
+
+        def _on_status(s: str):
+            _set_desc(s)
+
+        def _on_log(msg: str):
+            append_line(self.txt_output, msg)
+
+        def _on_done(exc):
+            # Re-enable the button
+            try:
+                if hasattr(self, "btn_wrmsd"):
+                    self.btn_wrmsd.setEnabled(True)
+            except Exception:
+                pass
+
+            if exc:
+                QMessageBox.critical(self, "wRMSD selection failed", str(exc))
+            else:
+                append_line(self.txt_output, "[wRMSD] completed successfully")
+                QMessageBox.information(self, "wRMSD selection",
+                                        "Finished selecting & merging lowest-wRMSD chunks.")
+
+            self.wrmsd_status.setText("wRMSD calculation: done")
+            # Reset timers
+            self.wrmsd_start_time = None
+            self.wrmsd_ema_rate = None
+            # Refresh streams (merged output lives under streams/lowest_wrmsd/)
+            try:
+                self._refresh_streams_list()
+            except Exception:
+                pass
+            # Drop reference so thread can be GC'd
+            self._wrmsd_worker = None
+
+        worker.progress.connect(_on_progress)
+        worker.status.connect(_on_status)
+        worker.log.connect(_on_log)
+        worker.done.connect(_on_done)
+
+        # --- launch thread ---
+        worker.start()
 
     def _ws_broadcast_settings_to_runs(self):
         ini = getattr(self, "selected_ini", None)
@@ -981,7 +1025,7 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         self.spin_threads.setValue(max(1, os.cpu_count() or 8))
         idx_form.addRow("Threads:", self.spin_threads)
 
-        grid_title = QLabel("SerialED Grid")
+        grid_title = QLabel("Iterative Indexing Grid with wRMSD Selection")
         grid_title.setStyleSheet("font-weight:600;")
         idx_form.addRow(grid_title)
 
@@ -1092,7 +1136,7 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
 
         # Top row: run controls
         btns = QHBoxLayout()
-        self.btn_start_grid = QPushButton("Start SerialED Grid")
+        self.btn_start_grid = QPushButton("Start Iterative Indexing Grid with wRMSD Selection")
         self.btn_start_grid.clicked.connect(self._start_grid_clicked)
         self.btn_stop = QPushButton("Stop")
         self.btn_stop.clicked.connect(self._stop_clicked)
@@ -1139,7 +1183,7 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         self.wrmsd_progress.setValue(0)
         outer.addWidget(self.wrmsd_progress)
 
-        self.wrmsd_status = QLabel("wRMSD: idle")
+        self.wrmsd_status = QLabel("wRMSD calculation: idle")
         outer.addWidget(self.wrmsd_status)
 
         row_wr = QHBoxLayout()
@@ -2207,7 +2251,7 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
     # ==============
     # Runner launch
     # ==============
-        
+    
     def _launch_runner(self, ctx: RunContext):
         # Write a temp runner
         fd, runner_path = tempfile.mkstemp(prefix="run_gandalf_", suffix=".py")
@@ -2244,31 +2288,36 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         self.run_log_path = ctx.run_dir / "indexing.log"
         self.run_log_fp = open(self.run_log_path, "w", encoding="utf-8")
 
-        # Platform-specific spawn flags
+        # --- Prepare environment for subprocess (define BEFORE popen_kwargs) ---
+        env = os.environ.copy()
+        idxmj = self.edit_idxmj.text().strip()
+        if idxmj:
+            ip = Path(idxmj)
+            # If user pointed to the executable, use its parent; if a dir, use it directly
+            idx_dir = ip.parent if ip.suffix else ip
+            env["PATH"] = str(idx_dir) + os.pathsep + env.get("PATH", "")
+
+        # --- Platform-specific spawn flags & pipe setup ---
         popen_kwargs = dict(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             bufsize=1,
+            text=True,        # text mode so readline() returns str
+            encoding="utf-8",
+            errors="replace",
+            env=env,
         )
+
         if os.name == "nt":
-            # Create a new process group for safe CTRL_BREAK
+            # New process group so we can signal it cleanly (CTRL_BREAK)
             try:
                 popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
             except Exception:
                 pass
         else:
-            popen_kwargs["preexec_fn"] = os.setsid  # new process group (POSIX)
-
-        # --- begin env patch for indexamajig path ---
-        env = os.environ.copy()
-        idxmj = self.edit_idxmj.text().strip()
-        if idxmj:
-            idx_path = Path(idxmj)
-            idx_dir = str(idx_path.parent) if idx_path.suffix else str(Path(idxmj))
-            # Prepend the directory to PATH so the child can find indexamajig
-            env["PATH"] = idx_dir + os.pathsep + env.get("PATH", "")
-        popen_kwargs["env"] = env
-        # --- end env patch ---
+            # New process group on POSIX + avoid FD leaks
+            popen_kwargs["preexec_fn"] = os.setsid
+            popen_kwargs["close_fds"] = True
 
         # Spawn
         try:
@@ -2299,20 +2348,21 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
                 getattr(self, "btn_batch_add", None),
                 getattr(self, "btn_batch_clear", None),
                 getattr(self, "btn_batch_start", None)):
-            if b: b.setEnabled(False)
+            if b:
+                b.setEnabled(False)
 
         self.lbl_status.setText("Running…")
         self._reset_progress_bar()
         self._refresh_streams_list()
 
-
-        # Timing start
+        # Timing start (for rate/ETA)
         self.run_start_time = time.time()
         self.ema_rate = None
         self.lbl_elapsed.setText("Elapsed: 00:00:00")
         self.lbl_eta.setText("ETA: --:--:--")
         self.lbl_rate.setText("Rate: -- img/s")
 
+ 
 
     def _reset_progress_bar(self):
         # Scale 0..(passes*per_pass)
@@ -2490,7 +2540,7 @@ class SerialEDIndexIntegrateWindow(QMainWindow):
         return f"{h:02d}:{m:02d}:{s:02d}"
 
     def _set_window_title_for_run(self, run_dir: Optional[Path]):
-        base = "Index & Integrate (SerialED Grid)"
+        base = "Index & Integrate (Iterative Indexing Grid with wRMSD Selection)"
         if run_dir:
             self.setWindowTitle(f"{base} — {run_dir.name}")
         else:
@@ -2631,6 +2681,7 @@ class GandalfIteratorWindow(SerialEDIndexIntegrateWindow):
     def on_mainwindow_ini_changed(self, ini_path: str):
         self.ini_file_path = ini_path
         # TODO: update internal widgets or reload content here
+
 
 def main():
     os.environ["QT_QPA_PLATFORM"] = "xcb" #LINUX
