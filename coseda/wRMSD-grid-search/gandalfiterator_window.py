@@ -1,2695 +1,400 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-IndexIntegrate (Iterative Indexing Grid with wRMSD Selection) – COSEDA-style window
-Part 1: Core window, UI (Settings/Start), runner, progress, run dir, flags surface.
-- PyQt6 single-file app
-- Self-importing runner with parse_known_args (passes unknown --flags through)
-- Iterative Indexing Grid with wRMSD Selection controls (max radius, step)
-- Peakfinder/Advanced/Other flags surface
-- HDF5 image counting (/entry/data/images)
-- Start/Stop with process-group kill and live log
-- Per-run folder with input.lst and indexing.log
-"""
-from __future__ import annotations
+gandalfiterator_window.py (adaptive, lean GUI) — PyQt6 version
 
-import builtins
-import io as stdio
+A lightweight PyQt6 GUI for the Adaptive Center-Shift Optimization pipeline:
+- Choose run root, .geom, .cell, and HDF5 files/directories
+- Set adaptive knobs (R_px, s_init_px, K_dir, ...)
+- Enter arbitrary indexamajig flags (verbatim pass-through, e.g. "-j 32 --peaks peaks.conf")
+- Start the run in a background thread
+- Live tail the run_root/log.jsonl and display status
+- Show final merged stream path
+
+Dependencies: PyQt6 (pip install pyqt6)
+
+Integrates with:
+- gandalfiterator.Params, gandalf_adaptive
+"""
+
+from __future__ import annotations
 import os
 import sys
 import json
-import time
-import shutil
 import shlex
-import signal
-import tempfile
-import textwrap
-import subprocess
-from configparser import ConfigParser
-from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
+import time
 from typing import List, Optional
 
-from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QTimer
-)
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QFileDialog, QMessageBox,
-    QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout, QLabel, QLineEdit,
-    QPlainTextEdit, QPushButton, QSpinBox, QDoubleSpinBox, QSplitter, QListWidgetItem,
-    QGroupBox, QTabWidget, QProgressBar, QComboBox, QTextEdit, QScrollArea, QCheckBox
-)
+from PyQt6 import QtCore, QtGui, QtWidgets
 
-from scipy import io
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# wRMSD selection pipeline
-from lowest_wrmsd import stage_calc, stage_select, stage_write
-
-# --- Make `gandalf_iterator` visible in THIS module for the runner ---
-try:
-    # If installed as a package/module
-    from gandalfiterator import gandalf_iterator as _gandalf_iterator
-except Exception:
-    # Fallback: same folder as this file
-    import importlib.util, sys
-    from pathlib import Path
-    _gi_path = Path(__file__).with_name("gandalfiterator.py")
-    if not _gi_path.exists():
-        raise ImportError(f"Cannot locate gandalfiterator.py next to {__file__}")
-    _spec = importlib.util.spec_from_file_location("gandalfiterator", str(_gi_path))
-    _mod = importlib.util.module_from_spec(_spec)
-    sys.modules["gandalfiterator"] = _mod
-    assert _spec.loader is not None
-    _spec.loader.exec_module(_mod)
-    _gandalf_iterator = _mod.gandalf_iterator
-
-# Re-export so GANDALF_RUNNER_CODE can `getattr(mod, "gandalf_iterator")`
-gandalf_iterator = _gandalf_iterator
-
-# ==========
-# Utilities
-# ==========
-
-from gi_util import (
-    estimate_grid_points, count_images_in_h5_folder, ensure_dir,
-    timestamp_run_dir, write_text, append_line
-)
-
-# =========================
-# Self-importing runner src
-# =========================
-
-from gandalf_runner import GANDALF_RUNNER_CODE
-
-# =====================
-# Process output reader
-# =====================
-
-class ProcessOutputThread(QThread):
-    output_received = pyqtSignal(str)
-    finished = pyqtSignal(int)
-
-    def __init__(self, process: subprocess.Popen):
-        super().__init__()
-        self.process = process
-
-    def run(self):
-        try:
-            stdout = self.process.stdout
-            if stdout is None:
-                # Nothing to read (shouldn't happen with PIPE, but be safe)
-                rc = self.process.wait()
-                self.finished.emit(int(rc))
-                return
-
-            # In text mode: readline returns "" on EOF
-            for line in iter(stdout.readline, ""):
-                # Pass lines through as-is (including newline)
-                self.output_received.emit(line)
-        except Exception as e:
-            # Optional: surface reader errors to the log
-            try:
-                self.output_received.emit(f"[reader] {e}\n")
-            except Exception:
-                pass
-        finally:
-            rc = self.process.wait()
-            self.finished.emit(int(rc))
+# Local imports (ensure these are on PYTHONPATH)
+from gandalfiterator import Params, gandalf_adaptive
 
 
-# --- Put near ProcessOutputThread ---
-class WRMSDWorker(QThread):
-    progress = pyqtSignal(int, int)     # cur, total
-    status   = pyqtSignal(str)
-    log      = pyqtSignal(str)
-    done     = pyqtSignal(object)       # exc or None
-
-    def __init__(self, streams_dir: Path):
-        super().__init__()
-        self.streams_dir = streams_dir
-
-    def run(self):
-        try:
-            from lowest_wrmsd import stage_calc, stage_select, stage_write
-            import lowest_wrmsd as _lw
-
-            # tqdm shim -> emit signals
-            class _GuiTqdm:
-                def __call__(self, total=None, desc=None, unit=None, dynamic_ncols=None):
-                    self.total = int(total or 0)
-                    self.cur = 0
-                    self.status.emit(f"{desc or ''}")
-                    self.progress.emit(0, self.total)
-                    return self
-                def update(self, n=1):
-                    self.cur += int(n)
-                    self.progress.emit(self.cur, self.total)
-                def close(self): pass
-
-            shim = _GuiTqdm()
-            # Bind shim methods to instance signals
-            shim.progress = self.progress
-            shim.status = self.status
-
-            prev = getattr(_lw, "tqdm", None)
-            _lw.tqdm = shim
-            try:
-                metrics_dir  = self.streams_dir / "metrics"
-                winners_path = self.streams_dir / "winners.jsonl.gz"
-
-                stage_calc(streams_dir=self.streams_dir, metrics_dir=metrics_dir,
-                           workers=0, match_radius=4.0, outlier_sigma=2.0,
-                           min_peaks=1, min_reflections=1, resume=True, precount=True)
-                self.log.emit("[wRMSD] calc done")
-
-                stage_select(metrics_dir=metrics_dir, winners_path=winners_path)
-                self.log.emit("[wRMSD] select done")
-
-                stage_write(streams_dir=self.streams_dir, winners_path=winners_path,
-                            out_path=None, write_workers=0)
-                self.log.emit("[wRMSD] write done (merged stream in lowest_wrmsd/)")
-                self.done.emit(None)
-            finally:
-                _lw.tqdm = prev
-        except Exception as e:
-            self.done.emit(e)
-
-# ---- Peakfinder presets (module-level) ----
-default_peakfinder_options = {
-    "cxi": "--peaks=cxi",
-    "peakfinder9": """--peaks=peakfinder9
---min-snr-biggest-pix=7
---min-snr-peak-pix=6
---min-snr=5
---min-sig=11
---min-peak-over-neighbour=-inf
---local-bg-radius=3""",
-    "peakfinder8": """--peaks=peakfinder8
---threshold=800
---min-snr=5
---min-pix-count=2
---max-pix-count=200
---local-bg-radius=3
---min-res=0
---max-res=1200""",
-}
-# -------------------------------------------
+def _abs(p: str) -> str:
+    return os.path.abspath(os.path.expanduser(p))
 
 
-# =============
-# Data classes
-# =============
-@dataclass
-class RunContext:
-    run_dir: Path
-    geom_path: Path
-    cell_path: Path
-    input_dir: Path
-    list_path: Path
-    out_base: str
-    threads: int
-    max_radius: float
-    step: float
-    extra_flags: List[str]
-    total_images: int = 0
-    estimated_passes: int = 1
+def _gather_h5_sources(paths: List[str]) -> List[str]:
+    out = set()
+    for p in paths:
+        ap = _abs(p)
+        if os.path.isfile(ap) and ap.lower().endswith(".h5"):
+            out.add(ap)
+        elif os.path.isdir(ap):
+            for root, _, files in os.walk(ap):
+                for fn in files:
+                    if fn.lower().endswith(".h5"):
+                        out.add(os.path.join(root, fn))
+    return sorted(out)
 
-# ===========
-# Main Window
-# ===========
 
-class SerialEDIndexIntegrateWindow(QMainWindow):
-        
-    def __init__(self, parent=None):
+class LogTailer(QtCore.QThread):
+    """Tails a JSONL log file and emits lines as they arrive."""
+    lineRead = QtCore.pyqtSignal(str)
+    finishedTailing = QtCore.pyqtSignal()
+
+    def __init__(self, log_path: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Index & Integrate (Iterative Indexing Grid with wRMSD Selection)")
-        self.resize(1200, 800)
-
-        # -------- Core paths / defaults --------
-        self.run_root = Path.home() / "indexing_runs"
-        self.workspace_root = self.run_root
-        ensure_dir(self.run_root)
-
-        # Optional debug defaults for quick testing
-        if os.getenv("DEBUG_DEFAULTS", "1") == "1":
-            self.default_geom = Path("/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_001/4135627.geom")
-            self.default_cell = Path("/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_001/4135627.cell")
-            self.default_input = Path("/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_001")
-        else:
-            self.default_geom = None
-            self.default_cell = None
-            self.default_input = None
-
-        # Load user prefs once (may override paths above)
-        try:
-            self._load_prefs()
-        except Exception:
-            pass
-
-        # -------- State (single source of truth) --------
-        self.selected_run_dir: Optional[Path] = None
-        self.selected_ini: Optional[Path] = None
-
-        # Progress bookkeeping
-        self.per_pass_images = 0
-        self.seen_passes = 0
-        self.estimated_passes = 1
-        self.processed_images_total = 0
-        self.last_seen_processed = 0
-
-        # Timing / rate (EMA)
-        self.run_start_time = None
-        self.ema_rate = None  # images/sec
-        self.ema_alpha = 0.3
-
-        self.wrmsd_start_time = None
-        self.wrmsd_ema_rate = None   # chunks/sec
-        self.wrmsd_alpha = 0.3       # EMA smoothing, like indexing
-
-
-        # --- Output mirroring defaults (used by _on_proc_line) ---
-        self._mirror_stdout = True
-        self._mirror_only_progress = True
-
-        # Batch state (manual queue)
-        self.batch_queue: list[dict] = []
-        self.batch_active = False
-
-        # Workspace batch state
-        self._ws_batch_queue: list[Path] = []
-        self._ws_batch_mode = False
-        self._ws_chain_on_finish = False
-
-        # Remember the output directory of the last Gandalf run (.stream files live here)
-        self.last_out_dir: Optional[Path] = None
-
-        # Child process / runner handles
-        self.proc: Optional[subprocess.Popen] = None
-        self.proc_thread: Optional[ProcessOutputThread] = None
-        self.proc_runner_path: Optional[Path] = None
-
-        # -------- UI skeleton --------
-        self.tabs = QTabWidget()
-        self.settings_tab = QWidget()
-        self.start_tab = QWidget()
-
-        # Build main tabs first (these create widgets like txt_output used elsewhere)
-        self._build_settings_tab()
-        self._build_start_tab()
-        self.tabs.addTab(self.settings_tab, "Settings")
-        self.tabs.addTab(self.start_tab, "Start")
-
-        # Editors
-        self.cell_tab = QWidget()
-        self.geom_tab = QWidget()
-        self._build_cell_tab()
-        self._build_geom_tab()
-        self.tabs.addTab(self.cell_tab, "Cell")
-        self.tabs.addTab(self.geom_tab, "Geom")
-
-        # Left-side panels: Workspace + Runs
-        self.splitter = QSplitter()
-        self.left_container = QWidget()
-        left_v = QVBoxLayout(self.left_container)
-        left_v.setContentsMargins(0, 0, 0, 0)
-
-        # Workspace panel
-        self.workspace_panel = QWidget()
-        self._build_workspace_panel()
-        left_v.addWidget(self.workspace_panel, 2)
-
-        # Runs panel
-        self.runs_panel = QWidget()
-        self._build_runs_panel()
-        left_v.addWidget(self.runs_panel, 3)
-
-        # Assemble splitter and set as central widget (once)
-        self.splitter.addWidget(self.left_container)
-        self.splitter.addWidget(self.tabs)
-        self.splitter.setStretchFactor(0, 0)
-        self.splitter.setStretchFactor(1, 1)
-        self.setCentralWidget(self.splitter)
-
-        # Ensure current paths visible in UI (and preview built)
-        # _build_workspace_panel() already populated the tree; refresh once more just in case.
-        try:
-            self._refresh_workspace_tree()
-        except Exception:
-            pass
-
-        # Kick initial previews after the event loop starts
-        QTimer.singleShot(0, lambda: self._update_command_preview(None))
-
-        # After workspace tree exists, try autoloading first INI's latest run
-        QTimer.singleShot(0, self._workspace_autoload_latest_on_startup)
-
-
-    def _build_workspace_panel(self):
-        """Workspace section: choose a workspace root, show INIs and their runs, batch/create actions."""
-        from PyQt6.QtWidgets import (
-            QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-            QTreeWidget, QTreeWidgetItem
-        )
-        w = self.workspace_panel
-        outer = QVBoxLayout(w)
-
-        # Workspace root picker
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Workspace root:"))
-        ws_root_text = str(getattr(self, "workspace_root", self.run_root))
-        self.edit_ws_root = QLineEdit(ws_root_text)
-        btn_browse_ws = QPushButton("…")
-        btn_browse_ws.setToolTip("Choose a directory that contains *.ini files")
-        btn_browse_ws.clicked.connect(self._choose_workspace_root)
-        row.addWidget(self.edit_ws_root, 1)
-        row.addWidget(btn_browse_ws, 0)
-        outer.addLayout(row)
-
-        # Tree
-        self.tree_ws = QTreeWidget()
-        self.tree_ws.setHeaderLabels(["Workspace Files / Runs"])
-        self.tree_ws.setColumnCount(1)
-        self.tree_ws.currentItemChanged.connect(self._on_ws_tree_selection_changed)
-        # Double-click to open run folder
-        self.tree_ws.itemDoubleClicked.connect(self._on_ws_item_double_clicked)
-        outer.addWidget(self.tree_ws, 1)
-
-        # Buttons (actions)
-        row2 = QHBoxLayout()
-        self.btn_ws_new_run = QPushButton("New Run for Current INI")
-        self.btn_ws_new_run.clicked.connect(self._ws_new_run_for_current_ini)
-
-        self.btn_ws_broadcast = QPushButton("Broadcast settings to runs")
-        self.btn_ws_broadcast.setToolTip("Write current Settings to all runs under the selected INI")
-        self.btn_ws_broadcast.clicked.connect(self._ws_broadcast_settings_to_runs)
-
-        self.btn_ws_pick_latest = QPushButton("Select newest run")
-        self.btn_ws_pick_latest.setToolTip("Locate and select the newest run for the selected INI")
-        self.btn_ws_pick_latest.clicked.connect(self._ws_select_newest_run_for_selected_ini)
-
-        self.btn_ws_new_batch = QPushButton("New Batch Run")
-        self.btn_ws_new_batch.clicked.connect(self._ws_create_new_batch_group)
-
-        self.btn_ws_start_batch = QPushButton("Start Batch Indexing")
-        self.btn_ws_start_batch.clicked.connect(self._ws_start_batch_indexing)
-
-        row2.addWidget(self.btn_ws_new_run)
-        row2.addWidget(self.btn_ws_broadcast)
-        row2.addWidget(self.btn_ws_pick_latest)
-        row2.addWidget(self.btn_ws_new_batch)
-        row2.addWidget(self.btn_ws_start_batch)
-        outer.addLayout(row2)
-
-        # Initial population
-        try:
-            self.workspace_root = Path(self.edit_ws_root.text().strip()).resolve()
-        except Exception:
-            self.workspace_root = Path(str(self.run_root)).resolve()
-            self.edit_ws_root.setText(str(self.workspace_root))
-        self._refresh_workspace_tree()
-
-
-    def _on_ws_item_double_clicked(self, item, _column):
-        val = item.data(0, Qt.ItemDataRole.UserRole)
-        if not val:
-            return
-        p = Path(val)
-        if p.is_dir() and p.name.startswith("indexingintegration_"):
-            # open run folder
-            try:
-                if sys.platform.startswith("darwin"):
-                    subprocess.Popen(["open", str(p)])
-                elif os.name == "nt":
-                    os.startfile(str(p))  # type: ignore[attr-defined]
-                else:
-                    subprocess.Popen(["xdg-open", str(p)])
-            except Exception as e:
-                QMessageBox.warning(self, "Open folder failed", str(e))
-
-    def _run_wrmsd_selection(self):
-        """
-        Threaded wRMSD (calc → select → write).
-        Uses WRMSDWorker (QThread) to keep the UI responsive.
-        Expects WRMSDWorker(streams_dir: Path) with signals:
-            progress(int,int), status(str), log(str), done(object)
-        """
-        # --- verify we can import the module before launching ---
-        try:
-            import lowest_wrmsd as _lw  # noqa: F401
-        except Exception as e:
-            QMessageBox.critical(self, "wRMSD", f"Could not import lowest_wrmsd: {e}")
-            return
-
-        # --- detect streams dir (prefer active run; fall back to last_out_dir) ---
-        try:
-            candidate = getattr(self, "last_out_dir", None)
-            if candidate:
-                candidate = Path(candidate)
-            else:
-                rd = self._resolve_active_run_dir()
-                candidate = (rd / "streams") if rd else None
-
-            if not candidate or not Path(candidate).exists():
-                QMessageBox.warning(self, "No streams found",
-                                    "Choose “Use existing streams…” or select a run that has streams.")
-                return
-
-            streams_dir = self._detect_streams_dir_from(Path(candidate)) or Path(candidate)
-            if (not streams_dir.exists()) or (not any(streams_dir.glob("*.stream"))):
-                QMessageBox.warning(self, "No streams found",
-                                    f"No .stream files in:\n{candidate}")
-                return
-        except Exception as e:
-            QMessageBox.critical(self, "wRMSD", str(e))
-            return
-
-        # --- helpers to drive the progress/ETA UI (same behavior as before) ---
-        def _set_total(total):
-            try:
-                self.wrmsd_progress.setMaximum(max(1, int(total)))
-                self.wrmsd_progress.setValue(0)
-                # reset timing
-                self.wrmsd_start_time = time.time()
-                self.wrmsd_ema_rate = None
-                self.wrmsd_lbl_elapsed.setText("Elapsed: 00:00:00")
-                self.wrmsd_lbl_eta.setText("ETA: --:--:--")
-                self.wrmsd_lbl_rate.setText("Rate: -- chunks/s")
-            except Exception:
-                pass
-
-        def _update_val(cur, total):
-            try:
-                total = max(1, int(total))
-                cur = max(0, min(int(cur), total))
-                self.wrmsd_progress.setMaximum(total)
-                self.wrmsd_progress.setValue(cur)
-                self.wrmsd_status.setText(f"wRMSD : {cur}/{total}")
-
-                # timing/ETA
-                if self.wrmsd_start_time:
-                    elapsed = max(1e-3, time.time() - self.wrmsd_start_time)
-                    inst_rate = cur / elapsed if elapsed > 0 else 0.0
-                    # smooth like the indexing bar
-                    if inst_rate > 0:
-                        if self.wrmsd_ema_rate is None:
-                            self.wrmsd_ema_rate = inst_rate
-                        else:
-                            a = getattr(self, "wrmsd_alpha", 0.3)
-                            self.wrmsd_ema_rate = a * inst_rate + (1 - a) * self.wrmsd_ema_rate
-
-                    # labels
-                    def _fmt_hms(seconds: int) -> str:
-                        h = seconds // 3600
-                        m = (seconds % 3600) // 60
-                        s = seconds % 60
-                        return f"{h:02d}:{m:02d}:{s:02d}"
-
-                    self.wrmsd_lbl_elapsed.setText(f"Elapsed: {_fmt_hms(int(elapsed))}")
-                    if self.wrmsd_ema_rate and self.wrmsd_ema_rate > 0:
-                        remaining = max(0, total - cur)
-                        eta_sec = int(remaining / self.wrmsd_ema_rate)
-                        self.wrmsd_lbl_eta.setText(f"ETA: {_fmt_hms(eta_sec)}")
-                        self.wrmsd_lbl_rate.setText(f"Rate: {self.wrmsd_ema_rate:.2f} chunks/s")
-                    else:
-                        self.wrmsd_lbl_eta.setText("ETA: --:--:--")
-                        self.wrmsd_lbl_rate.setText("Rate: -- chunks/s")
-            except Exception:
-                pass
-
-        def _set_desc(text):
-            try:
-                self.wrmsd_status.setText(f"wRMSD calculation: {text}")
-            except Exception:
-                pass
-
-        # --- reset UI prior to launch ---
-        self.wrmsd_progress.setMaximum(100)
-        self.wrmsd_progress.setValue(0)
-        self.wrmsd_status.setText("wRMSD calculation: starting…")
-        append_line(self.txt_output, f"[wRMSD] Starting selection in: {streams_dir}")
-
-        self.wrmsd_lbl_elapsed.setText("Elapsed: 00:00:00")
-        self.wrmsd_lbl_eta.setText("ETA: --:--:--")
-        self.wrmsd_lbl_rate.setText("Rate: -- chunks/s")
-        self.wrmsd_start_time = time.time()
-        self.wrmsd_ema_rate = None
-
-        # Give the progress bar its initial total once we know it
-        _set_total(0)
-
-        # Disable the button while running (optional)
-        try:
-            if hasattr(self, "btn_wrmsd"):
-                self.btn_wrmsd.setEnabled(False)
-        except Exception:
-            pass
-
-        # --- create and keep a strong reference to the worker so it won't be GC'd ---
-        try:
-            self._wrmsd_worker = WRMSDWorker(streams_dir)  # type: ignore[name-defined]
-        except NameError:
-            QMessageBox.critical(self, "wRMSD", "WRMSDWorker class is not defined. Paste it into the module first.")
-            return
-
-        worker = self._wrmsd_worker
-
-        # --- signal wiring ---
-        def _on_progress(cur: int, total: int):
-            # First time we see total>0, initialize the bar properly
-            if self.wrmsd_progress.maximum() in (0, 100) and total > 0:
-                _set_total(total)
-            _update_val(cur, total)
-
-        def _on_status(s: str):
-            _set_desc(s)
-
-        def _on_log(msg: str):
-            append_line(self.txt_output, msg)
-
-        def _on_done(exc):
-            # Re-enable the button
-            try:
-                if hasattr(self, "btn_wrmsd"):
-                    self.btn_wrmsd.setEnabled(True)
-            except Exception:
-                pass
-
-            if exc:
-                QMessageBox.critical(self, "wRMSD selection failed", str(exc))
-            else:
-                append_line(self.txt_output, "[wRMSD] completed successfully")
-                QMessageBox.information(self, "wRMSD selection",
-                                        "Finished selecting & merging lowest-wRMSD chunks.")
-
-            self.wrmsd_status.setText("wRMSD calculation: done")
-            # Reset timers
-            self.wrmsd_start_time = None
-            self.wrmsd_ema_rate = None
-            # Refresh streams (merged output lives under streams/lowest_wrmsd/)
-            try:
-                self._refresh_streams_list()
-            except Exception:
-                pass
-            # Drop reference so thread can be GC'd
-            self._wrmsd_worker = None
-
-        worker.progress.connect(_on_progress)
-        worker.status.connect(_on_status)
-        worker.log.connect(_on_log)
-        worker.done.connect(_on_done)
-
-        # --- launch thread ---
-        worker.start()
-
-    def _ws_broadcast_settings_to_runs(self):
-        ini = getattr(self, "selected_ini", None)
-        if not ini or not Path(ini).exists():
-            QMessageBox.information(self, "Broadcast", "Select an INI in the workspace tree first.")
-            return
-        run_base = Path(self._resolve_run_root(str(ini)))
-        if not run_base.exists():
-            QMessageBox.information(self, "Broadcast", "Resolved run root does not exist.")
-            return
-
-        cfg = self._collect_settings_from_ui()
-        runs = [p for p in run_base.glob("indexingintegration_*") if p.is_dir()]
-        if not runs:
-            QMessageBox.information(self, "Broadcast", "No runs found for the selected INI.")
-            return
-
-        ok_settings = 0
-        ok_lists = 0
-        h5_hint = self._find_h5_path_from_ini(str(ini))  # one-time lookup
-
-        for rd in runs:
-            try:
-                with open(rd / "index_settings.json", "w", encoding="utf-8") as f:
-                    json.dump(cfg, f, indent=2)
-                ok_settings += 1
-            except Exception as e:
-                append_line(self.txt_output, f"[broadcast] settings failed for {rd.name}: {e}")
-            # refresh input.lst if we have a hint
-            try:
-                if h5_hint:
-                    with open(rd / "input.lst", "w", encoding="utf-8") as f:
-                        f.write(os.path.abspath(h5_hint))
-                    ok_lists += 1
-            except Exception as e:
-                append_line(self.txt_output, f"[broadcast] input.lst failed for {rd.name}: {e}")
-
-        append_line(self.txt_output, f"[broadcast] settings {ok_settings}/{len(runs)}, input.lst {ok_lists}/{len(runs)}")
-        QMessageBox.information(self, "Broadcast", f"Wrote settings to {ok_settings} run(s); input.lst to {ok_lists} run(s).")
-
-
-    def _ws_new_run_for_current_ini(self):
-        """Create a new timestamped run for the INI currently selected in the tree."""
-        ini = getattr(self, "selected_ini", None)
-        if not ini or not Path(ini).exists():
-            QMessageBox.information(self, "New Run", "Select an INI in the workspace tree first.")
-            return
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_base = self._resolve_run_root(str(ini))
-        run_dir = Path(run_base) / f"indexingintegration_{ts}"
-        try:
-            ensure_dir(run_dir)
-            # Write list file from INI heuristic (or empty)
-            lst = run_dir / "input.lst"
-            try:
-                h5 = self._find_h5_path_from_ini(str(ini))
-                with open(lst, "w", encoding="utf-8") as f:
-                    f.write(os.path.abspath(h5) if h5 else "")
-            except Exception as e:
-                QMessageBox.warning(self, "Run", f"Created run dir, but failed to write input.lst:\n{e}")
-            # Pre-touch run-local cell/geom (like original)
-            cf = run_dir / "cellfile.cell"
-            gf = run_dir / "geometry.geom"
-            for f in (cf, gf):
-                if not f.exists():
-                    f.touch()
-            # Reflect into UI
-            self.selected_run_dir = run_dir
-            self.edit_geom.setText(str(gf))
-            self.edit_cell.setText(str(cf))
-            self.edit_input_dir.setText(str(run_dir))  # iterator scans folder
-            self._save_settings_to_run(run_dir)
-            self._refresh_workspace_tree()
-            self._update_command_preview(None)
-        except Exception as e:
-            QMessageBox.warning(self, "New Run", str(e))
-
-    def _ws_create_new_batch_group(self):
-        """Create a new timestamped run folder with the SAME name for every INI."""
-        inis = self._get_workspace_ini_paths()
-        if not inis:
-            QMessageBox.warning(self, "Batch Run", "No INI files found under the workspace root.")
-            return
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        made = 0
-        for ini in inis:
-            try:
-                rd = Path(self._resolve_run_root(ini)) / f"indexingintegration_{ts}"
-                if not rd.is_dir():
-                    rd.mkdir(parents=True, exist_ok=True)
-                    # pre-touch placeholders
-                    (rd / "cellfile.cell").touch(exist_ok=True)
-                    (rd / "geometry.geom").touch(exist_ok=True)
-                    made += 1
-            except Exception:
-                continue
-        self._refresh_workspace_tree()
-        QMessageBox.information(self, "Batch", f"Created batch run 'indexingintegration_{ts}' for {made} file(s).")
-
-    def _choose_workspace_root(self):
-        path = QFileDialog.getExistingDirectory(self, "Select workspace root", str(self.workspace_root))
-        if not path:
-            return
-        self.workspace_root = Path(path).resolve()
-        self.edit_ws_root.setText(str(self.workspace_root))
-        self._refresh_workspace_tree()
-
-    def _refresh_workspace_tree(self):
-        """Scan workspace_root for *.ini and list runs under each INI's run-root."""
-        from PyQt6.QtWidgets import QTreeWidgetItem
-        self.tree_ws.clear()
-        root = getattr(self, "workspace_root", None)
-        if not root or not Path(root).exists():
-            return
-        ini_paths = sorted(Path(root).rglob("*.ini"))
-        for ini in ini_paths:
-            ini_item = QTreeWidgetItem([ini.name])
-            ini_item.setData(0, Qt.ItemDataRole.UserRole, str(ini))
-            self.tree_ws.addTopLevelItem(ini_item)
-            # list runs under resolved run base
-            run_base = self._resolve_run_root(str(ini))
-            if run_base and Path(run_base).exists():
-                for rd in sorted(Path(run_base).glob("indexingintegration_*")):
-                    if rd.is_dir():
-                        run_item = QTreeWidgetItem([rd.name])
-                        run_item.setData(0, Qt.ItemDataRole.UserRole, str(rd))
-                        ini_item.addChild(run_item)
-        self.tree_ws.expandAll()
-
-    def _on_ws_tree_selection_changed(self, cur, _prev):
-        """When a run node is selected, reflect into UI; when an INI is selected, remember it and auto-select its latest run."""
-        if not cur:
-            return
-        val = cur.data(0, Qt.ItemDataRole.UserRole)
-        if not val:
-            return
-        p = Path(val)
-        # INI clicked
-        if p.suffix.lower() == ".ini" and p.is_file():
-            self.selected_ini = p
-            # try to auto-select newest run for this INI
-            try:
-                rd = self._select_newest_run_for_ini(p, also_focus_tree=True)
-                if rd:
-                    self._apply_run_dir(rd)
-                    self._update_command_preview(None)
-                else:
-                    # no runs yet; try to pre-fill input/geom/cell from INI context
-                    h5 = self._find_h5_path_from_ini(str(p))
-                    if h5:
-                        self.edit_input_dir.setText(str(Path(h5).parent))
-                    self._update_command_preview(None)
-            except Exception:
-                pass
-            return
-
-        # Run folder clicked
-        if p.is_dir() and p.name.startswith("indexingintegration_"):
-            self.selected_run_dir = p
-            # load settings.json if present
-            s = p / "index_settings.json"
-            if s.exists():
-                try:
-                    with open(s, "r", encoding="utf-8") as f:
-                        self._apply_settings_to_ui(json.load(f))
-                except Exception as e:
-                    append_line(self.txt_output, f"[warn] failed to load settings: {e}")
-            else:
-                # try to seed sensible defaults (geom/cell from run, input from run or INI)
-                self._load_index_settings_or_defaults(p, getattr(self, "selected_ini", None))
-
-            # reflect key file paths
-            g = p / "geometry.geom"
-            c = p / "cellfile.cell"
-            lst = p / "input.lst"
-            if g.exists(): self.edit_geom.setText(str(g))
-            if c.exists(): self.edit_cell.setText(str(c))
-            if lst.exists(): self.edit_input_dir.setText(str(lst.parent))
-            self._update_command_preview(None)
-
-    def _load_index_settings_or_defaults(self, run_dir: Path, ini_path: Path | None):
-        """
-        If index_settings.json is missing:
-        - keep current UI values,
-        - but try to prefill input folder (from run_dir/input.lst or INI’s h5 location)
-        - ensure out_base is at least the run folder name suffix.
-        """
-        # input folder from run_dir/input.lst (if present and has a line)
-        lst = run_dir / "input.lst"
-        try:
-            if lst.exists():
-                with open(lst, "r", encoding="utf-8") as f:
-                    first = f.readline().strip()
-                if first:
-                    self.edit_input_dir.setText(str(Path(first).parent))
-            elif ini_path and Path(ini_path).exists():
-                h5 = self._find_h5_path_from_ini(str(ini_path))
-                if h5:
-                    self.edit_input_dir.setText(str(Path(h5).parent))
-        except Exception:
-            pass
-
-        # sensible out_base default
-        if not self.edit_out_base.text().strip():
-            try:
-                self.edit_out_base.setText(run_dir.name.split("indexingintegration_")[-1] or "output")
-            except Exception:
-                self.edit_out_base.setText("output")
-
-    def _list_runs_for_ini(self, ini_path: Path) -> list[Path]:
-        run_base = Path(self._resolve_run_root(str(ini_path)))
-        if not run_base.exists():
-            return []
-        return [p for p in run_base.glob("indexingintegration_*") if p.is_dir()]
-
-    def _find_newest_run(self, runs: list[Path]) -> Path | None:
-        if not runs:
-            return None
-        # Try by mtime; if equal, fall back to name sort
-        runs_sorted = sorted(runs, key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
-        return runs_sorted[0]
-
-    def _select_newest_run_for_ini(self, ini_path: Path, also_focus_tree: bool = False) -> Path | None:
-        runs = self._list_runs_for_ini(ini_path)
-        newest = self._find_newest_run(runs)
-        if newest and also_focus_tree:
-            # walk the tree and select this item if present
-            top_count = self.tree_ws.topLevelItemCount()
-            for i in range(top_count):
-                ini_item = self.tree_ws.topLevelItem(i)
-                ini_val = ini_item.data(0, Qt.ItemDataRole.UserRole)
-                if ini_val and Path(ini_val) == ini_path:
-                    for j in range(ini_item.childCount()):
-                        child = ini_item.child(j)
-                        val = child.data(0, Qt.ItemDataRole.UserRole)
-                        if val and Path(val) == newest:
-                            self.tree_ws.setCurrentItem(child)
-                            break
-                    break
-        return newest
-
-    def _ws_select_newest_run_for_selected_ini(self):
-        ini = getattr(self, "selected_ini", None)
-        if not ini or not Path(ini).exists():
-            QMessageBox.information(self, "Workspace", "Select an INI in the workspace tree first.")
-            return
-        rd = self._select_newest_run_for_ini(ini, also_focus_tree=True)
-        if rd:
-            self._apply_run_dir(rd)
-            append_line(self.txt_output, f"[workspace] selected newest run: {rd.name}")
-        else:
-            QMessageBox.information(self, "Workspace", "No runs found for this INI yet.")
-
-    def _get_workspace_ini_paths(self) -> list[str]:
-        root = getattr(self, "workspace_root", None)
-        if not root or not Path(root).exists():
-            return []
-        return [str(p) for p in sorted(Path(root).rglob("*.ini"))]
-
-    def _resolve_run_root(self, ini_path: str) -> str:
-        """Match original logic: run root = base_dir or base_dir/outputfolder if present in INI."""
-        try:
-            parser = ConfigParser()
-            parser.read(ini_path)
-            base_dir = os.path.dirname(os.path.abspath(ini_path))
-            output_folder = parser.get("Paths", "outputfolder", fallback="").strip()
-            return os.path.join(base_dir, output_folder) if output_folder else base_dir
-        except Exception:
-            return os.path.dirname(os.path.abspath(ini_path))
-
-    def _find_h5_path_from_ini(self, ini_path: str) -> str | None:
-        """
-        Better heuristic:
-        1) Read INI for any path-like values in likely sections/keys.
-        2) Search these dirs (and immediate subdirs) for *.h5/*.hdf5/*.cxi.
-        3) Fallback: sibling and one-level child dirs of the INI's folder.
-        Returns absolute path of the first match or None.
-        """
-        base = Path(os.path.dirname(os.path.abspath(ini_path)))
-
-        # 1) Collect candidate directories from INI
-        cand_dirs: list[Path] = []
-        try:
-            parser = ConfigParser()
-            parser.read(ini_path)
-            # common sections/keys used in various pipelines
-            likely_keys = {"datafolder", "inputfolder", "datadir", "folder", "path", "h5dir", "cxi_dir"}
-            for section in parser.sections():
-                for key, val in parser.items(section):
-                    v = (val or "").strip().strip('"').strip("'")
-                    if not v:
-                        continue
-                    p = Path(v)
-                    # expand relative to INI folder
-                    if not p.is_absolute():
-                        p = (base / p).resolve()
-                    if p.is_dir() and p not in cand_dirs:
-                        cand_dirs.append(p)
-        except Exception:
-            pass
-
-        # Always search the INI's folder first
-        cand_dirs.insert(0, base)
-
-        def scan_dir_once(d: Path) -> Optional[Path]:
-            for ext in ("*.h5", "*.hdf5", "*.cxi"):
-                hits = sorted(d.glob(ext))
-                if hits:
-                    return hits[0].resolve()
-            # immediate subdirs
-            for sub in sorted([p for p in d.iterdir() if p.is_dir()]):
-                for ext in ("*.h5", "*.hdf5", "*.cxi"):
-                    hits = sorted(sub.glob(ext))
-                    if hits:
-                        return hits[0].resolve()
-            return None
-
-        # 2) search candidate dirs
-        seen = set()
-        for d in cand_dirs:
-            if not d.exists():
-                continue
-            key = str(d.resolve())
-            if key in seen:
-                continue
-            seen.add(key)
-            hit = scan_dir_once(d)
-            if hit:
-                return str(hit)
-
-        # 3) fallback: siblings of INI folder
-        for sib in sorted([p for p in base.parent.iterdir() if p.is_dir()]):
-            hit = scan_dir_once(sib)
-            if hit:
-                return str(hit)
-
-        return None
-
-    # -----------------
-    # UI: Settings tab
-    # -----------------
-
-    def _update_peak_params(self, name: str):
-        """
-        Fill the Peakfinder params editor based on the selected preset.
-        Safe during early init: only triggers preview if txt_preview exists.
-        """
-        txt = default_peakfinder_options.get(name, "")
-        try:
-            self.peak_params_edit.blockSignals(True)
-            self.peak_params_edit.setPlainText(txt)
-        finally:
-            self.peak_params_edit.blockSignals(False)
-        if hasattr(self, "txt_preview") and self.txt_preview:
-            self._update_command_preview(None)
-            
-    def _toggle_peak_params_visibility(self, name: str):
-        """
-        Hide the params editor for 'cxi' (only needs --peaks=cxi),
-        show it for 'peakfinder9'/'peakfinder8'.
-        """
-        show = name in ("peakfinder9", "peakfinder8")
-        self.peak_params_edit.setVisible(show)
-
-    def _build_settings_tab(self):
-        w = self.settings_tab
-
-        # Make the whole settings page scrollable (helps on macOS/smaller windows)
-        scroll = QScrollArea(w)
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)  # build page on 'content'
-
-        # ----------------------
-        # Files group
-        # ----------------------
-        files_group = QGroupBox("Files")
-        files_form = QFormLayout(files_group)
-
-        # Optional full path to indexamajig
-        self.edit_idxmj = QLineEdit("")
-        files_form.addRow("indexamajig path (optional):", self.edit_idxmj)
-
-        # Geometry / Cell / Input
-        self.edit_geom = QLineEdit()
-        if getattr(self, "default_geom", None) and self.default_geom.exists():
-            self.edit_geom.setText(str(self.default_geom))
-        btn_geom = QPushButton("Browse…")
-        btn_geom.clicked.connect(lambda: self._browse_to(self.edit_geom, "Geometry (*.geom)"))
-        files_form.addRow("Geometry (.geom):", self._hpair(self.edit_geom, btn_geom))
-
-        self.edit_cell = QLineEdit()
-        if getattr(self, "default_cell", None) and self.default_cell.exists():
-            self.edit_cell.setText(str(self.default_cell))
-        btn_cell = QPushButton("Browse…")
-        btn_cell.clicked.connect(lambda: self._browse_to(self.edit_cell, "Cell (*.cell)"))
-        files_form.addRow("Cell (.cell):", self._hpair(self.edit_cell, btn_cell))
-
-        self.edit_input_dir = QLineEdit()
-        if getattr(self, "default_input", None) and self.default_input.exists():
-            self.edit_input_dir.setText(str(self.default_input))
-        btn_input = QPushButton("Browse…")
-        btn_input.clicked.connect(lambda: self._browse_dir(self.edit_input_dir))
-        files_form.addRow("Input folder (HDF5s):", self._hpair(self.edit_input_dir, btn_input))
-
-        self.edit_out_base = QLineEdit("Xtal")
-        files_form.addRow("Output base:", self.edit_out_base)
-
-        outer.addWidget(files_group)
-
-        # ----------------------
-        # Indexing & Integration
-        # ----------------------
-        idx_group = QGroupBox("Indexing & Integration")
-        idx_form = QFormLayout(idx_group)
-
-        self.spin_threads = QSpinBox()
-        self.spin_threads.setRange(1, 256)
-        self.spin_threads.setValue(max(1, os.cpu_count() or 8))
-        idx_form.addRow("Threads:", self.spin_threads)
-
-        grid_title = QLabel("Iterative Indexing Grid with wRMSD Selection")
-        grid_title.setStyleSheet("font-weight:600;")
-        idx_form.addRow(grid_title)
-
-        self.spin_max_radius = QDoubleSpinBox()
-        self.spin_max_radius.setDecimals(3)
-        self.spin_max_radius.setRange(0.0, 100.0)
-        self.spin_max_radius.setSingleStep(0.1)
-        self.spin_max_radius.setValue(0.0)
-        idx_form.addRow("Max radius (px):", self.spin_max_radius)
-
-        self.spin_step = QDoubleSpinBox()
-        self.spin_step.setDecimals(3)
-        self.spin_step.setRange(0.001, 10.0)
-        self.spin_step.setSingleStep(0.1)
-        self.spin_step.setValue(0.1)
-        idx_form.addRow("Step (px):", self.spin_step)
-
-        outer.addWidget(idx_group)
-
-        # ----------------------
-        # Flags (Peakfinder + Advanced + Other)
-        # ----------------------
-        flags_group = QGroupBox("Flags")
-        flags_layout = QGridLayout(flags_group)
-
-        # Peakfinder block (dropdown + multiline params)
-        peak_group = QGroupBox("Peakfinder Options")
-        pg = QGridLayout(peak_group)
-
-        pg.addWidget(QLabel("Peakfinder:"), 0, 0)
-        self.peak_combo = QComboBox()
-        self.peak_combo.addItems(["cxi", "peakfinder9", "peakfinder8"])
-        # width adapts to content
-        self.peak_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        pg.addWidget(self.peak_combo, 0, 1)
-
-        pg.addWidget(QLabel("Peakfinder Params:"), 1, 0, Qt.AlignmentFlag.AlignTop)
-        self.peak_params_edit = QTextEdit()
-        self.peak_params_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        self.peak_params_edit.setMinimumHeight(100)  # make it clearly visible
-        pg.addWidget(self.peak_params_edit, 1, 1)
-
-        # initial text and live updates
-        self._update_peak_params(self.peak_combo.currentText())
-        self._toggle_peak_params_visibility(self.peak_combo.currentText())
-        self.peak_combo.currentTextChanged.connect(self._update_peak_params)
-        self.peak_combo.currentTextChanged.connect(self._toggle_peak_params_visibility)
-        self.peak_params_edit.textChanged.connect(lambda: self._update_command_preview(None))
-
-        # add peakfinder group to flags grid
-        flags_layout.addWidget(peak_group, flags_layout.rowCount(), 0, 1, 2)
-
-        # Advanced flags (multi-line)
-        flags_layout.addWidget(QLabel("Advanced flags:"), flags_layout.rowCount(), 0)
-        self.txt_advanced = QPlainTextEdit()
-        self.txt_advanced.setPlainText(
-            "--min-peaks=15\n"
-            "--tolerance=10,10,10,5\n"
-            "--xgandalf-sampling-pitch=5\n"
-            "--xgandalf-grad-desc-iterations=1\n"
-            "--xgandalf-tolerance=0.02\n"
-            "--int-radius=4,5,9\n"
-        )
-        self.txt_advanced.setMinimumHeight(110)
-        flags_layout.addWidget(self.txt_advanced, flags_layout.rowCount() - 1, 1)
-
-        # Other flags (multi-line)
-        flags_layout.addWidget(QLabel("Other flags:"), flags_layout.rowCount(), 0)
-        self.txt_other = QPlainTextEdit()
-        self.txt_other.setPlainText(
-            "--no-revalidate\n"
-            "--no-half-pixel-shift\n"
-            "--no-refine\n"
-            "--no-non-hits-in-stream\n"
-            "--no-retry\n"
-            "--fix-profile-radius=70000000\n"
-            "--indexing=xgandalf\n"
-            "--integration=rings\n"
-        )
-        self.txt_other.setMinimumHeight(110)
-        flags_layout.addWidget(self.txt_other, flags_layout.rowCount() - 1, 1)
-
-        outer.addWidget(flags_group)
-
-        # Live preview updates when settings change
-        for wdg in (self.edit_geom, self.edit_cell, self.edit_input_dir, self.edit_out_base):
-            wdg.textChanged.connect(lambda *_: self._update_command_preview(None))
-        self.spin_threads.valueChanged.connect(lambda *_: self._update_command_preview(None))
-        self.spin_max_radius.valueChanged.connect(lambda *_: self._update_command_preview(None))
-        self.spin_step.valueChanged.connect(lambda *_: self._update_command_preview(None))
-        self.txt_advanced.textChanged.connect(lambda *_: self._update_command_preview(None))
-        self.txt_other.textChanged.connect(lambda *_: self._update_command_preview(None))
-
-        outer.addStretch(1)
-
-        # Mount the scroll area into the tab widget
-        tab_layout = QVBoxLayout(w)
-        tab_layout.setContentsMargins(0, 0, 0, 0)
-        tab_layout.addWidget(scroll)
-
-    # ---------------
-    # UI: Start tab
-    # ---------------
-
-    def _build_start_tab(self):
-        w = self.start_tab
-        outer = QVBoxLayout(w)
-
-        # Top row: run controls
-        btns = QHBoxLayout()
-        self.btn_start_grid = QPushButton("Start Iterative Indexing Grid with wRMSD Selection")
-        self.btn_start_grid.clicked.connect(self._start_grid_clicked)
-        self.btn_stop = QPushButton("Stop")
-        self.btn_stop.clicked.connect(self._stop_clicked)
-        self.btn_stop.setEnabled(False)
-        btns.addWidget(self.btn_start_grid)
-        btns.addWidget(self.btn_stop)
-
-        # Aux: clear log, refresh streams
-        self.btn_clear_log = QPushButton("Clear log")
-        self.btn_clear_log.clicked.connect(lambda: self.txt_output.setPlainText(""))
-        self.btn_refresh_streams = QPushButton("Refresh streams")
-        self.btn_refresh_streams.clicked.connect(self._refresh_streams_list)
-        btns.addWidget(self.btn_clear_log)
-        btns.addWidget(self.btn_refresh_streams)
-        outer.addLayout(btns)
-
-        # Progress + pass/eta/rate row
-        self.progress = QProgressBar()
-        self.progress.setMinimum(0)
-        self.progress.setMaximum(100)
-        self.progress.setValue(0)
-        outer.addWidget(self.progress)
-
-        row = QHBoxLayout()
-        self.lbl_status = QLabel("Ready.")
-        self.lbl_pass = QLabel("Pass: -/-")
-        self.lbl_elapsed = QLabel("Elapsed: 00:00:00")
-        self.lbl_eta = QLabel("ETA: --:--:--")
-        self.lbl_rate = QLabel("Rate: -- img/s")
-        for wdg in (self.lbl_status, self.lbl_pass, self.lbl_elapsed, self.lbl_eta, self.lbl_rate):
-            wdg.setMinimumWidth(160)
-        row.addWidget(self.lbl_status)
-        row.addWidget(self.lbl_pass)
-        row.addWidget(self.lbl_elapsed)
-        row.addWidget(self.lbl_eta)
-        row.addWidget(self.lbl_rate)
-        row.addStretch(1)
-        outer.addLayout(row)
-
-        # --- New: wRMSD progress bar + label ---
-        self.wrmsd_progress = QProgressBar()
-        self.wrmsd_progress.setMinimum(0)
-        self.wrmsd_progress.setMaximum(100)
-        self.wrmsd_progress.setValue(0)
-        outer.addWidget(self.wrmsd_progress)
-
-        self.wrmsd_status = QLabel("wRMSD calculation: idle")
-        outer.addWidget(self.wrmsd_status)
-
-        row_wr = QHBoxLayout()
-        self.wrmsd_lbl_elapsed = QLabel("Elapsed: 00:00:00")
-        self.wrmsd_lbl_eta     = QLabel("ETA: --:--:--")
-        self.wrmsd_lbl_rate    = QLabel("Rate: -- chunks/s")
-        for wdg in (self.wrmsd_lbl_elapsed, self.wrmsd_lbl_eta, self.wrmsd_lbl_rate):
-            wdg.setMinimumWidth(140)
-        row_wr.addWidget(self.wrmsd_lbl_elapsed)
-        row_wr.addWidget(self.wrmsd_lbl_eta)
-        row_wr.addWidget(self.wrmsd_lbl_rate)
-        row_wr.addStretch(1)
-        outer.addLayout(row_wr)
-
-
-        # Output mirroring controls
-        mirror_row = QHBoxLayout()
-        self.mirror_enable_chk = QCheckBox("Enable output mirroring")
-        self.mirror_enable_chk.setChecked(True)
-        self.mirror_enable_chk.toggled.connect(self._on_toggle_mirror)
-
-        self.mirror_progress_only_chk = QCheckBox("Only progress/errors")
-        self.mirror_progress_only_chk.setChecked(True)
-        self.mirror_progress_only_chk.toggled.connect(self._on_toggle_mirror_only_progress)
-        self.mirror_progress_only_chk.setEnabled(self.mirror_enable_chk.isChecked())
-
-        mirror_row.addWidget(self.mirror_enable_chk)
-        mirror_row.addWidget(self.mirror_progress_only_chk)
-        mirror_row.addStretch(1)
-        outer.addLayout(mirror_row)
-
-
-        # Command preview group (left: preview; right: action buttons incl. wRMSD)
-        prev_group = QGroupBox("Command preview")
-        prev_lay = QHBoxLayout(prev_group)
-
-        self.txt_preview = QPlainTextEdit()
-        self.txt_preview.setReadOnly(True)
-        self.txt_preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.txt_preview.setMinimumHeight(80)
-        prev_lay.addWidget(self.txt_preview, 1)
-
-        col = QVBoxLayout()
-        self.btn_copy_preview = QPushButton("Copy")
-        self.btn_copy_preview.clicked.connect(
-            lambda: QApplication.clipboard().setText(self.txt_preview.toPlainText())
-        )
-        self.btn_open_streams = QPushButton("Open streams folder")
-        self.btn_open_streams.clicked.connect(self._open_streams_folder)
-        self.btn_open_latest_stream = QPushButton("Open latest stream")
-        self.btn_open_latest_stream.clicked.connect(self._open_latest_stream_file)
-        self.btn_merge_streams = QPushButton("Merge streams now")
-        self.btn_merge_streams.clicked.connect(self._merge_streams_now_clicked)
-        self.btn_export_run = QPushButton("Export run (.zip)")
-        self.btn_export_run.clicked.connect(self._export_run_bundle)
-
-        self.btn_pick_streams = QPushButton("Use existing streams…")
-        self.btn_pick_streams.setToolTip("Select a folder that already contains .stream files (or a run folder with a streams/ subfolder)")
-        self.btn_pick_streams.clicked.connect(self._pick_existing_streams_dir)
-        col.addWidget(self.btn_pick_streams)
-
-        col.addWidget(self.btn_copy_preview)
-        col.addWidget(self.btn_open_streams)
-        col.addWidget(self.btn_open_latest_stream)
-        col.addWidget(self.btn_merge_streams)
-        col.addWidget(self.btn_export_run)
-
-        # NEW: lowest-wRMSD action button
-        self.btn_wrmsd = QPushButton("Select lowest wRMSD")
-        self.btn_wrmsd.setObjectName("select_lowest_wrmsd_button")
-        self.btn_wrmsd.setToolTip("Runs calc → select → write on Gandalf output streams")
-        self.btn_wrmsd.setEnabled(False)  # enabled after run or when streams dir is detected
-        self.btn_wrmsd.clicked.connect(self._run_wrmsd_selection)
-        col.addWidget(self.btn_wrmsd)
-
-        col.addStretch(1)
-        prev_lay.addLayout(col)
-        outer.addWidget(prev_group)
-
-        # Streams browser
-        from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
-        streams_group = QGroupBox("Streams in current run")
-        streams_lay = QVBoxLayout(streams_group)
-        self.tree_streams = QTreeWidget()
-        self.tree_streams.setColumnCount(3)
-        self.tree_streams.setHeaderLabels(["File", "Size (MB)", "Modified"])
-        self.tree_streams.itemDoubleClicked.connect(self._on_stream_item_double_clicked)
-        streams_lay.addWidget(self.tree_streams)
-        outer.addWidget(streams_group, 1)
-
-        # Output log
-        self.txt_output = QPlainTextEdit()
-        self.txt_output.setReadOnly(True)
-        self.txt_output.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.txt_output.setMinimumHeight(220)
-        outer.addWidget(self.txt_output, 1)
-
-
-    def _update_wrmsd_button_enabled(self):
-        try:
-            # prefer active run's streams; fall back to last_out_dir
-            sdir = self._streams_dir_for_active()
-            if not sdir and getattr(self, "last_out_dir", None):
-                sdir = Path(self.last_out_dir)
-            ok = bool(sdir and Path(sdir).exists() and any(Path(sdir).glob("*.stream")))
-            if hasattr(self, "btn_wrmsd"):
-                self.btn_wrmsd.setEnabled(ok)
-        except Exception:
-            if hasattr(self, "btn_wrmsd"):
-                self.btn_wrmsd.setEnabled(False)
-
-    def _streams_dir_for_active(self) -> Optional[Path]:
-        rd = self._resolve_active_run_dir()
-        return (rd / "streams") if rd else None
-
-    def _refresh_streams_list(self):
-        from PyQt6.QtWidgets import QTreeWidgetItem
-        self.tree_streams.clear()
-        sdir = self._streams_dir_for_active()
-        if not sdir or not sdir.exists():
-            return
-        files = sorted(sdir.glob("*.stream"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for p in files:
-            try:
-                sz_mb = p.stat().st_size / (1024 * 1024)
-                mtime = datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-                it = QTreeWidgetItem([p.name, f"{sz_mb:.2f}", mtime])
-                it.setData(0, Qt.ItemDataRole.UserRole, str(p))
-                self.tree_streams.addTopLevelItem(it)
-            except Exception:
-                continue
-
-        self._update_wrmsd_button_enabled()
-
-    def _detect_streams_dir_from(self, p: Path) -> Optional[Path]:
-        """Return a directory that actually contains .stream files.
-        Accept either the folder itself, or its 'streams/' subfolder."""
-        try:
-            p = Path(p)
-            if p.is_dir() and any(p.glob("*.stream")):
-                return p
-            sub = p / "streams"
-            if sub.is_dir() and any(sub.glob("*.stream")):
-                return sub
-        except Exception:
-            pass
-        return None
-    
-    def _pick_existing_streams_dir(self):
-        path = QFileDialog.getExistingDirectory(self, "Select folder containing .stream files (or a run folder)")
-        if not path:
-            return
-        cand = Path(path)
-        streams = self._detect_streams_dir_from(cand)
-        if not streams:
-            QMessageBox.information(self, "Streams",
-                                    "No .stream files found in this folder (or its 'streams' subfolder).")
-            return
-        self.last_out_dir = streams
-        append_line(self.txt_output, f"[GUI] Using existing streams dir: {streams}")
-        self._refresh_streams_list()
-        self._update_wrmsd_button_enabled()
-
-
-
-    def _on_stream_item_double_clicked(self, item, _col):
-        val = item.data(0, Qt.ItemDataRole.UserRole)
-        if not val:
-            return
-        p = Path(val)
-        try:
-            if sys.platform.startswith("darwin"):
-                subprocess.Popen(["open", str(p)])
-            elif os.name == "nt":
-                os.startfile(str(p))  # type: ignore[attr-defined]
-            else:
-                subprocess.Popen(["xdg-open", str(p)])
-        except Exception as e:
-            QMessageBox.warning(self, "Open stream failed", str(e))
-
-    def _open_latest_stream_file(self):
-        sdir = self._streams_dir_for_active()
-        if not sdir or not sdir.exists():
-            QMessageBox.information(self, "Streams", "No streams folder for the active run.")
-            return
-        files = list(sdir.glob("*.stream"))
-        if not files:
-            QMessageBox.information(self, "Streams", "No .stream files found yet.")
-            return
-        latest = max(files, key=lambda p: p.stat().st_mtime)
-        try:
-            if sys.platform.startswith("darwin"):
-                subprocess.Popen(["open", str(latest)])
-            elif os.name == "nt":
-                os.startfile(str(latest))  # type: ignore[attr-defined]
-            else:
-                subprocess.Popen(["xdg-open", str(latest)])
-        except Exception as e:
-            QMessageBox.warning(self, "Open latest stream failed", str(e))
-
-
-    def _build_cell_tab(self):
-        lay = QVBoxLayout(self.cell_tab)
-
-        # Toolbar
-        bar = QHBoxLayout()
-        btn_load = QPushButton("Load from path")
-        btn_save = QPushButton("Save to path")
-        btn_save_as_run = QPushButton("Save As… (into run dir)")
-        bar.addWidget(btn_load)
-        bar.addWidget(btn_save)
-        bar.addWidget(btn_save_as_run)
-        bar.addStretch(1)
-        lay.addLayout(bar)
-
-        # Editor
-        self.cell_editor = QPlainTextEdit()
-        self.cell_editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        lay.addWidget(self.cell_editor, 1)
-
-        # Wire actions
-        btn_load.clicked.connect(self._cell_load_from_path)
-        btn_save.clicked.connect(self._cell_save_to_path)
-        btn_save_as_run.clicked.connect(self._cell_save_as_into_run)
-
-
-    def _build_geom_tab(self):
-        lay = QVBoxLayout(self.geom_tab)
-
-        # Toolbar
-        bar = QHBoxLayout()
-        btn_load = QPushButton("Load from path")
-        btn_save = QPushButton("Save to path")
-        btn_save_as_run = QPushButton("Save As… (into run dir)")
-        bar.addWidget(btn_load)
-        bar.addWidget(btn_save)
-        bar.addWidget(btn_save_as_run)
-        bar.addStretch(1)
-        lay.addLayout(bar)
-
-        # Editor
-        self.geom_editor = QPlainTextEdit()
-        self.geom_editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        lay.addWidget(self.geom_editor, 1)
-
-        # Wire actions
-        btn_load.clicked.connect(self._geom_load_from_path)
-        btn_save.clicked.connect(self._geom_save_to_path)
-        btn_save_as_run.clicked.connect(self._geom_save_as_into_run)
-
-    # ---- Cell helpers ----
-
-    def _cell_load_from_path(self):
-        path = self.edit_cell.text().strip()
-        if not path:
-            QMessageBox.information(self, "Cell", "Set a cell file path on the Settings tab first.")
-            return
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                self.cell_editor.setPlainText(f.read())
-            append_line(self.txt_output, f"[cell] loaded: {path}")
-        except Exception as e:
-            QMessageBox.warning(self, "Load cell failed", str(e))
-
-    def _cell_save_to_path(self):
-        path = self.edit_cell.text().strip()
-        if not path:
-            QMessageBox.information(self, "Cell", "Set a cell file path on the Settings tab first.")
-            return
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(self.cell_editor.toPlainText())
-            append_line(self.txt_output, f"[cell] saved: {path}")
-        except Exception as e:
-            QMessageBox.warning(self, "Save cell failed", str(e))
-
-    def _cell_save_as_into_run(self):
-        run_dir = getattr(self, "selected_run_dir", None) or (self.current_run.run_dir if getattr(self, "current_run", None) else None)
-        if not run_dir:
-            QMessageBox.information(self, "Cell", "Select or create a run first (left panel).")
-            return
-        default = (Path(run_dir) / "cellfile.cell").as_posix()
-        path, _ = QFileDialog.getSaveFileName(self, "Save cell into run", default, "Cell (*.cell);;All files (*)")
-        if not path:
-            return
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(self.cell_editor.toPlainText())
-            self.edit_cell.setText(path)
-            append_line(self.txt_output, f"[cell] saved: {path}")
-        except Exception as e:
-            QMessageBox.warning(self, "Save cell failed", str(e))
-
-    # ---- Geometry helpers ----
-    def _geom_load_from_path(self):
-        path = self.edit_geom.text().strip()
-        if not path:
-            QMessageBox.information(self, "Geometry", "Set a geometry file path on the Settings tab first.")
-            return
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                self.geom_editor.setPlainText(f.read())
-            append_line(self.txt_output, f"[geom] loaded: {path}")
-        except Exception as e:
-            QMessageBox.warning(self, "Load geometry failed", str(e))
-
-    def _geom_save_to_path(self):
-        path = self.edit_geom.text().strip()
-        if not path:
-            QMessageBox.information(self, "Geometry", "Set a geometry file path on the Settings tab first.")
-            return
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(self.geom_editor.toPlainText())
-            append_line(self.txt_output, f"[geom] saved: {path}")
-        except Exception as e:
-            QMessageBox.warning(self, "Save geometry failed", str(e))
-
-    def _geom_save_as_into_run(self):
-        run_dir = getattr(self, "selected_run_dir", None) or (self.current_run.run_dir if getattr(self, "current_run", None) else None)
-        if not run_dir:
-            QMessageBox.information(self, "Geometry", "Select or create a run first (left panel).")
-            return
-        default = (Path(run_dir) / "geometry.geom").as_posix()
-        path, _ = QFileDialog.getSaveFileName(self, "Save geometry into run", default, "Geometry (*.geom);;All files (*)")
-        if not path:
-            return
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(self.geom_editor.toPlainText())
-            self.edit_geom.setText(path)
-            append_line(self.txt_output, f"[geom] saved: {path}")
-        except Exception as e:
-            QMessageBox.warning(self, "Save geometry failed", str(e))
-
-    def _build_runs_panel(self):
-        """Left-side runs panel: choose run root, list runs, open and create."""
-        from PyQt6.QtWidgets import (
-            QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-            QListWidget, QListWidgetItem
-        )
-        w = self.runs_panel
-        outer = QVBoxLayout(w)
-
-        # Run root chooser
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Run root:"))
-        self.edit_run_root = QLineEdit(str(self.run_root))
-        btn_browse_root = QPushButton("…")
-        btn_browse_root.setToolTip("Choose run root directory")
-        btn_browse_root.clicked.connect(self._choose_run_root)
-        row.addWidget(self.edit_run_root, 1)
-        row.addWidget(btn_browse_root, 0)
-        outer.addLayout(row)
-
-        # Buttons: new run, open folder
-        row2 = QHBoxLayout()
-        self.btn_new_run = QPushButton("New Run")
-        self.btn_new_run.setToolTip("Create a timestamped run folder")
-        self.btn_new_run.clicked.connect(self._create_new_run_dir)
-
-        self.btn_open_run = QPushButton("Open Folder")
-        self.btn_open_run.setToolTip("Open selected run folder in file manager")
-        self.btn_open_run.clicked.connect(self._open_selected_run_dir)
-
-        row2.addWidget(self.btn_new_run)
-        row2.addWidget(self.btn_open_run)
-        outer.addLayout(row2)
-
-        # Runs list
-        self.list_runs = QListWidget()
-        self.list_runs.itemSelectionChanged.connect(self._on_select_run)
-        outer.addWidget(self.list_runs, 1)
-
-        # --- Batch queue (simple scaffold) ---
-        outer.addWidget(QLabel("Batch queue:"))
-        self.list_batch = QListWidget()
-        outer.addWidget(self.list_batch, 1)
-
-        row3 = QHBoxLayout()
-        self.btn_batch_add = QPushButton("Add current settings")
-        self.btn_batch_clear = QPushButton("Clear")
-        self.btn_batch_start = QPushButton("Start Batch")
-        self.btn_batch_add.clicked.connect(self._batch_add_current)
-        self.btn_batch_clear.clicked.connect(self._batch_clear)
-        self.btn_batch_start.clicked.connect(self._batch_start)
-        row3.addWidget(self.btn_batch_add)
-        row3.addWidget(self.btn_batch_clear)
-        row3.addWidget(self.btn_batch_start)
-        outer.addLayout(row3)
-
-        # Initial population
-        self._refresh_runs_tree()
-
-    def _ws_start_batch_indexing(self):
-        """Queue and run all INIs with a NEW timestamped run name. Writes settings and seeds input.lst."""
-        inis = self._get_workspace_ini_paths()
-        if not inis:
-            QMessageBox.information(self, "Batch Run", "No INI files found under the workspace root.")
-            return
-        group = f"indexingintegration_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        cfg = self._collect_settings_from_ui()
-        self._ws_batch_queue = []
-        created_dirs = 0
-        created_lists = 0
-
-        for ini in inis:
-            try:
-                run_base = self._resolve_run_root(ini)
-                rd = Path(run_base) / group
-                rd.mkdir(parents=True, exist_ok=True)
-                created_dirs += 1
-                # settings
-                try:
-                    with open(rd / "index_settings.json", "w", encoding="utf-8") as jf:
-                        json.dump(cfg, jf, indent=2)
-                except Exception:
-                    pass
-                # seed list from INI heuristic
-                try:
-                    lst = rd / "input.lst"
-                    if not lst.exists():
-                        h5 = self._find_h5_path_from_ini(ini)
-                        if h5:
-                            with open(lst, "w", encoding="utf-8") as f:
-                                f.write(os.path.abspath(h5))
-                            created_lists += 1
-                except Exception:
-                    pass
-                self._ws_batch_queue.append(rd)
-            except Exception:
-                continue
-
-        # switch UI to current selection if possible
-        if self._ws_batch_queue:
-            self._apply_run_dir(self._ws_batch_queue[0])
-
-        self._refresh_workspace_tree()
-        # Auto-pick first INI and newest run on startup (if any)
-        QTimer.singleShot(0, self._workspace_autoload_latest_on_startup)
-
-        if not self._ws_batch_queue:
-            QMessageBox.information(self, "Batch Run", "No runs could be prepared for batch execution.")
-            return
-
-        info_bits = [f"created {created_dirs} run folder(s)"]
-        if created_lists:
-            info_bits.append(f"prepared {created_lists} input.lst file(s)")
-        append_line(self.txt_output, "[batch] " + "; ".join(info_bits))
-
-        # begin
-        self._ws_batch_mode = True
-        self._ws_start_next_in_batch()
-
-    def _workspace_autoload_latest_on_startup(self):
-        try:
-            # pick first INI
-            top = self.tree_ws.topLevelItem(0)
-            if not top:
-                return
-            ini_val = top.data(0, Qt.ItemDataRole.UserRole)
-            if not ini_val:
-                return
-            ini_path = Path(ini_val)
-            self.selected_ini = ini_path
-            # select newest run for it (and focus)
-            rd = self._select_newest_run_for_ini(ini_path, also_focus_tree=True)
-            if rd:
-                self._apply_run_dir(rd)
-            else:
-                # no runs yet; try to seed input from INI
-                h5 = self._find_h5_path_from_ini(str(ini_path))
-                if h5:
-                    self.edit_input_dir.setText(str(Path(h5).parent))
-            self._update_command_preview(None)
-        except Exception:
-            pass
-
-    def _apply_run_dir(self, run_dir: Path):
-        """Reflect run_dir into the Settings tab and select it everywhere."""
-        self.selected_run_dir = Path(run_dir)
-        # Prefer local cell/geom if exist
-        gf = self.selected_run_dir / "geometry.geom"
-        cf = self.selected_run_dir / "cellfile.cell"
-        lst = self.selected_run_dir / "input.lst"
-        if gf.exists(): self.edit_geom.setText(str(gf))
-        if cf.exists(): self.edit_cell.setText(str(cf))
-        if lst.exists(): self.edit_input_dir.setText(str(self.selected_run_dir))
-        self._update_command_preview(None)
-        self._set_window_title_for_run(run_dir)
-
-
-    def _ws_start_next_in_batch(self):
-        if not getattr(self, "_ws_batch_queue", []):
-            self._ws_batch_mode = False
-            QMessageBox.information(self, "Batch Run", "Batch finished.")
-            return
-        rd = self._ws_batch_queue.pop(0)
-        self._apply_run_dir(rd)
-        # trigger a normal grid run (this will save settings, write streams dir, etc.)
-        self._start_grid_clicked()
-        # chain next on finish
-        # (your existing _on_proc_finished already continues your other batch;
-        # we keep a separate flag to chain here as well)
-        self._ws_chain_on_finish = True
-
-    def _resolve_active_run_dir(self) -> Optional[Path]:
-        """Prefer current running context; otherwise use the last selected run."""
-        if getattr(self, "current_run", None):
-            return self.current_run.run_dir
-        return getattr(self, "selected_run_dir", None)
-
-    def _open_streams_folder(self):
-        run_dir = self._resolve_active_run_dir()
-        if not run_dir:
-            QMessageBox.information(self, "Streams", "No run selected. Create/select a run on the left.")
-            return
-        streams_dir = run_dir / "streams"
-        ensure_dir(streams_dir)
-        try:
-            if sys.platform.startswith("darwin"):
-                subprocess.Popen(["open", str(streams_dir)])
-            elif os.name == "nt":
-                os.startfile(str(streams_dir))  # type: ignore[attr-defined]
-            else:
-                subprocess.Popen(["xdg-open", str(streams_dir)])
-        except Exception as e:
-            QMessageBox.warning(self, "Open streams failed", str(e))
-
-    def _merge_streams_now_clicked(self):
-        run_dir = self._resolve_active_run_dir()
-        if not run_dir:
-            QMessageBox.information(self, "Merge streams", "No run selected.")
-            return
-        try:
-            out_path = self._merge_streams_in_run(run_dir)
-            append_line(self.txt_output, f"[merge] merged -> {out_path}")
-            QMessageBox.information(self, "Merge streams", f"Merged file:\n{out_path}")
-        except Exception as e:
-            QMessageBox.warning(self, "Merge streams failed", str(e))
-
-    def _merge_streams_in_run(self, run_dir: Path, out_name: Optional[str] = None) -> Path:
-        """
-        Naive .stream concatenation stub:
-        - finds run_dir/streams/*.stream
-        - concatenates into run_dir/<out_name or 'merged.stream'>
-        Returns the output path.
-        """
-        streams_dir = run_dir / "streams"
-        files = sorted(streams_dir.glob("*.stream"))
-        if not files:
-            raise RuntimeError(f"No .stream files in {streams_dir}")
-
-        # Choose output name
-        if out_name:
-            out_path = run_dir / out_name
-        else:
-            # If we have a current_run with out_base, prefer that for the merged name
-            base = None
-            if getattr(self, "current_run", None) and self.current_run.run_dir == run_dir:
-                base = self.current_run.out_base
-            out_path = run_dir / (f"{base}_merged.stream" if base else "merged.stream")
-
-        # Concatenate as text; add a newline between files if needed
-        with open(out_path, "w", encoding="utf-8") as out:
-            for i, fpath in enumerate(files, start=1):
-                with open(fpath, "r", encoding="utf-8", errors="replace") as inp:
-                    for line in inp:
-                        out.write(line)
-                if i != len(files):
-                    out.write("\n")
-        return out_path
-
-    def _export_run_bundle(self):
-        run_dir = self._resolve_active_run_dir()
-        if not run_dir:
-            QMessageBox.information(self, "Export run", "No run selected.")
-            return
-
-        # Build a temporary staging dir to ensure external refs are included
-        stage = Path(tempfile.mkdtemp(prefix="run_export_"))
-        try:
-            # Copy run folder contents
-            staged_run = stage / run_dir.name
-            shutil.copytree(run_dir, staged_run)
-
-            # Bring in external refs (geom/cell) if they are outside run_dir
-            refs_dir = staged_run / "refs"
-            refs_added = False
-            geom_path = Path(self.edit_geom.text().strip()) if self.edit_geom.text().strip() else None
-            cell_path = Path(self.edit_cell.text().strip()) if self.edit_cell.text().strip() else None
-            for p in (geom_path, cell_path):
-                if p and p.exists() and not str(p.resolve()).startswith(str(run_dir.resolve())):
-                    ensure_dir(refs_dir)
-                    shutil.copy2(p, refs_dir / p.name)
-                    refs_added = True
-
-            # Create zip next to the run dir
-            zip_path = run_dir.with_suffix(".zip")
-            if zip_path.exists():
-                zip_path.unlink()
-            shutil.make_archive(str(zip_path.with_suffix("")), "zip", root_dir=stage, base_dir=run_dir.name)
-
-            note = " (with refs)" if refs_added else ""
-            append_line(self.txt_output, f"[export] created {zip_path}{note}")
-            QMessageBox.information(self, "Export run", f"Created:\n{zip_path}")
-        except Exception as e:
-            QMessageBox.warning(self, "Export run failed", str(e))
-        finally:
-            # Clean staging
-            try:
-                shutil.rmtree(stage, ignore_errors=True)
-            except Exception:
-                pass
-
-
-    def _choose_run_root(self):
-        path = QFileDialog.getExistingDirectory(self, "Select run root", str(self.run_root))
-        if path:
-            self.run_root = Path(path)
-            ensure_dir(self.run_root)
-            self.edit_run_root.setText(str(self.run_root))
-            self._refresh_runs_tree()
-
-    def _create_new_run_dir(self):
-        run_dir = timestamp_run_dir(self.run_root)
-        ensure_dir(run_dir)
-        # Pre-create streams dir and empty input.lst
-        ensure_dir(run_dir / "streams")
-        write_text(run_dir / "input.lst", "")
-        self._refresh_runs_tree()
-        # Select it and load (which will reflect paths into UI)
-        self._select_run_in_list(run_dir)
-
-    def _open_selected_run_dir(self):
-        item = self.list_runs.currentItem()
-        if not item:
-            return
-        run_dir = Path(item.data(Qt.ItemDataRole.UserRole))
-        try:
-            if sys.platform.startswith("darwin"):
-                subprocess.Popen(["open", str(run_dir)])
-            elif os.name == "nt":
-                os.startfile(str(run_dir))  # type: ignore[attr-defined]
-            else:
-                subprocess.Popen(["xdg-open", str(run_dir)])
-        except Exception as e:
-            QMessageBox.warning(self, "Open folder failed", str(e))
-
-    def _refresh_runs_tree(self):
-        self.list_runs.clear()
-        if not self.run_root.exists():
-            return
-        for p in sorted(self.run_root.glob("indexingintegration_*")):
-            if not p.is_dir():
-                continue
-            item = QListWidgetItem(p.name)
-            item.setData(Qt.ItemDataRole.UserRole, str(p))
-            self.list_runs.addItem(item)
-
-    def _select_run_in_list(self, run_dir: Path):
-        for i in range(self.list_runs.count()):
-            item = self.list_runs.item(i)
-            if Path(item.data(Qt.ItemDataRole.UserRole)) == run_dir:
-                self.list_runs.setCurrentItem(item)
+        self.log_path = log_path
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        waited = 0.0
+        while not self._stop and not os.path.exists(self.log_path):
+            self.msleep(250)
+            waited += 0.25
+            if waited > 3600:
                 break
 
-    def _on_select_run(self):
-        item = self.list_runs.currentItem()
-        if not item:
-            return
-        run_dir = Path(item.data(Qt.ItemDataRole.UserRole))
-        # Load settings.json if present; populate UI; fill file paths
-        settings_path = run_dir / "index_settings.json"
-        if settings_path.exists():
-            try:
-                with open(settings_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                self._apply_settings_to_ui(data)
-            except Exception as e:
-                append_line(self.txt_output, f"[warn] failed to load settings: {e}")
-        # Populate file widgets to point into this run by default
-        # (User can still change them)
-        # geom/cell/input folder are stored in settings; leave as-is if present
-        self.current_run = None  # clear any old context
-        # reflect preview from current UI (no ctx yet)
-        self.selected_run_dir = run_dir
-        self._update_command_preview(None)
-
-
-    def _collect_settings_from_ui(self) -> dict:
-        return {
-            "indexamajig_path": self.edit_idxmj.text().strip(),
-            "geom_path": self.edit_geom.text().strip(),
-            "cell_path": self.edit_cell.text().strip(),
-            "input_dir": self.edit_input_dir.text().strip(),
-            "out_base": self.edit_out_base.text().strip(),
-            "threads": int(self.spin_threads.value()),
-            "max_radius": float(self.spin_max_radius.value()),
-            "step": float(self.spin_step.value()),
-            "advanced_flags": self.txt_advanced.toPlainText(),
-            "other_flags": self.txt_other.toPlainText(),
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "peakfinder_choice": self.peak_combo.currentText(),
-            "peakfinder_params": self.peak_params_edit.toPlainText(),
-
-        }
-
-    def _apply_settings_to_ui(self, data: dict):
-        def set_text(le: QLineEdit, key: str):
-            if key in data and isinstance(data[key], str):
-                le.setText(data[key])
-
-        set_text(self.edit_geom, "geom_path")
-        set_text(self.edit_cell, "cell_path")
-        set_text(self.edit_input_dir, "input_dir")
-        set_text(self.edit_out_base, "out_base")
-
-        if "threads" in data:
-            try: self.spin_threads.setValue(int(data["threads"]))
-            except: pass
-        if "max_radius" in data:
-            try: self.spin_max_radius.setValue(float(data["max_radius"]))
-            except: pass
-        if "step" in data:
-            try: self.spin_step.setValue(float(data["step"]))
-            except: pass
-            
-        if "peakfinder" in data and "peakfinder_params" not in data:
-            legacy = str(data["peakfinder"]).strip()
-            if legacy in default_peakfinder_options:
-                self.peak_combo.setCurrentText(legacy)
-                self.peak_params_edit.setPlainText(default_peakfinder_options[legacy])
-            else:
-                self.peak_params_edit.setPlainText(legacy)
-
-        if "peakfinder_choice" in data and isinstance(data["peakfinder_choice"], str):
-            self.peak_combo.setCurrentText(data["peakfinder_choice"])
-
-        if "peakfinder_params" in data and isinstance(data["peakfinder_params"], str):
-            self.peak_params_edit.setPlainText(data["peakfinder_params"])
-
-        if "advanced_flags" in data and isinstance(data["advanced_flags"], str):
-            self.txt_advanced.setPlainText(data["advanced_flags"])
-        if "other_flags" in data and isinstance(data["other_flags"], str):
-            self.txt_other.setPlainText(data["other_flags"])
-        if "indexamajig_path" in data and isinstance(data["indexamajig_path"], str):
-            self.edit_idxmj.setText(data["indexamajig_path"])
-
-    def _save_settings_to_run(self, run_dir: Path):
-        data = self._collect_settings_from_ui()
-        try:
-            with open(run_dir / "index_settings.json", "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            append_line(self.txt_output, f"[warn] failed to save settings: {e}")
-
-    def _build_command_preview(self, ctx: RunContext) -> str:
-        flags = self._compose_extra_flags()
-        base = (
-            f"indexamajig -g {ctx.geom_path} -i {ctx.list_path} "
-            f"-o {(ctx.run_dir / 'streams' / ctx.out_base)}.stream "
-            f"-p {ctx.cell_path} -j {ctx.threads}"
-        )
-        if flags:
-            base += " " + " ".join(flags)
-        passes = estimate_grid_points(ctx.max_radius, ctx.step)
-        base += f" | [grid] R={ctx.max_radius:g}px, step={ctx.step:g}px → {passes} passes"
-        return base
-
-    def _update_command_preview(self, _evt):
-        """
-        Rebuild the command preview so it matches the filled step-lattice circle used
-        by gandalf_iterator and estimate_grid_points. If a RunContext exists, show
-        the precise per-run preview (streams path + exact pass count).
-        """
-        try:
-            if not hasattr(self, "txt_preview") or self.txt_preview is None:
-                return
-
-            # If we have an active RunContext, show the precise command + grid info.
-            if getattr(self, "current_run", None):
-                try:
-                    self.txt_preview.setPlainText(self._build_command_preview(self.current_run))
-                    return
-                except Exception as e:
-                    self.txt_preview.setPlainText(f"[preview error] {e}")
-                    return
-
-            # Fallback simplified preview (no RunContext yet)
-            geom = self.edit_geom.text().strip()
-            cell = self.edit_cell.text().strip()
-            out_base = self.edit_out_base.text().strip()
-            threads = str(self.spin_threads.value())
-
-            # Prefer run's list file if available; else input folder path as entered
-            if getattr(self, "selected_run_dir", None):
-                cand = self.selected_run_dir / "input.lst"
-                lst = str(cand) if cand.exists() else self.edit_input_dir.text().strip()
-            else:
-                lst = self.edit_input_dir.text().strip()
-
-            flags = self._compose_extra_flags()
-            base = f"indexamajig -g {geom} -i {lst} -o {out_base}.stream -p {cell} -j {threads}"
-            if flags:
-                base += " " + " ".join(flags)
-
-            # Exact grid count for step-lattice points within the circle
-            try:
-                R = float(self.spin_max_radius.value())
-                S = float(self.spin_step.value())
-                passes = estimate_grid_points(R, S)
-                base += f" | [grid] R={R:g}px, step={S:g}px → {passes} passes"
-            except Exception:
-                pass
-
-            self.txt_preview.setPlainText(base)
-        except Exception as e:
-            if hasattr(self, "txt_preview") and self.txt_preview:
-                self.txt_preview.setPlainText(f"[preview error] {e}")
-
-
-    def _preflight_validate(self) -> bool:
-        """Check that required paths exist and are writable; warn user if not."""
-        msgs = []
-        gp = Path(self.edit_geom.text().strip())
-        cp = Path(self.edit_cell.text().strip())
-        ip = Path(self.edit_input_dir.text().strip())
-        out_base = self.edit_out_base.text().strip()
-        if not gp.is_file(): msgs.append("Geometry file is missing.")
-        if not cp.is_file(): msgs.append("Cell file is missing.")
-        if not ip.is_dir(): msgs.append("Input folder is missing.")
-        if not out_base: msgs.append("Output base is empty.")
-        if float(self.spin_step.value()) <= 0: msgs.append("Step must be > 0.")
-        if float(self.spin_max_radius.value()) < 0: msgs.append("Max radius must be ≥ 0.")
-
-        rd = self._resolve_active_run_dir() or self.run_root
-        try:
-            ensure_dir(rd)
-            test_path = Path(rd) / ".write_test"
-            test_path.write_text("ok", encoding="utf-8")
-            test_path.unlink(missing_ok=True)
-        except Exception:
-            msgs.append(f"Run directory not writable: {rd}")
-
-        if msgs:
-            QMessageBox.warning(self, "Preflight", "\n".join(msgs))
-            return False
-        return True
-
-    def _batch_add_current(self):
-        data = self._collect_settings_from_ui()
-        self.batch_queue.append(data)
-        item = QListWidgetItem(
-            f"{data.get('out_base','output')}  |  R={data.get('max_radius',0)}  step={data.get('step',0)}"
-        )
-        item.setData(Qt.ItemDataRole.UserRole, json.dumps(data))
-        self.list_batch.addItem(item)
-
-    def _batch_clear(self):
-        self.batch_queue.clear()
-        self.list_batch.clear()
-
-    def _batch_start(self):
-        if self.batch_active or not self.batch_queue:
-            return
-        self.batch_active = True
-        append_line(self.txt_output, f"[batch] starting {len(self.batch_queue)} job(s)")
-        self._batch_next()
-
-    def _batch_next(self):
-        if not self.batch_queue:
-            append_line(self.txt_output, "[batch] done.")
-            self.batch_active = False
-            return
-        # Pop next job and apply UI, then start a grid run
-        raw = self.batch_queue.pop(0)
-        try:
-            data = raw if isinstance(raw, dict) else json.loads(raw)
-        except Exception:
-            data = {}
-        self._apply_settings_to_ui(data)
-        ensure_dir(self.run_root)
-        self._start_grid_clicked()
-
-    # ==============
-    # Path pickers
-    # ==============
-    def _browse_to(self, lineedit: QLineEdit, filter_str: str):
-        path, _ = QFileDialog.getOpenFileName(self, "Select file", str(Path.cwd()), filter_str)
-        if path:
-            lineedit.setText(path)
-
-    def _browse_dir(self, lineedit: QLineEdit):
-        path = QFileDialog.getExistingDirectory(self, "Select folder", str(Path.cwd()))
-        if path:
-            lineedit.setText(path)
-
-    def _hpair(self, a: QWidget, b: QWidget) -> QWidget:
-        cw = QWidget()
-        lay = QHBoxLayout(cw)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(a, 1)
-        lay.addWidget(b, 0)
-        return cw
-
-    # =====================
-    # Start/Stop click flow
-    # =====================
-    def _start_grid_clicked(self):
-        # Prevent double-start while running
-        if self.proc and self.proc.poll() is None:
-            QMessageBox.information(self, "Run", "A job is already running.")
-            return
-        # Validate inputs
-        if not self._preflight_validate():
+        if not os.path.exists(self.log_path):
+            self.finishedTailing.emit()
             return
 
-        # Validate inputs
-        geom = Path(self.edit_geom.text().strip())
-        cell = Path(self.edit_cell.text().strip())
-        in_dir = Path(self.edit_input_dir.text().strip())
-        out_base = self.edit_out_base.text().strip() or "output"
-        threads = int(self.spin_threads.value())
-        max_radius = float(self.spin_max_radius.value())
-        step = float(self.spin_step.value())
-
-        missing = []
-        if not geom.is_file(): missing.append("geometry file")
-        if not cell.is_file(): missing.append("cell file")
-        if not in_dir.is_dir(): missing.append("input folder")
-        if step <= 0.0: missing.append("step > 0")
-        if max_radius < 0.0: missing.append("radius ≥ 0")
-
-        if missing:
-            QMessageBox.warning(self, "Missing/invalid", "Please provide: " + ", ".join(missing))
-            return
-
-        # Compose flags
-        extra_flags = self._compose_extra_flags()
-        # Create run dir and materialize input.lst
-        run_dir = timestamp_run_dir(self.run_root)
-        ensure_dir(run_dir)
-        list_path = run_dir / "input.lst"
-        total_images = self._write_input_list(in_dir, list_path)
-        ensure_dir(run_dir / "streams")
-        self._save_settings_to_run(run_dir)
-        self.last_out_dir = run_dir / "streams"
-        self._update_wrmsd_button_enabled()
-
-        # NEW: bail out if we found no images
-        if total_images == 0:
-            QMessageBox.warning(self, "No images", "Found 0 images in the input folder.")
-            return
-        
-        # Progress scale
-        est_passes = estimate_grid_points(max_radius, step)
-        per_pass = total_images
-        self.per_pass_images = per_pass
-        self.estimated_passes = max(1, est_passes)
-        self.processed_images_total = 0
-        self.last_seen_processed = 0
-        self.seen_passes = 0
-
-        # Stash context
-        self.current_run = RunContext(
-            run_dir=run_dir, geom_path=geom, cell_path=cell,
-            input_dir=in_dir, list_path=list_path, out_base=out_base,
-            threads=threads, max_radius=max_radius, step=step,
-            extra_flags=extra_flags, total_images=total_images,
-            estimated_passes=est_passes
-        )
-        # Command preview (precise)
-        self._update_command_preview(self.current_run)
-        self.lbl_pass.setText(f"Pass: 1/{max(1, self.current_run.estimated_passes)}")
-
-
-        # Command preview
-        append_line(self.txt_output,
-                    f"[grid] base='{out_base}', R={max_radius:g}px step={step:g}px → {est_passes} passes")
-        append_line(self.txt_output, f"[files] run_dir={run_dir}")
-        append_line(self.txt_output, f"[files] input.lst={list_path} (images={total_images})")
-        append_line(self.txt_output, f"[files] streams={run_dir/'streams'}")
-
-
-        # Launch child
-        prev = self._build_command_preview(self.current_run)                                        
-        append_line(self.txt_output, "[preview] " + prev.replace("\n", " | "))   
-        self._launch_runner(self.current_run)
-
-    def _stop_clicked(self):
-        if not self.proc or self.proc.poll() is not None:
-            self.lbl_status.setText("No active process.")
-            return
-        ans = QMessageBox.question(self, "Stop run", "Stop the current job?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if ans != QMessageBox.StandardButton.Yes:
-            return
-        self._kill_process_group()
-        self._cleanup_runner_file()
-        self._set_window_title_for_run(self._resolve_active_run_dir())
-
-        self.btn_stop.setEnabled(False)
-        self.btn_start_grid.setEnabled(True)
-        self.lbl_status.setText("Stopped.")
-        self.lbl_pass.setText("Pass: -/-")
-        self.lbl_elapsed.setText("Elapsed: 00:00:00")
-        self.lbl_eta.setText("ETA: --:--:--")
-        self.lbl_rate.setText("Rate: -- img/s")
-        self._refresh_streams_list()
-
-    # ==================
-    # Compose extra flags
-    # ==================
-    
-    def _compose_extra_flags(self) -> list[str]:
-        flags: list[str] = []
-
-        # Optional indexamajig path passthrough (if you added this field)
-        idxmj = getattr(self, "edit_idxmj", None)
-        if idxmj and idxmj.text().strip():
-            flags.append(f"--indexamajig-path={idxmj.text().strip()}")
-
-        # Peakfinder params: take exactly what’s in the text box
-        if hasattr(self, "peak_params_edit"):
-            for line in self.peak_params_edit.toPlainText().splitlines():
-                s = line.strip()
-                if s:
-                    flags.append(s)
-
-        # Advanced flags (multiline)
-        if hasattr(self, "txt_advanced"):
-            for line in self.txt_advanced.toPlainText().splitlines():
-                s = line.strip()
-                if s:
-                    flags.append(s)
-
-        # Other flags (multiline)
-        if hasattr(self, "txt_other"):
-            for line in self.txt_other.toPlainText().splitlines():
-                s = line.strip()
-                if s:
-                    flags.append(s)
-
-        return flags
-
-    # ======================
-    # Create list and count
-    # ======================
-
-    def _write_input_list(self, in_dir: Path, list_path: Path) -> int:
-        """
-        Writes an indexamajig-style input list with absolute HDF5 paths.
-        Returns total image count for progress scaling.
-        """
-        lines: List[str] = []
-        for ext in ("*.h5", "*.hdf5", "*.cxi"):
-            for h5path in sorted(in_dir.glob(ext)):
-                lines.append(str(h5path.resolve()))
-        write_text(list_path, "\n".join(lines) + ("\n" if lines else ""))
-        total = count_images_in_h5_folder(in_dir)
-        append_line(self.txt_output, f"[scan] detected {total} images across {len(lines)} files")
-        return total
-
-
-    # ==============
-    # Runner launch
-    # ==============
-    
-    def _launch_runner(self, ctx: RunContext):
-        # Write a temp runner
-        fd, runner_path = tempfile.mkstemp(prefix="run_gandalf_", suffix=".py")
-        os.close(fd)
-        self.proc_runner_path = Path(runner_path)
-        with open(self.proc_runner_path, "w", encoding="utf-8") as f:
-            f.write(textwrap.dedent(GANDALF_RUNNER_CODE))
-
-        # Ensure streams dir
-        streams_dir = ctx.run_dir / "streams"
-        ensure_dir(streams_dir)
-
-        # Build argv (named) + pass-through flags
-        outbase_for_child = str((streams_dir / ctx.out_base).resolve())
-        argv = [
-            sys.executable,
-            "-u",
-            str(self.proc_runner_path),
-            "--host", os.path.abspath(__file__),
-            "--geom", str(ctx.geom_path),
-            "--cell", str(ctx.cell_path),
-            "--input", str(ctx.list_path),
-            "--outbase", outbase_for_child,
-            "--threads", str(ctx.threads),
-            "--radius", str(ctx.max_radius),
-            "--step", str(ctx.step),
-            *ctx.extra_flags,
-        ]
-
-        # Log plan
-        append_line(self.txt_output, "[launch] " + " ".join(shlex.quote(a) for a in argv))
-
-        # Create per-run log
-        self.run_log_path = ctx.run_dir / "indexing.log"
-        self.run_log_fp = open(self.run_log_path, "w", encoding="utf-8")
-
-        # --- Prepare environment for subprocess (define BEFORE popen_kwargs) ---
-        env = os.environ.copy()
-        idxmj = self.edit_idxmj.text().strip()
-        if idxmj:
-            ip = Path(idxmj)
-            # If user pointed to the executable, use its parent; if a dir, use it directly
-            idx_dir = ip.parent if ip.suffix else ip
-            env["PATH"] = str(idx_dir) + os.pathsep + env.get("PATH", "")
-
-        # --- Platform-specific spawn flags & pipe setup ---
-        popen_kwargs = dict(
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=1,
-            text=True,        # text mode so readline() returns str
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-        )
-
-        if os.name == "nt":
-            # New process group so we can signal it cleanly (CTRL_BREAK)
-            try:
-                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        else:
-            # New process group on POSIX + avoid FD leaks
-            popen_kwargs["preexec_fn"] = os.setsid
-            popen_kwargs["close_fds"] = True
-
-        # Spawn
-        try:
-            self.proc = subprocess.Popen(argv, **popen_kwargs)
-        except Exception as e:
-            QMessageBox.critical(self, "Launch error", str(e))
-            self._cleanup_runner_file()
-            return
-
-        # Reader thread
-        self.proc_thread = ProcessOutputThread(self.proc)
-        self.proc_thread.output_received.connect(self._on_proc_line)
-        self.proc_thread.output_received.connect(self._on_process_output)
-        self.proc_thread.finished.connect(self._on_proc_finished)
-        self.proc_thread.start()
-
-        # UI state
-        self.btn_start_grid.setEnabled(False)
-        self.btn_stop.setEnabled(True)
-
-        # Disable workspace/run actions while running (prevent tree churn)
-        for b in (getattr(self, "btn_ws_new_run", None),
-                getattr(self, "btn_ws_new_batch", None),
-                getattr(self, "btn_ws_start_batch", None),
-                getattr(self, "btn_ws_broadcast", None),
-                getattr(self, "btn_new_run", None),
-                getattr(self, "btn_open_run", None),
-                getattr(self, "btn_batch_add", None),
-                getattr(self, "btn_batch_clear", None),
-                getattr(self, "btn_batch_start", None)):
-            if b:
-                b.setEnabled(False)
-
-        self.lbl_status.setText("Running…")
-        self._reset_progress_bar()
-        self._refresh_streams_list()
-
-        # Timing start (for rate/ETA)
-        self.run_start_time = time.time()
-        self.ema_rate = None
-        self.lbl_elapsed.setText("Elapsed: 00:00:00")
-        self.lbl_eta.setText("ETA: --:--:--")
-        self.lbl_rate.setText("Rate: -- img/s")
-
- 
-
-    def _reset_progress_bar(self):
-        # Scale 0..(passes*per_pass)
-        total = max(1, self.estimated_passes * max(1, self.per_pass_images))
-        self.progress.setMinimum(0)
-        self.progress.setMaximum(total)
-        self.progress.setValue(0)
-
-    # =====================
-    # Process output hooks
-    # =====================
-
-    def _on_process_output(self, text: str):
-        # PARSE-ONLY: do not append to GUI log here (avoids double printing).
-        # Line format from gandalf_iterator(): "Resulting streamfiles will be saved in <dir>"
-        marker = "Resulting streamfiles will be saved in "
-        if marker in text:
-            out_dir_str = text.split(marker, 1)[1].strip()
-            try:
-                p = Path(out_dir_str)
-                if p.exists():
-                    self.last_out_dir = p
-                    self._update_wrmsd_button_enabled()
-                    append_line(self.txt_output, f"[GUI] Detected streams dir: {self.last_out_dir}")
-            except Exception:
-                pass
-
-
-    def _on_proc_line(self, text: str):
-        line = text.rstrip("\n")
-
-        # --- Selective mirroring to GUI log ---
-        should_show = True
-        if not getattr(self, "_mirror_stdout", True):
-            should_show = False
-        elif getattr(self, "_mirror_only_progress", True):
-            low = line.lower()
-            # Show progress lines AND anything that looks like an error/failure
-            should_show = (
-                ("images processed" in low)
-                or ("error" in low)
-                or ("failed" in low)
-                or ("fatal" in low)
-                or low.startswith("[xy-pass]")
-            )
-
-        if should_show:
-            append_line(self.txt_output, line)
-
-        # --- Always write complete raw output to log file ---
-        try:
-            self.run_log_fp.write(text)
-            self.run_log_fp.flush()
-        except Exception:
-            pass
-
-        # --- Progress parsing ---
-        n = self._parse_images_processed(text)
-        if n is not None:
-            if n < self.last_seen_processed:
-                self.seen_passes += 1
-            self.last_seen_processed = n
-            total_so_far = self.seen_passes * self.per_pass_images + n
-            self.progress.setValue(max(self.progress.value(), total_so_far))
-
-        # --- Pass label updates ---
-        if text.startswith("[XY-PASS]"):
-            parts = text.split()
-            try:
-                frac = parts[1]  # "i/N"
-                i, N = frac.split("/")
-                self.seen_passes = max(self.seen_passes, int(i) - 1)
-                self.estimated_passes = max(self.estimated_passes, int(N))
-                # Expand max without dropping current progress
-                old_val = self.progress.value()
-                new_max = max(1, self.estimated_passes * max(1, self.per_pass_images))
-                self.progress.setMaximum(new_max)
-                self.progress.setValue(min(old_val, new_max))
-            except Exception:
-                pass
-
-        self.lbl_pass.setText(
-            f"Pass: {min(self.seen_passes + 1, max(1, self.estimated_passes))}/{max(1, self.estimated_passes)}"
-        )
-
-        # --- Rate / ETA ---
-        now = time.time()
-        if self.run_start_time:
-            rate_in_line = self._parse_images_per_sec(text)
-            cur = self.progress.value()
-            if rate_in_line and rate_in_line > 0:
-                self.ema_rate = (
-                    self.ema_alpha * rate_in_line +
-                    (1 - self.ema_alpha) * (self.ema_rate or rate_in_line)
-                )
-            else:
-                elapsed = max(1e-3, now - self.run_start_time)
-                derived = cur / elapsed
-                if derived > 0:
-                    self.ema_rate = (
-                        self.ema_alpha * derived +
-                        (1 - self.ema_alpha) * (self.ema_rate or derived)
-                    )
-            self._update_time_labels(now, cur)
-
-
-    def _on_toggle_mirror(self, checked: bool):
-        self._mirror_stdout = bool(checked)
-        try:
-            self.mirror_progress_only_chk.setEnabled(bool(checked))
-        except Exception:
-            pass
-
-    def _on_toggle_mirror_only_progress(self, checked: bool):
-        self._mirror_only_progress = bool(checked)
-
-
-    def _parse_images_processed(self, line: str) -> Optional[int]:
-        if "images processed" not in line:
-            return None
-        # scan tokens backward until we find an int
-        num = None
-        toks = line.replace(",", " ").split()
-        for i, tok in enumerate(toks):
-            if tok.isdigit() and i + 1 < len(toks) and toks[i+1].startswith("images"):
-                try:
-                    num = int(tok); break
-                except Exception:
-                    continue
-        if num is None:
-            # fallback: first integer in the line
-            acc = ""
-            for ch in line:
-                if ch.isdigit(): acc += ch
-                elif acc:
-                    try: return int(acc)
-                    except: return None
-            return int(acc) if acc else None
-        return num
-
-
-    def _parse_images_per_sec(self, line: str) -> Optional[float]:
-        # light-weight scan for floating number followed by "images/sec"
-        if "images/sec" not in line:
-            return None
-        try:
-            before = line.split("images/sec")[0]
-            tokens = before.strip().split()
-            for tok in reversed(tokens):
-                t = tok.strip(",;")
-                try:
-                    return float(t)
-                except Exception:
-                    continue
-        except Exception:
-            return None
-        return None
-
-    def _update_time_labels(self, now_ts: float, cur_progress: int):
-        elapsed = int(now_ts - (self.run_start_time or now_ts))
-        self.lbl_elapsed.setText(f"Elapsed: {self._fmt_hms(elapsed)}")
-        if self.ema_rate and self.ema_rate > 0:
-            self.lbl_rate.setText(f"Rate: {self.ema_rate:.2f} img/s")
-            remaining = max(0, self.progress.maximum() - cur_progress)
-            eta_sec = int(remaining / self.ema_rate) if self.ema_rate > 0 else 0
-            self.lbl_eta.setText(f"ETA: {self._fmt_hms(eta_sec)}")
-        else:
-            self.lbl_rate.setText("Rate: -- img/s")
-            self.lbl_eta.setText("ETA: --:--:--")
-
-    def _fmt_hms(self, seconds: int) -> str:
-        h = seconds // 3600
-        m = (seconds % 3600) // 60
-        s = seconds % 60
-        return f"{h:02d}:{m:02d}:{s:02d}"
-
-    def _set_window_title_for_run(self, run_dir: Optional[Path]):
-        base = "Index & Integrate (Iterative Indexing Grid with wRMSD Selection)"
-        if run_dir:
-            self.setWindowTitle(f"{base} — {run_dir.name}")
-        else:
-            self.setWindowTitle(base)
-
-    def _on_proc_finished(self, rc: int):
-        append_line(self.txt_output, f"[done] exit code {rc}")
-        self.lbl_status.setText("Finished." if rc == 0 else f"Failed (rc={rc})")
-        self.btn_stop.setEnabled(False)
-        self.btn_start_grid.setEnabled(True)
-        self._update_wrmsd_button_enabled()
-
-        for b in (getattr(self, "btn_ws_new_run", None),
-                getattr(self, "btn_ws_new_batch", None),
-                getattr(self, "btn_ws_start_batch", None),
-                getattr(self, "btn_ws_broadcast", None),
-                getattr(self, "btn_new_run", None),
-                getattr(self, "btn_open_run", None),
-                getattr(self, "btn_batch_add", None),
-                getattr(self, "btn_batch_clear", None),
-                getattr(self, "btn_batch_start", None)):
-            if b: b.setEnabled(True)
-
-        try:
-            self.run_log_fp.close()
-        except Exception:
-            pass
-        self._cleanup_runner_file()
-        self.proc = None
-        self.proc_thread = None
-        self._set_window_title_for_run(self._resolve_active_run_dir())
-
-        # Reset time labels
-        self.lbl_elapsed.setText("Elapsed: 00:00:00")
-        self.lbl_eta.setText("ETA: --:--:--")
-        self.lbl_rate.setText("Rate: -- img/s")
-        self.lbl_pass.setText("Pass: -/-")
-        self.run_start_time = None
-        self.ema_rate = None
-        self._refresh_streams_list()
-
-        # Batch continuation
-        if self.batch_active:
-            QTimer.singleShot(150, self._batch_next)
-        if getattr(self, "_ws_chain_on_finish", False):
-            self._ws_chain_on_finish = False
-            if getattr(self, "_ws_batch_mode", False):
-                QTimer.singleShot(200, self._ws_start_next_in_batch)
-
-    # =========
-    # Cleanup
-    # =========
-
-    def _kill_process_group(self):
-        if not self.proc or self.proc.poll() is not None:
-            return
-        try:
-            if os.name == "nt":
-                # Send CTRL_BREAK to the group, then terminate if needed
-                try:
-                    self.proc.send_signal(signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]
-                    self.proc.wait(timeout=2)
-                except Exception:
-                    pass
-                if self.proc.poll() is None:
-                    self.proc.terminate()
-            else:
-                # POSIX: try graceful group kill, then hard-kill
-                pgid = os.getpgid(self.proc.pid)
-                os.killpg(pgid, signal.SIGTERM)
-                try:
-                    self.proc.wait(timeout=2)
-                except Exception:
-                    os.killpg(pgid, signal.SIGKILL)
-        except Exception:
-            try:
-                self.proc.terminate()
-            except Exception:
-                pass
-
-
-    def _prefs_path(self) -> Path:
-        return Path.home() / ".indexintegrate_iterate_window.json"
-
-    def _load_prefs(self):
-        try:
-            p = self._prefs_path()
-            if not p.exists():
-                return
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            ws = data.get("workspace_root")
-            rr = data.get("run_root")
-            if ws and Path(ws).exists():
-                self.workspace_root = Path(ws)
-                self.edit_ws_root.setText(str(self.workspace_root))
-            if rr and Path(rr).exists():
-                self.run_root = Path(rr)
-                self.edit_run_root.setText(str(self.run_root))
-        except Exception:
-            pass
-
-    def _save_prefs(self):
-        try:
-            data = {
-                "workspace_root": str(getattr(self, "workspace_root", "")),
-                "run_root": str(getattr(self, "run_root", "")),
-            }
-            with open(self._prefs_path(), "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except Exception:
-            pass
-
-    def _cleanup_runner_file(self):
-        try:
-            if self.proc_runner_path and self.proc_runner_path.exists():
-                self.proc_runner_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        self.proc_runner_path = None
-
-    def closeEvent(self, event):
-        try:
-            self._save_prefs()
-        finally:
-            super().closeEvent(event)
-
-# --- Adapter for cosedaUI.mainwindow ---
-class GandalfIteratorWindow(SerialEDIndexIntegrateWindow):
-    def __init__(self, main_window=None, ini_directory=None, ini_file_path=None, parent=None):
+        with open(self.log_path, "r", encoding="utf-8", errors="ignore") as f:
+            while not self._stop:
+                pos = f.tell()
+                line = f.readline()
+                if not line:
+                    self.msleep(250)
+                    f.seek(pos)
+                else:
+                    self.lineRead.emit(line.rstrip("\n"))
+        self.finishedTailing.emit()
+
+
+class WorkerThread(QtCore.QThread):
+    """Runs gandalf_adaptive in background."""
+    startedRun = QtCore.pyqtSignal()
+    finishedRun = QtCore.pyqtSignal(str)  # merged stream path (or "")
+
+    def __init__(self, run_root: str, geom: str, cell: str, sources: List[str],
+                 params: Params, idx_flags: List[str], parent=None):
         super().__init__(parent)
-        self.main_window = main_window
-        self.ini_directory = ini_directory
-        self.ini_file_path = ini_file_path
-        self.setWindowTitle("Gandalf Iterator")
+        self.run_root = run_root
+        self.geom = geom
+        self.cell = cell
+        self.sources = sources
+        self.params = params
+        self.idx_flags = idx_flags
 
-    # Optional slot: for INI path sync
-    def on_mainwindow_ini_changed(self, ini_path: str):
-        self.ini_file_path = ini_path
-        # TODO: update internal widgets or reload content here
+    def run(self):
+        self.startedRun.emit()
+        try:
+            merged = gandalf_adaptive(
+                run_root=self.run_root,
+                geom_path=self.geom,
+                cell_path=self.cell,
+                h5_sources=self.sources,
+                params=self.params,
+                indexamajig_flags_passthrough=self.idx_flags,
+            )
+            self.finishedRun.emit(merged or "")
+        except Exception:
+            self.finishedRun.emit("")
+
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Adaptive Center Refinement — Gandalf (PyQt6)")
+        self.setMinimumSize(980, 720)
+
+        central = QtWidgets.QWidget()
+        self.setCentralWidget(central)
+        layout = QtWidgets.QVBoxLayout(central)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        # ---- Paths group ----
+        grp_paths = QtWidgets.QGroupBox("Paths")
+        layout.addWidget(grp_paths)
+        form_paths = QtWidgets.QFormLayout(grp_paths)
+
+        self.runRootEdit = QtWidgets.QLineEdit()
+        self.geomEdit = QtWidgets.QLineEdit()
+        self.cellEdit = QtWidgets.QLineEdit()
+        self.h5List = QtWidgets.QListWidget()
+        self.h5List.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+
+        btnRunRoot = QtWidgets.QPushButton("Browse…")
+        btnGeom = QtWidgets.QPushButton("Browse…")
+        btnCell = QtWidgets.QPushButton("Browse…")
+        btnAddH5 = QtWidgets.QPushButton("Add .h5 or Folder…")
+        btnClearH5 = QtWidgets.QPushButton("Clear")
+
+        hboxRun = QtWidgets.QWidget()
+        hb1 = QtWidgets.QHBoxLayout(hboxRun); hb1.setContentsMargins(0,0,0,0)
+        hb1.addWidget(self.runRootEdit, 1); hb1.addWidget(btnRunRoot)
+
+        hboxGeom = QtWidgets.QWidget()
+        hb2 = QtWidgets.QHBoxLayout(hboxGeom); hb2.setContentsMargins(0,0,0,0)
+        hb2.addWidget(self.geomEdit, 1); hb2.addWidget(btnGeom)
+
+        hboxCell = QtWidgets.QWidget()
+        hb3 = QtWidgets.QHBoxLayout(hboxCell); hb3.setContentsMargins(0,0,0,0)
+        hb3.addWidget(self.cellEdit, 1); hb3.addWidget(btnCell)
+
+        hboxH5Btns = QtWidgets.QWidget()
+        hb4 = QtWidgets.QHBoxLayout(hboxH5Btns); hb4.setContentsMargins(0,0,0,0)
+        hb4.addWidget(btnAddH5); hb4.addWidget(btnClearH5); hb4.addStretch(1)
+
+        form_paths.addRow("Run root:", hboxRun)
+        form_paths.addRow("Geom (.geom):", hboxGeom)
+        form_paths.addRow("Cell (.cell):", hboxCell)
+        form_paths.addRow("HDF5 sources:", self.h5List)
+        form_paths.addRow("", hboxH5Btns)
+
+        # ---- Parameters ----
+        grp_params = QtWidgets.QGroupBox("Adaptive Parameters")
+        layout.addWidget(grp_params)
+        grid = QtWidgets.QGridLayout(grp_params)
+        grid.setContentsMargins(9,9,9,9)
+
+        def spinD(default, step, decimals=3, minimum=-1e9, maximum=1e9):
+            s = QtWidgets.QDoubleSpinBox()
+            s.setDecimals(decimals)
+            s.setSingleStep(step)
+            s.setRange(minimum, maximum)
+            s.setValue(default)
+            s.setMaximumWidth(120)
+            return s
+
+        def spinI(default, step, minimum=1, maximum=10**9):
+            s = QtWidgets.QSpinBox()
+            s.setRange(minimum, maximum)
+            s.setSingleStep(step)
+            s.setValue(default)
+            s.setMaximumWidth(120)
+            return s
+
+        self.R_px = spinD(1.0, 0.1, decimals=3, minimum=0.0)
+        self.s_init_px = spinD(0.2, 0.05, decimals=3, minimum=0.0)
+        self.K_dir = spinI(10, 1, minimum=1, maximum=360)
+        self.s_refine_px = spinD(0.5, 0.1, decimals=3, minimum=0.0)
+        self.s_min_px = spinD(0.1, 0.05, decimals=3, minimum=0.0)
+        self.eps_rel = spinD(0.007, 0.001, decimals=4, minimum=0.0, maximum=0.5)
+        self.N_eval_max = spinI(16, 1, minimum=1, maximum=1000)
+        self.tie_tol_rel = spinD(0.01, 0.001, decimals=3, minimum=0.0, maximum=0.2)
+
+        self.chk8 = QtWidgets.QCheckBox("8-connected neighbors")
+        self.chk8.setChecked(True)
+        self.chkDirectional = QtWidgets.QCheckBox("Directional prioritization")
+        self.chkDirectional.setChecked(True)
+
+        labels = ["R_px", "s_init_px", "K_dir", "s_refine_px", "s_min_px",
+                  "eps_rel", "N_eval_max", "tie_tol_rel"]
+        widgets = [self.R_px, self.s_init_px, self.K_dir, self.s_refine_px,
+                   self.s_min_px, self.eps_rel, self.N_eval_max, self.tie_tol_rel]
+        for r, (lab, wid) in enumerate(zip(labels, widgets)):
+            grid.addWidget(QtWidgets.QLabel(lab + ":"), r, 0)
+            grid.addWidget(wid, r, 1)
+        grid.addWidget(self.chk8, len(labels), 0, 1, 1)
+        grid.addWidget(self.chkDirectional, len(labels), 1, 1, 1)
+
+        # ---- Indexamajig flags ----
+        grp_flags = QtWidgets.QGroupBox("indexamajig flags (e.g., -j 32 --peaks peaks.conf)")
+        layout.addWidget(grp_flags)
+        vbox_flags = QtWidgets.QVBoxLayout(grp_flags)
+        self.flagsEdit = QtWidgets.QLineEdit()
+        vbox_flags.addWidget(self.flagsEdit)
+
+        # ---- Actions ----
+        hboxBtns = QtWidgets.QHBoxLayout()
+        layout.addLayout(hboxBtns)
+        self.btnStart = QtWidgets.QPushButton("Start Adaptive Run")
+        self.btnStart.setDefault(True)
+        self.btnQuit = QtWidgets.QPushButton("Quit")
+        hboxBtns.addStretch(1)
+        hboxBtns.addWidget(self.btnStart)
+        hboxBtns.addWidget(self.btnQuit)
+
+        # ---- Log panel ----
+        grp_log = QtWidgets.QGroupBox("Run Log (live)")
+        layout.addWidget(grp_log, 1)
+        vbox_log = QtWidgets.QVBoxLayout(grp_log)
+        self.logView = QtWidgets.QPlainTextEdit()
+        self.logView.setReadOnly(True)
+        self.logView.setMaximumBlockCount(20000)
+        vbox_log.addWidget(self.logView)
+
+        self.statusBar().showMessage("Ready.")
+
+        # ---- Signals ----
+        btnRunRoot.clicked.connect(self._chooseRunRoot)
+        btnGeom.clicked.connect(self._chooseGeom)
+        btnCell.clicked.connect(self._chooseCell)
+        btnAddH5.clicked.connect(self._addH5OrDir)
+        btnClearH5.clicked.connect(self._clearH5List)
+        self.btnStart.clicked.connect(self._startRun)
+        self.btnQuit.clicked.connect(self.close)
+
+        self.worker: Optional[WorkerThread] = None
+        self.tailer: Optional[LogTailer] = None
+
+    # ---- Path pickers ----
+    def _chooseRunRoot(self):
+        d = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose run root")
+        if d:
+            self.runRootEdit.setText(d)
+
+    def _chooseGeom(self):
+        fn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Choose .geom", filter="Geom (*.geom);;All Files (*)")
+        if fn:
+            self.geomEdit.setText(fn)
+
+    def _chooseCell(self):
+        fn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Choose .cell", filter="Cell (*.cell);;All Files (*)")
+        if fn:
+            self.cellEdit.setText(fn)
+
+    def _addH5OrDir(self):
+        dlg = QtWidgets.QFileDialog(self, "Add HDF5 files")
+        dlg.setFileMode(QtWidgets.QFileDialog.FileMode.ExistingFiles)
+        dlg.setNameFilter("HDF5 (*.h5);;All Files (*)")
+        if dlg.exec():
+            for p in dlg.selectedFiles():
+                self._appendH5Path(p)
+        dir_path = QtWidgets.QFileDialog.getExistingDirectory(self, "Add directory with .h5 files (recursive)")
+        if dir_path:
+            self._appendH5Path(dir_path)
+
+    def _appendH5Path(self, p: str):
+        for i in range(self.h5List.count()):
+            if _abs(self.h5List.item(i).text()) == _abs(p):
+                return
+        self.h5List.addItem(p)
+
+    def _clearH5List(self):
+        self.h5List.clear()
+
+    # ---- Run handling ----
+    def _collectParams(self) -> Params:
+        return Params(
+            R_px=float(self.R_px.value()),
+            s_init_px=float(self.s_init_px.value()),
+            K_dir=int(self.K_dir.value()),
+            s_refine_px=float(self.s_refine_px.value()),
+            s_min_px=float(self.s_min_px.value()),
+            eps_rel=float(self.eps_rel.value()),
+            N_eval_max=int(self.N_eval_max.value()),
+            tie_tol_rel=float(self.tie_tol_rel.value()),
+            eight_connected=bool(self.chk8.isChecked()),
+            directional_refine=bool(self.chkDirectional.isChecked()),
+        )
+
+    def _collectSources(self) -> List[str]:
+        vals = [self.h5List.item(i).text() for i in range(self.h5List.count())]
+        return _gather_h5_sources(vals)
+
+    def _startRun(self):
+        run_root = self.runRootEdit.text().strip()
+        geom = self.geomEdit.text().strip()
+        cell = self.cellEdit.text().strip()
+        sources = self._collectSources()
+        if not run_root or not geom or not cell or not sources:
+            QtWidgets.QMessageBox.warning(self, "Missing inputs",
+                                          "Please set run root, geom, cell, and add at least one .h5 or directory.")
+            return
+
+        os.makedirs(run_root, exist_ok=True)
+        params = self._collectParams()
+
+        flags_str = self.flagsEdit.text().strip()
+        try:
+            idx_flags = shlex.split(flags_str) if flags_str else []
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Flags error", f"Could not parse flags: {e}")
+            return
+
+        log_path = os.path.join(_abs(run_root), "log.jsonl")
+        if self.tailer:
+            self.tailer.stop()
+            self.tailer.wait()
+        self.tailer = LogTailer(log_path)
+        self.tailer.lineRead.connect(self._onLogLine)
+        self.tailer.finishedTailing.connect(lambda: self.statusBar().showMessage("Log tailer finished."))
+        self.tailer.start()
+
+        self._setInputsEnabled(False)
+        self.logView.appendPlainText("=== Starting adaptive run ===")
+        self.statusBar().showMessage("Running…")
+
+        self.worker = WorkerThread(run_root=_abs(run_root),
+                                   geom=_abs(geom),
+                                   cell=_abs(cell),
+                                   sources=sources,
+                                   params=params,
+                                   idx_flags=idx_flags)
+        self.worker.startedRun.connect(lambda: self._onStarted())
+        self.worker.finishedRun.connect(self._onFinished)
+        self.worker.start()
+
+    def _setInputsEnabled(self, enabled: bool):
+        for w in [
+            self.runRootEdit, self.geomEdit, self.cellEdit, self.h5List,
+            self.R_px, self.s_init_px, self.K_dir, self.s_refine_px, self.s_min_px,
+            self.eps_rel, self.N_eval_max, self.tie_tol_rel, self.chk8, self.chkDirectional,
+            self.flagsEdit
+        ]:
+            w.setEnabled(enabled)
+        self.btnStart.setEnabled(enabled)
+
+    def _onStarted(self):
+        self.logView.appendPlainText("Run thread started.")
+
+    def _onFinished(self, merged_path: str):
+        self._setInputsEnabled(True)
+        self.statusBar().showMessage("Finished.")
+        if self.tailer:
+            QtCore.QTimer.singleShot(1000, self.tailer.stop)
+
+        if merged_path:
+            self.logView.appendPlainText(f"✓ Merged stream: {merged_path}")
+            QtWidgets.QMessageBox.information(self, "Run complete", f"Merged stream written to:\n{merged_path}")
+        else:
+            self.logView.appendPlainText("No merged stream produced (no FINAL images or failure).")
+            QtWidgets.QMessageBox.warning(self, "Run finished", "No merged stream produced.")
+
+    def _onLogLine(self, line: str):
+        try:
+            obj = json.loads(line)
+            # Compact pretty
+            pretty = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
+            self.logView.appendPlainText(pretty)
+        except Exception:
+            self.logView.appendPlainText(line)
 
 
 def main():
-    os.environ["QT_QPA_PLATFORM"] = "xcb" #LINUX
-    # os.environ["QT_QPA_PLATFORM"] = "cocoa" #MAC
-    app = QApplication(sys.argv)
-    w = SerialEDIndexIntegrateWindow()
-    w.show()
+    app = QtWidgets.QApplication(sys.argv)
+    mw = MainWindow()
+    mw.show()
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()

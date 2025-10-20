@@ -1,323 +1,850 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+gandalfiterator.py
+Adaptive per-image center-shift optimization (seed -> ring -> refine) with
+wave-based batching via .lst files, overlay HDF5s, and indexamajig.
+
+This module implements:
+- Per-image state machine
+- Candidate selection (one per active image per wave)
+- Overlay writes (absolute shifts in mm for listed images)
+- .lst + run_meta.json construction
+- (Part 2) Indexamajig execution, stream parsing/scoring, state updates
+- (Part 2) Winner chunk extraction, merged stream writing
+- (Part 2) gandalf_adaptive() entrypoint callable from runner/GUI
+
+Dependencies: overlay_h5.py, gi_util.py, stream_scoring.py, stream_extract.py
+"""
+
+from __future__ import annotations
 import os
-import h5py
+import json
+import time
+import math
+import numpy as np
+from typing import Dict, Tuple, List, Optional, Any
+from dataclasses import dataclass, field
 
-# --- VENDORED GANDALF ITERATOR BEGIN ---
+from overlay_h5 import (
+    create_overlay,
+    write_shifts_mm,
+    get_seed_shifts_mm,
+)
+from gi_util import (
+    read_geom_res_mm_per_1000px,
+    mm_per_px,
+    px_to_mm,
+    ring_directions,
+    write_lst,
+    jsonl_append,
+    run_indexamajig,
+    RunResult,
+)
+from stream_scoring import score_single_chunk_stream_file
+from stream_extract import (
+    find_chunk_span_for_image,
+    extract_winner_stream,
+    merge_winner_streams,
+)
 
-def gandalf_iterator(
-    geomfile_path: str,
-    cellfile_path: str,
-    input_path: str,
-    output_file_base: str,
-    num_threads: int,
-    max_radius: float,
-    step: float,
-    extra_flags=None,
-):
-    """
-    Run CrystFEL 'indexamajig' over a filled circular grid of center shifts.
 
-    For each (dx, dy) in *pixels*:
-      1) Convert to millimeters using geometry 'res' (mm/px = 1000/res).
-      2) Apply det_shift_x_mm += dx_mm and det_shift_y_mm += dy_mm (in-place) to all HDF5s listed.
-      3) Run indexamajig to write a unique .stream for this pass.
-      4) Revert the applied shifts (subtract the same deltas), even on errors.
+# ------------------------- Parameters / Defaults -------------------------
 
-    Emits progress lines and [XY-PASS] i/N markers for the GUI.
-    """
-    import sys, subprocess, math
-    from pathlib import Path
+@dataclass
+class Params:
+    R_px: float = 1.0
+    s_init_px: float = 0.2
+    K_dir: int = 10
+    s_refine_px: float = 0.5
+    s_min_px: float = 0.1
+    eps_rel: float = 0.007        # 0.7%
+    N_eval_max: int = 16
+    tie_tol_rel: float = 0.01     # 1%
+    # behavior knobs
+    eight_connected: bool = True  # include diagonals in refinement
+    directional_refine: bool = True  # prioritize along descent direction once 2 successes exist
 
-    # ---- Validate required inputs ----
-    geom = Path(geomfile_path)
-    cell = Path(cellfile_path)
-    input_p = Path(input_path)
 
-    if not geom.is_file():
-        print(f"ERROR: geometry file missing: {geom}", file=sys.stderr); return 2
-    if not cell.is_file():
-        print(f"ERROR: cell file missing: {cell}", file=sys.stderr); return 2
-    if not input_p.exists():
-        print(f"ERROR: input path missing: {input_p}", file=sys.stderr); return 2
+# ------------------------- State Machine Types -------------------------
 
-    # ---- Output directory & base name ----
-    outbase = Path(output_file_base)
-    if outbase.is_absolute():
-        out_dir = outbase.parent
-        out_base_name = outbase.name
-    else:
-        base_dir = input_p if input_p.is_dir() else input_p.parent
-        out_dir = base_dir / f"xgandalf_iterations_max_radius_{max_radius}_step_{step}"
-        out_base_name = outbase.name
-    out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Resulting streamfiles will be saved in {out_dir}")
+class ImgState:
+    INIT = "INIT"
+    SEED_TRY = "SEED_TRY"
+    RING_SEARCH = "RING_SEARCH"
+    REFINE = "REFINE"
+    FINAL = "FINAL"
+    UNINDEXED = "UNINDEXED"
 
-    # ---- Prepare list.lst (or accept provided list file) ----
-    if input_p.is_file():
-        list_path = input_p
-        print(f"Using provided list file: {list_path}")
-    else:
-        list_path = input_p / "list.lst"
-        try:
-            if not list_path.exists():
-                exts = ("*.h5", "*.hdf5", "*.cxi")
-                hits = []
-                for ext in exts:
-                    hits.extend(sorted(input_p.glob(ext)))
-                hits = [str(p.resolve()) for p in hits]
-                list_path.write_text("\n".join(hits) + ("\n" if hits else ""), encoding="utf-8")
-                print(f"'list.lst' has been created with {len(hits)} entries at {list_path}")
-            else:
-                print(f"Using existing list file: {list_path}")
-        except Exception as e:
-            print(f"WARNING: could not write list.lst: {e}", file=sys.stderr)
 
-    # ---- Build grid: step-lattice points inside circle, sorted radially ----
-    grid_pts: list[tuple[float, float]] = []
-    if max_radius <= 0 or step <= 0:
-        grid_pts = [(0.0, 0.0)]
-    else:
-        try:
-            decimals = max(0, -int(math.floor(math.log10(step)))) if step > 0 else 6
-            decimals = min(6, decimals)
-        except Exception:
-            decimals = 6
+@dataclass
+class BestPoint:
+    dx_px: float
+    dy_px: float
+    wrmsd: float
+    n_reflections: Optional[int] = None
+    n_peaks: Optional[int] = None
+    cell_dev_pct: Optional[float] = None
 
-        limit = int(math.ceil(max_radius / step))
-        R2 = max_radius * max_radius
-        pts_set = set()
-        for i in range(-limit, limit + 1):
-            xi = round(i * step, decimals)
-            xi2 = xi * xi
-            if xi2 > R2 + 1e-12:
-                continue
-            for j in range(-limit, limit + 1):
-                yj = round(j * step, decimals)
-                if xi2 + yj * yj <= R2 + 1e-12:
-                    pts_set.add((xi, yj))
+    def as_tuple(self):
+        return (self.dx_px, self.dy_px, self.wrmsd)
 
-        grid_pts = sorted(
-            pts_set,
-            key=lambda p: (p[0]*p[0] + p[1]*p[1], abs(p[0]) + abs(p[1]), p[0], p[1])
-        )
-        if (0.0, 0.0) in grid_pts:
-            grid_pts.remove((0.0, 0.0))
-            grid_pts.insert(0, (0.0, 0.0))
 
-    print(f"Generated {len(grid_pts)} grid points in the circle.")
+@dataclass
+class Candidate:
+    h5_src: str
+    overlay: str
+    image_idx: int
+    purpose: str            # "seed" | "ring" | "refine"
+    delta_px: Tuple[float, float]  # relative to seed (dx, dy)
+    abs_mm: Tuple[float, float]    # absolute shift to write (mm)
+    seed_mm: Tuple[float, float]
 
-    # ---- Convert px→mm using geometry 'res' ----
-    try:
-        res = extract_resolution(str(geom))  # expects a line "res = <float>"
-        mm_per_pixel = 1000.0 / float(res)
-        print(f"[geom] res={res} → mm_per_pixel={mm_per_pixel}")
-    except Exception as e:
-        print(f"ERROR: failed to read 'res' from geometry: {e}", file=sys.stderr)
-        return 2
 
-    # ---- Handle optional indexamajig path flag; pass through remaining flags ----
-    extra_flags = list(extra_flags or [])
-    idxamajig_bin = "indexamajig"
-    pruned_flags: list[str] = []
-    for f in extra_flags:
-        if f.startswith("--indexamajig-path="):
-            idxamajig_bin = f.split("=", 1)[1].strip() or idxamajig_bin
-        else:
-            pruned_flags.append(f)
-    extra_flags = pruned_flags
+@dataclass
+class ImageController:
+    h5_src: str
+    overlay: str
+    image_idx: int
+    geom_res_value: float          # 'res' from .geom
+    seed_mm: Tuple[float, float]   # absolute seed shift (mm)
+    params: Params
 
-    # ---- Main loop: apply shift, run, revert ----
-    total = len(grid_pts)
-    passes_done = 0
+    # dynamic state
+    state: str = ImgState.INIT
+    best: Optional[BestPoint] = None
+    eval_count: int = 0
+    ring_r_px: float = 0.0
+    refine_s_px: float = 0.0
+    have_two_successes: bool = False
+    # vector from worse->better (for directional prioritization)
+    descent_vec_px: Optional[Tuple[float, float]] = None
+    # bookkeeping for refinement sweep
+    _sweep_tried: int = 0
 
-    for (dx_px, dy_px) in grid_pts:
-        print(f"Running for pixel shifts x = {dx_px}, y = {dy_px}")
-        # Convert pixel shifts to millimeters
-        sx_mm = float(dx_px) * mm_per_pixel
-        sy_mm = float(dy_px) * mm_per_pixel
-        print(f"  => Applying det_shift Δx={sx_mm} mm, Δy={sy_mm} mm")
+    # results
+    winner_stream_path: Optional[str] = None
 
-        stream_name = (
-            f"{out_base_name}_{dx_px:.3f}_{dy_px:.3f}.stream"
-            .replace("+", "")
-            .replace("-0.000", "0.000")
-        )
-        stream_path = (out_dir / stream_name).resolve()
+    def activate(self):
+        """Initialize to SEED_TRY and set starting radii/step."""
+        self.state = ImgState.SEED_TRY
+        self.ring_r_px = self.params.s_init_px
+        self.refine_s_px = self.params.s_refine_px
+        self.eval_count = 0
+        self.have_two_successes = False
+        self.descent_vec_px = None
+        self._sweep_tried = 0
 
-        # 1) Apply in-place shift
-        try:
-            perturb_det_shifts(str(list_path), sx_mm, sy_mm)
-        except Exception as e:
-            print(f"ERROR: failed to apply det_shift ({sx_mm},{sy_mm}) mm: {e}", file=sys.stderr)
-            # skip this pass and continue with the next
-            continue
+    def mm_per_px(self) -> float:
+        return mm_per_px(self.geom_res_value)
 
-        # 2) Run indexamajig and 3) Revert in finally
-        try:
-            cmd = [
-                idxamajig_bin,
-                "-g", str(geom),
-                "-i", str(list_path),
-                "-o", str(stream_path),
-                "-p", str(cell),
-                "-j", str(num_threads),
-                *extra_flags,
-            ]
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
+    # ---------------- Candidate Proposal ----------------
+
+    def next_candidate(self) -> Optional[Candidate]:
+        """
+        Propose exactly one candidate for current state, or None if no candidate
+        (e.g., finished or unindexed).
+        """
+        if self.state in (ImgState.FINAL, ImgState.UNINDEXED):
+            return None
+
+        if self.eval_count >= self.params.N_eval_max and self.state != ImgState.SEED_TRY:
+            # if we haven't even tried seed, allow that; otherwise stop
+            self.state = ImgState.FINAL if self.best else ImgState.UNINDEXED
+            return None
+
+        if self.state == ImgState.INIT:
+            self.activate()
+
+        if self.state == ImgState.SEED_TRY:
+            dpx = (0.0, 0.0)
+            abs_mm = (self.seed_mm[0], self.seed_mm[1])
+            return Candidate(self.h5_src, self.overlay, self.image_idx, "seed", dpx, abs_mm, self.seed_mm)
+
+        if self.state == ImgState.RING_SEARCH:
+            cand = self._next_ring_candidate()
+            if cand is None:
+                # exhausted ring -> UNINDEXED
+                self.state = ImgState.UNINDEXED
+                return None
+            return cand
+
+        if self.state == ImgState.REFINE:
+            cand = self._next_refine_candidate()
+            if cand is None:
+                # halved down below s_min OR no neighbors -> finalize
+                self.state = ImgState.FINAL if self.best else ImgState.UNINDEXED
+                return None
+            return cand
+
+        return None
+
+    def _next_ring_candidate(self) -> Optional[Candidate]:
+        """
+        Choose the next angular direction at current radius ring_r_px.
+        We sample K_dir directions per ring using golden-angle order.
+        After proposing K_dir at this radius, move to next radius.
+        """
+        r = self.ring_r_px
+        if r > self.params.R_px + 1e-12:
+            return None
+
+        # Determine which angular we are on within the radius
+        k = self.eval_count  # local counter; OK to use eval_count as coarse index
+        # Derive position within a ring: modulo K_dir
+        idx_in_ring = k % self.params.K_dir
+        if idx_in_ring == 0 and k > 0:
+            # completed a ring -> advance r
+            # Note: we advance r only when we return to idx 0 (start of a new ring)
+            self.ring_r_px += self.params.s_init_px
+            r = self.ring_r_px
+            if r > self.params.R_px + 1e-12:
+                return None
+
+        # Determine the angle for this index within the ring
+        angles = ring_directions(self.params.K_dir, k0=0)
+        ang = angles[idx_in_ring]
+        dx = r * math.cos(ang)
+        dy = r * math.sin(ang)
+        dpx = (dx, dy)
+        abs_mm = self._abs_mm_from_delta_px(dpx)
+        return Candidate(self.h5_src, self.overlay, self.image_idx, "ring", dpx, abs_mm, self.seed_mm)
+
+    def _neighbor_set(self, s: float) -> List[Tuple[float, float]]:
+        """Return neighbor offsets around best (dx,dy) at step s (8-connected by default)."""
+        moves = [( s, 0.0), (-s, 0.0), (0.0,  s), (0.0, -s)]
+        if self.params.eight_connected:
+            moves += [( s,  s), ( s, -s), (-s,  s), (-s, -s)]
+        return moves
+
+    def _order_neighbors_directional(self, neighbors: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+        """
+        Prioritize neighbors aligning with descent_vec_px (positive dot product).
+        If no descent vector yet, return neighbors as-is.
+        """
+        if not self.params.directional_refine or not self.have_two_successes or self.descent_vec_px is None:
+            return neighbors
+        vx, vy = self.descent_vec_px
+        scored = []
+        for dx, dy in neighbors:
+            dot = dx * vx + dy * vy
+            scored.append((dot, (dx, dy)))
+        # Sort descending by dot product (prioritize positive alignment)
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [p for _, p in scored]
+
+    def _next_refine_candidate(self) -> Optional[Candidate]:
+        """
+        Propose next neighbor around current best using step s; if all neighbors
+        are exhausted without improvement, halve s; stop if s < s_min.
+        """
+        if self.best is None:
+            # Shouldn't happen: refine without a best; fall back to seed try
+            self.state = ImgState.SEED_TRY
+            return self.next_candidate()
+
+        # If step is too small, stop
+        if self.refine_s_px < self.params.s_min_px - 1e-12:
+            return None
+
+        # Generate neighbor list centered at best
+        bx, by, _ = self.best.as_tuple()
+        neighbors = [(bx + dx, by + dy) for (dx, dy) in self._neighbor_set(self.refine_s_px)]
+        # Directional prioritization
+        moves = [(nx - bx, ny - by) for (nx, ny) in neighbors]
+        moves = self._order_neighbors_directional(moves)
+        # Convert back to absolute candidate positions
+        ordered = [(bx + dx, by + dy) for (dx, dy) in moves]
+
+        # Pick the next neighbor in the sweep
+        if self._sweep_tried >= len(ordered):
+            # Completed a sweep with no improvement -> halve step and reset sweep
+            self.refine_s_px *= 0.5
+            self._sweep_tried = 0
+            if self.refine_s_px < self.params.s_min_px - 1e-12:
+                return None
+            # Recompute with new s
+            bx, by, _ = self.best.as_tuple()
+            neighbors = [(bx + dx, by + dy) for (dx, dy) in self._neighbor_set(self.refine_s_px)]
+            moves = [(nx - bx, ny - by) for (nx, ny) in neighbors]
+            moves = self._order_neighbors_directional(moves)
+            ordered = [(bx + dx, by + dy) for (dx, dy) in moves]
+
+        nx, ny = ordered[self._sweep_tried]
+        self._sweep_tried += 1
+
+        # Enforce trust radius relative to seed
+        if nx * nx + ny * ny > (self.params.R_px + 1e-12) ** 2:
+            # skip this one by recursion (move on to next)
+            return self._next_refine_candidate()
+
+        dpx = (nx, ny)
+        abs_mm = self._abs_mm_from_delta_px(dpx)
+        return Candidate(self.h5_src, self.overlay, self.image_idx, "refine", dpx, abs_mm, self.seed_mm)
+
+    # ---------------- Results Incorporation ----------------
+
+    def incorporate_result(
+        self,
+        candidate: Candidate,
+        indexed: bool,
+        metrics: Optional[Dict[str, Any]],
+        params: Params,
+    ) -> None:
+        """
+        Update controller state after a run result for this candidate.
+        """
+        self.eval_count += 1
+
+        if self.state == ImgState.SEED_TRY:
+            if indexed:
+                self.best = BestPoint(
+                    dx_px=0.0, dy_px=0.0, wrmsd=float(metrics["wrmsd"]),
+                    n_reflections=metrics.get("n_reflections"),
+                    n_peaks=metrics.get("n_peaks"),
+                    cell_dev_pct=metrics.get("cell_dev_pct"),
                 )
-            except FileNotFoundError:
-                print(f"ERROR: '{idxamajig_bin}' not found. Set it on PATH or use --indexamajig-path=...", file=sys.stderr)
-                return 2
-            except Exception as e:
-                print(f"ERROR: failed to launch indexamajig: {e}", file=sys.stderr)
-                return 2
-
-            try:
-                assert proc.stdout is not None
-                for line in proc.stdout:
-                    print(line.rstrip())
-            except Exception as e:
-                print(f"WARNING: error while reading indexamajig output: {e}", file=sys.stderr)
-
-            rc = proc.wait()
-            if rc != 0:
-                print(f"Error during indexamajig execution (exit {rc}).", file=sys.stderr)
+                self.state = ImgState.REFINE
+                self._sweep_tried = 0
             else:
-                passes_done += 1
-                print(f"[XY-PASS] {passes_done}/{total} completed -> {stream_path}")
+                self.state = ImgState.RING_SEARCH
+                # keep ring_r_px as initialized
 
-        finally:
-            # Always revert the applied shift
-            try:
-                perturb_det_shifts(str(list_path), -sx_mm, -sy_mm)
-                print(f"  => Reverted det_shift Δx={-sx_mm} mm, Δy={-sy_mm} mm")
-            except Exception as e:
-                print(f"WARNING: failed to revert det_shift: {e}", file=sys.stderr)
+            return
 
-    return 0
+        if self.state == ImgState.RING_SEARCH:
+            if indexed:
+                self.best = BestPoint(
+                    dx_px=candidate.delta_px[0],
+                    dy_px=candidate.delta_px[1],
+                    wrmsd=float(metrics["wrmsd"]),
+                    n_reflections=metrics.get("n_reflections"),
+                    n_peaks=metrics.get("n_peaks"),
+                    cell_dev_pct=metrics.get("cell_dev_pct"),
+                )
+                self.state = ImgState.REFINE
+                self._sweep_tried = 0
+                # First success; have_two_successes remains False until a second success
+            else:
+                # Not indexed: if this was the last angle at this radius, radius increments
+                # Note: _next_ring_candidate handles radius progression based on eval_count.
+                pass
+            return
+
+        if self.state == ImgState.REFINE:
+            if not indexed:
+                # No improvement; keep sweeping; when a full sweep has no improvements,
+                # _next_refine_candidate will halve step.
+                return
+
+            # Compare wrmsd to best with relative threshold
+            curr_wr = float(metrics["wrmsd"])
+            if self.best is None or (curr_wr < self.best.wrmsd * (1.0 - params.eps_rel)):
+                # Track descent direction if we already had a best (this is a second success)
+                if self.best is not None and not self.have_two_successes:
+                    vx = candidate.delta_px[0] - self.best.dx_px
+                    vy = candidate.delta_px[1] - self.best.dy_px
+                    if abs(vx) + abs(vy) > 0.0:
+                        self.have_two_successes = True
+                        self.descent_vec_px = (vx, vy)
+
+                # Accept improvement and reset sweep
+                self.best = BestPoint(
+                    dx_px=candidate.delta_px[0],
+                    dy_px=candidate.delta_px[1],
+                    wrmsd=curr_wr,
+                    n_reflections=metrics.get("n_reflections"),
+                    n_peaks=metrics.get("n_peaks"),
+                    cell_dev_pct=metrics.get("cell_dev_pct"),
+                )
+                self._sweep_tried = 0
+            else:
+                # Within tie tolerance? we can keep current best using tie-breaks if desired
+                tol = params.tie_tol_rel
+                if self.best and abs(curr_wr - self.best.wrmsd) <= tol * self.best.wrmsd:
+                    # Optional: tie-break policy (prefer smaller shift, more reflections, etc.)
+                    pass
+                # Else keep sweeping; _next_refine_candidate halves s after a sweep.
+
+            return
+
+        # If FINAL/UNINDEXED, nothing to do (should not be called)
+
+    # ---------------- Utilities ----------------
+
+    def _abs_mm_from_delta_px(self, dpx: Tuple[float, float]) -> Tuple[float, float]:
+        dx_mm, dy_mm = px_to_mm(dpx[0], dpx[1], self.geom_res_value)
+        return (self.seed_mm[0] + dx_mm, self.seed_mm[1] + dy_mm)
 
 
-def extract_resolution(geom_file_path: str) -> float:
+# ------------------------- Engine -------------------------
+
+@dataclass
+class SourceContext:
+    h5_src: str
+    overlay: str
+    N_images: int
+    controllers: Dict[int, ImageController] = field(default_factory=dict)
+
+
+@dataclass
+class RunWave:
+    run_id: int
+    lst_path: str
+    meta_path: str
+    stream_path: str
+    # entries in order of .lst lines:
+    entries: List[Candidate] = field(default_factory=list)
+
+
+class AdaptiveEngine:
     """
-    Extracts the resolution value from a geometry file.
-
-    The geometry file is expected to contain a line like:
-      res = 17857.14285714286
-
-    Parameters:
-        geom_file_path (str): The file path to the geometry file.
-
-    Returns:
-        float: The resolution value extracted from the file.
-
-    Raises:
-        ValueError: If the resolution value is not found or is invalid.
+    Orchestrates multiple source HDF5s, builds waves, writes overlays, runs indexamajig,
+    parses results, and drives controllers to FINAL/UNINDEXED.
     """
-    with open(geom_file_path, 'r') as file:
-        for line in file:
-            # Remove leading/trailing whitespace
-            line = line.strip()
-            # Skip comment lines
-            if line.startswith(";"):
+
+    def __init__(
+        self,
+        run_root: str,
+        geom_path: str,
+        cell_path: str,
+        h5_sources: List[str],
+        params: Params,
+        indexamajig_flags_passthrough: List[str],
+    ):
+        self.run_root = os.path.abspath(run_root)
+        self.geom_path = os.path.abspath(geom_path)
+        self.cell_path = os.path.abspath(cell_path)
+        self.h5_sources = [os.path.abspath(p) for p in h5_sources]
+        self.params = params
+        self.idx_flags = list(indexamajig_flags_passthrough)
+        self.res_value = read_geom_res_mm_per_1000px(self.geom_path)
+        self._mm_per_px = mm_per_px(self.res_value)
+
+        # Paths
+        self.inputs_dir = os.path.join(self.run_root, "inputs")
+        self.overlays_dir = os.path.join(self.run_root, "overlays")
+        self.runs_dir = os.path.join(self.run_root, "runs")
+        self.streams_dir = os.path.join(self.run_root, "streams")
+        self.merged_dir = os.path.join(self.run_root, "merged")
+        self.best_csv = os.path.join(self.run_root, "best_centers.csv")
+        self.log_path = os.path.join(self.run_root, "log.jsonl")
+
+        # Sources
+        self.sources: Dict[str, SourceContext] = {}
+
+        # Run counter
+        self.run_counter = 0
+
+        # Prepare dirs
+        os.makedirs(self.inputs_dir, exist_ok=True)
+        os.makedirs(self.overlays_dir, exist_ok=True)
+        os.makedirs(self.runs_dir, exist_ok=True)
+        os.makedirs(self.streams_dir, exist_ok=True)
+        os.makedirs(self.merged_dir, exist_ok=True)
+
+        # Symlink/copy inputs for provenance (cheap)
+        self._materialize_inputs()
+
+    def _materialize_inputs(self):
+        # Keep a copy or symlink to geom and cell for reproducibility
+        def _copy(src, dst):
+            if os.path.abspath(src) == os.path.abspath(dst):
+                return
+            with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
+                fdst.write(fsrc.read())
+        _copy(self.geom_path, os.path.join(self.inputs_dir, os.path.basename(self.geom_path)))
+        _copy(self.cell_path, os.path.join(self.inputs_dir, os.path.basename(self.cell_path)))
+
+    # ----- Source setup -----
+
+    def setup_sources(self) -> None:
+        """
+        Create overlays for each source and initialize controllers for all images.
+        """
+        for src in self.h5_sources:
+            overlay_path = os.path.join(self.overlays_dir, os.path.basename(src).replace(".h5", ".overlay.h5"))
+            N = create_overlay(src, overlay_path, use_vds=False)
+            sc = SourceContext(h5_src=src, overlay=overlay_path, N_images=N)
+            # read seeds from overlay (copied from src)
+            xs, ys = get_seed_shifts_mm(overlay_path)
+            controllers: Dict[int, ImageController] = {}
+            for idx in range(N):
+                ctrl = ImageController(
+                    h5_src=src,
+                    overlay=overlay_path,
+                    image_idx=idx,
+                    geom_res_value=self.res_value,
+                    seed_mm=(float(xs[idx]), float(ys[idx])),
+                    params=self.params,
+                )
+                controllers[idx] = ctrl
+            sc.controllers = controllers
+            self.sources[src] = sc
+
+    # ----- Wave construction -----
+
+    def _collect_candidates_for_wave(self) -> Dict[str, List[Candidate]]:
+        """
+        Produce at most one candidate per active image, grouped by overlay file (source).
+        Returns: {overlay_path: [Candidate, ...], ...}
+        """
+        grouped: Dict[str, List[Candidate]] = {}
+        for src, sc in self.sources.items():
+            for idx, ctrl in sc.controllers.items():
+                if ctrl.state in (ImgState.FINAL, ImgState.UNINDEXED):
+                    continue
+                cand = ctrl.next_candidate()
+                if cand is None:
+                    continue
+                grouped.setdefault(sc.overlay, []).append(cand)
+        return grouped
+
+    def _build_wave_files(self, grouped: Dict[str, List[Candidate]]) -> List[RunWave]:
+        """
+        For each overlay group, create a run wave:
+          - write absolute shifts to overlay for the listed indices
+          - create run_X/list, stream path, and meta json
+        """
+        waves: List[RunWave] = []
+        if not grouped:
+            return waves
+
+        # new run id
+        self.run_counter += 1
+        run_id = self.run_counter
+        run_dir = os.path.join(self.runs_dir, f"run_{run_id:04d}")
+        os.makedirs(run_dir, exist_ok=True)
+
+        # We'll create one .lst per overlay group, but share run_id namespace
+        # If you prefer one global .lst across overlays, adapt here.
+        for overlay_path, candidates in grouped.items():
+            # order candidates deterministically by (h5_src, image_idx)
+            candidates.sort(key=lambda c: (c.h5_src, c.image_idx))
+
+            lst_path = os.path.join(run_dir, f"{os.path.basename(overlay_path)}.lst")
+            meta_path = os.path.join(run_dir, f"{os.path.basename(overlay_path)}_meta.json")
+            stream_path = os.path.join(run_dir, f"{os.path.basename(overlay_path)}.stream")
+
+            indices = [c.image_idx for c in candidates]
+            dx_mm = [c.abs_mm[0] for c in candidates]
+            dy_mm = [c.abs_mm[1] for c in candidates]
+
+            # Write overlay shifts (absolute)
+            write_shifts_mm(overlay_path, indices, dx_mm, dy_mm)
+            # Write lst
+            write_lst(lst_path, overlay_path, indices)
+            # Write meta
+            meta = [
+                {
+                    "h5_path": c.h5_src,
+                    "overlay": c.overlay,
+                    "image_idx": c.image_idx,
+                    "purpose": c.purpose,
+                    "seed_mm": [c.seed_mm[0], c.seed_mm[1]],
+                    "delta_px": [c.delta_px[0], c.delta_px[1]],
+                    "abs_shift_mm": [c.abs_mm[0], c.abs_mm[1]],
+                }
+                for c in candidates
+            ]
+            with open(meta_path, "w") as f:
+                json.dump(meta, f, indent=2)
+
+            wave = RunWave(
+                run_id=run_id,
+                lst_path=lst_path,
+                meta_path=meta_path,
+                stream_path=stream_path,
+                entries=candidates,
+            )
+            waves.append(wave)
+
+            # Log
+            jsonl_append(self.log_path, {
+                "ts": time.time(), "type": "run_start",
+                "run_id": run_id, "overlay": overlay_path,
+                "lst_size": len(indices), "lst_path": lst_path
+            })
+
+        return waves
+
+from gi_util import (
+    jsonl_append,
+    run_indexamajig,
+    RunResult,
+)
+from stream_scoring import score_single_chunk_text
+from stream_extract import (
+    find_chunk_span_for_image,
+    extract_winner_stream,
+    merge_winner_streams,
+)
+
+# NOTE: Part 1/2 defined: Params, ImgState, BestPoint, Candidate, ImageController,
+# SourceContext, RunWave, AdaptiveEngine (class skeleton with setup & wave building).
+
+# ------------------------- AdaptiveEngine (continuation) -------------------------
+
+def _read_text(path: str) -> str:
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        return f.read()
+
+
+class AdaptiveEngine(AdaptiveEngine):  # extend the class defined in Part 1
+    # ----- Running waves -----
+
+    def _run_wave(self, wave: RunWave) -> RunResult:
+        # Execute indexamajig for this overlay-specific .lst
+        result = run_indexamajig(
+            lst_path=wave.lst_path,
+            geom_path=os.path.join(self.inputs_dir, os.path.basename(self.geom_path)),
+            cell_path=os.path.join(self.inputs_dir, os.path.basename(self.cell_path)),
+            out_stream_path=wave.stream_path,
+            flags_passthrough=self.idx_flags,
+        )
+        # log
+        jsonl_append(self.log_path, {
+            "ts": time.time(), "type": "run_end",
+            "run_id": wave.run_id, "overlay": os.path.basename(wave.lst_path).replace(".lst", ""),
+            "lst_size": len(wave.entries),
+            "elapsed_s": result.elapsed_s,
+            "returncode": result.returncode,
+            "stderr_tail": result.stderr_tail,
+            "stream_path": wave.stream_path,
+        })
+        return result
+
+    def _process_wave_results(self, wave: RunWave) -> None:
+        """
+        For each candidate in the wave, try to find its chunk in the .stream;
+        if found, score wRMSD and update controller; else mark as not indexed.
+        """
+        # Load stream text once
+        if not os.path.exists(wave.stream_path):
+            # No stream produced (crash); mark all as failed attempt
+            for cand in wave.entries:
+                ctrl = self.sources[cand.h5_src].controllers[cand.image_idx]
+                ctrl.incorporate_result(cand, indexed=False, metrics=None, params=self.params)
+                jsonl_append(self.log_path, {
+                    "ts": time.time(), "type": "candidate_result",
+                    "h5": cand.h5_src, "idx": cand.image_idx, "purpose": cand.purpose,
+                    "indexed": False, "reason": "no_stream"
+                })
+            return
+
+        text = _read_text(wave.stream_path)
+
+        for cand in wave.entries:
+            ctrl = self.sources[cand.h5_src].controllers[cand.image_idx]
+            span = find_chunk_span_for_image(
+                stream_path=wave.stream_path,
+                overlay_path=cand.overlay,
+                image_idx=cand.image_idx,
+            )
+
+            if span is None:
+                # Not indexed / not present
+                ctrl.incorporate_result(cand, indexed=False, metrics=None, params=self.params)
+                jsonl_append(self.log_path, {
+                    "ts": time.time(), "type": "candidate_result",
+                    "h5": cand.h5_src, "idx": cand.image_idx, "purpose": cand.purpose,
+                    "indexed": False
+                })
                 continue
-            # Look for the resolution line
-            if line.startswith("res"):
-                parts = line.split("=")
-                if len(parts) >= 2:
-                    res_str = parts[1].strip()
+
+            # Score the chunk using text slice (avoids temp files)
+            chunk_text = text[span[0]:span[1]]
+            try:
+                metrics = score_single_chunk_text(chunk_text)
+                ctrl.incorporate_result(cand, indexed=True, metrics=metrics, params=self.params)
+                jsonl_append(self.log_path, {
+                    "ts": time.time(), "type": "candidate_result",
+                    "h5": cand.h5_src, "idx": cand.image_idx, "purpose": cand.purpose,
+                    "indexed": True, "wrmsd": metrics.get("wrmsd"),
+                    "n_reflections": metrics.get("n_reflections"),
+                    "n_peaks": metrics.get("n_peaks"),
+                    "cell_dev_pct": metrics.get("cell_dev_pct"),
+                })
+            except Exception as e:
+                # If scoring failed, treat as not indexed (conservative)
+                ctrl.incorporate_result(cand, indexed=False, metrics=None, params=self.params)
+                jsonl_append(self.log_path, {
+                    "ts": time.time(), "type": "candidate_result",
+                    "h5": cand.h5_src, "idx": cand.image_idx, "purpose": cand.purpose,
+                    "indexed": False, "reason": f"score_error:{e}"
+                })
+
+    # ----- Completion checks & finalization -----
+
+    def _all_images_done(self) -> bool:
+        for sc in self.sources.values():
+            for ctrl in sc.controllers.values():
+                if ctrl.state not in (ImgState.FINAL, ImgState.UNINDEXED):
+                    return False
+        return True
+
+    def _finalize_winners(self) -> List[str]:
+        """
+        Extract per-image winner streams for all FINAL images that don't yet
+        have a streams/<src>_<idx>.stream file. Return list of paths created.
+        """
+        winner_paths: List[str] = []
+
+        # Iterate runs newest to oldest to find the chunk where best was achieved
+        # Simpler approach: try each run stream until we can extract a chunk at 'best' (overlay, idx).
+        # For performance, we could track last-success run, but correctness first.
+        run_dirs = sorted(
+            [os.path.join(self.runs_dir, d) for d in os.listdir(self.runs_dir) if d.startswith("run_")],
+            key=lambda p: p, reverse=True
+        )
+
+        for sc in self.sources.values():
+            for idx, ctrl in sc.controllers.items():
+                if ctrl.state != ImgState.FINAL or ctrl.best is None:
+                    continue
+                out_name = f"{os.path.basename(sc.h5_src).replace('.h5','')}_{idx}.stream"
+                out_path = os.path.join(self.streams_dir, out_name)
+                if os.path.exists(out_path):
+                    continue  # already extracted
+
+                # Find the stream where this final-best was produced:
+                # We search backward over run streams for this overlay that contain this (overlay, idx) chunk.
+                found = False
+                for run_dir in run_dirs:
+                    # Streams are named per overlay in our design
+                    candidate_stream = os.path.join(run_dir, f"{os.path.basename(sc.overlay)}.stream")
+                    if not os.path.exists(candidate_stream):
+                        continue
+                    span = find_chunk_span_for_image(candidate_stream, sc.overlay, idx)
+                    if span is None:
+                        continue
                     try:
-                        return float(res_str)
-                    except ValueError:
-                        raise ValueError(f"Invalid resolution value: {res_str}")
-    raise ValueError("Resolution not found in the geometry file.")
+                        extract_winner_stream(candidate_stream, out_path, span)
+                        ctrl.winner_stream_path = out_path
+                        winner_paths.append(out_path)
+                        found = True
+                        break
+                    except Exception as e:
+                        # Try older streams if extraction fails
+                        continue
 
-def run_indexamajig(geomfile_path, listfile_path, cellfile_path, output_path, num_threads, extra_flags=None):
-    if extra_flags is None:
-        extra_flags = []
+                # If not found, we can skip (image may have finalized without a valid chunk, rare)
+        return winner_paths
 
-    cmd = [
-        "indexamajig",
-        "-g", geomfile_path,
-        "-i", listfile_path,
-        "-o", output_path,
-        "-p", cellfile_path,
-        "-j", str(num_threads),
-        *extra_flags,
-    ]
-    # inherit stdout/stderr so QProcess sees lines immediately
-    import subprocess
-    subprocess.run(cmd, check=True)
+    def _write_best_centers_csv(self) -> None:
+        """
+        Append/update best_centers.csv with FINAL images' best records.
+        We rewrite the file each time from current state to avoid duplicates.
+        """
+        rows: List[str] = []
+        header = "h5_path,image_idx,dx_px,dy_px,dx_mm,dy_mm,wrmsd,n_reflections,n_peaks,cell_dev_pct,evals,time_ms,status"
+        rows.append(header)
 
-def perturb_det_shifts(file_list, x_pert, y_pert):
+        for sc in self.sources.values():
+            for idx, ctrl in sc.controllers.items():
+                if ctrl.best is None:
+                    continue
+                status = ctrl.state
+                dx_px = ctrl.best.dx_px
+                dy_px = ctrl.best.dy_px
+                dx_mm = ctrl.seed_mm[0] + dx_px * (1.0 * self._mm_per_px)
+                dy_mm = ctrl.seed_mm[1] + dy_px * (1.0 * self._mm_per_px)
+                wr = ctrl.best.wrmsd
+                nrefl = ctrl.best.n_reflections if ctrl.best.n_reflections is not None else ""
+                npeaks = ctrl.best.n_peaks if ctrl.best.n_peaks is not None else ""
+                celldev = ctrl.best.cell_dev_pct if ctrl.best.cell_dev_pct is not None else ""
+                evals = ctrl.eval_count
+                # time_ms not tracked per-image here; leave blank for now or compute if you time each attempt
+                rows.append(",".join(map(str, [
+                    sc.h5_src, idx, f"{dx_px:.6g}", f"{dy_px:.6g}",
+                    f"{dx_mm:.6g}", f"{dy_mm:.6g}",
+                    f"{wr:.6g}", nrefl, npeaks, celldev, evals, "", status
+                ])))
+
+        with open(self.best_csv, "w") as f:
+            f.write("\n".join(rows) + "\n")
+
+    def _merge_all_winners(self, out_path: Optional[str] = None) -> Optional[str]:
+        # Collect all existing per-image winner streams
+        streams = []
+        for name in sorted(os.listdir(self.streams_dir)):
+            if not name.endswith(".stream"):
+                continue
+            streams.append(os.path.join(self.streams_dir, name))
+        if not streams:
+            return None
+        if out_path is None:
+            out_path = os.path.join(self.merged_dir, "merged_best.stream")
+        merge_winner_streams(streams, out_path)
+        jsonl_append(self.log_path, {"ts": time.time(), "type": "merge_done",
+                                     "images": len(streams), "out_stream": out_path})
+        return out_path
+
+    # ----- Public driver -----
+
+    def run(self) -> str:
+        """
+        Main loop:
+          - setup sources (overlays + controllers)
+          - iterate waves until all images are FINAL/UNINDEXED
+          - extract winners, write CSV, merge
+        Returns path to merged stream or empty string if none.
+        """
+        self.setup_sources()
+
+        # Initialize all controllers to SEED_TRY
+        for sc in self.sources.values():
+            for ctrl in sc.controllers.values():
+                ctrl.activate()
+
+        # Wave loop
+        while True:
+            grouped = self._collect_candidates_for_wave()
+            if not grouped:
+                break
+
+            # Build run waves (.lst per overlay) for this wave id
+            waves = self._build_wave_files(grouped)
+
+            # Execute each wave (sequential per overlay group)
+            for wave in waves:
+                result = self._run_wave(wave)
+                # Process results even if returncode != 0 (partial outputs may exist)
+                self._process_wave_results(wave)
+
+            # Optional pruning: delete old run streams whose images are all finalized
+            # (We keep them until the very end for robust extraction.)
+
+            if self._all_images_done():
+                break
+
+        # Finalize winners
+        self._finalize_winners()
+        self._write_best_centers_csv()
+        merged_path = self._merge_all_winners()
+        return merged_path or ""
+
+# ------------------------- Public API -------------------------
+
+def gandalf_adaptive(
+    run_root: str,
+    geom_path: str,
+    cell_path: str,
+    h5_sources: List[str],
+    params: Params,
+    indexamajig_flags_passthrough: List[str],
+) -> str:
     """
-    Usage: python perturb_shifts.py file_list.lst x_perturbation y_perturbation
-
-    This script adds x_perturbation to entry/data/det_shift_x_mm
-    and y_perturbation to entry/data/det_shift_y_mm in each .h5 file
-    listed in file_list.lst.
+    Entry point for runner/GUI.
+    Creates the engine and runs the adaptive optimization. Returns path to merged stream.
     """
-
-    # Read the .lst file to get list of .h5 files
-    with open(file_list, 'r') as f:
-        h5_files = [line.strip() for line in f if line.strip()]
-
-    # Loop over .h5 files and apply perturbation
-    for h5_file in h5_files:
-        # print(f"Processing: {h5_file}")
-        with h5py.File(h5_file, 'r+') as h5f:
-            # Load existing datasets
-            x_data = h5f["entry/data/det_shift_x_mm"][...]
-            y_data = h5f["entry/data/det_shift_y_mm"][...]
-
-            # Apply perturbations
-            x_data += x_pert
-            y_data += y_pert
-
-            # Write updated values back
-            h5f["entry/data/det_shift_x_mm"][:] = x_data
-            h5f["entry/data/det_shift_y_mm"][:] = y_data
-
-    print(f"  => Applied x shift of {x_pert} mm, y shift of {y_pert} mm")
-
-def list_h5_files(input_path):
-    """
-    Creates or replaces a 'list.lst' file in the specified input_path directory.
-    The file contains the full paths of all files ending with '.h5' in the directory,
-    sorted alphabetically.
-    
-    Args:
-        input_path (str): The directory path where '.h5' files are located.
-    """
-    # Path to the list file
-    listfile_path = os.path.join(input_path, 'list.lst')
-    
-    try:
-        # List all .h5 files
-        h5_files = [file for file in os.listdir(input_path) if file.endswith('.h5') and os.path.isfile(os.path.join(input_path, file))]
-        
-        # Sort the list alphabetically
-        h5_files_sorted = sorted(h5_files, key=lambda x: x.lower())  # Case-insensitive sorting
-        
-        # Open the list file in write mode to overwrite if it exists
-        with open(listfile_path, 'w') as list_file:
-            for file in h5_files_sorted:
-                full_path = os.path.join(input_path, file)
-                list_file.write(full_path + '\n')
-        
-        print(f"'list.lst' has been created with {len(h5_files_sorted)} entries at {listfile_path}")
-    
-    except FileNotFoundError:
-        print(f"The directory '{input_path}' does not exist.")
-    except PermissionError:
-        print(f"Permission denied when accessing '{input_path}'.")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-    
-    return listfile_path
-
-# # --- VENDORED GANDALF ITERATOR END ---
+    eng = AdaptiveEngine(
+        run_root=run_root,
+        geom_path=geom_path,
+        cell_path=cell_path,
+        h5_sources=h5_sources,
+        params=params,
+        indexamajig_flags_passthrough=indexamajig_flags_passthrough,
+    )
+    merged = eng.run()
+    return merged
