@@ -54,7 +54,7 @@ def _copy_initial_seeds(src: h5py.File, ov: h5py.File) -> None:
 def create_overlay(
     h5_src_path: str,
     h5_overlay_path: str,
-    use_vds: bool = False,
+    use_vds: bool = True,
 ) -> int:
     """
     Create overlay file (overwrite if exists). Returns number of images N.
@@ -157,3 +157,19 @@ def zero_shifts(
             idx = np.asarray(indices, dtype=int)
             ov[SHIFT_X_DS][idx] = 0.0
             ov[SHIFT_Y_DS][idx] = 0.0
+            
+def read_seed_shifts_mm_from_src(h5_src_path: str) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Read seed shifts directly from the source HDF5. If not present, return zeros.
+    """
+    h5_src_path = os.path.abspath(h5_src_path)
+    with h5py.File(h5_src_path, "r") as f:
+        N = f[IMAGES_DS].shape[0]
+        if SHIFT_X_DS in f and SHIFT_Y_DS in f:
+            xs = f[SHIFT_X_DS][...]
+            ys = f[SHIFT_Y_DS][...]
+            if xs.shape != (N,) or ys.shape != (N,):
+                raise ValueError(f"Seed arrays in source have wrong shape: {xs.shape}, {ys.shape}; expected {(N,)}")
+            return xs, ys
+        else:
+            return np.zeros((N,), dtype="f8"), np.zeros((N,), dtype="f8")

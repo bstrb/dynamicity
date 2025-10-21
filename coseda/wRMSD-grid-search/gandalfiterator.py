@@ -460,19 +460,21 @@ class AdaptiveEngine:
 
     def setup_sources(self) -> None:
         """
-        Create overlays for each source and initialize controllers for all images.
+        Initialize controllers for all images (read seed shifts from source).
+        NOTE: We no longer create persistent overlays here; overlays are created per run.
         """
+        from overlay_h5 import read_seed_shifts_mm_from_src  # local import to avoid cycles
+
         for src in self.h5_sources:
-            overlay_path = os.path.join(self.overlays_dir, os.path.basename(src).replace(".h5", ".overlay.h5"))
-            N = create_overlay(src, overlay_path, use_vds=False)
-            sc = SourceContext(h5_src=src, overlay=overlay_path, N_images=N)
-            # read seeds from overlay (copied from src)
-            xs, ys = get_seed_shifts_mm(overlay_path)
+            # Read seed shifts (mm) from source HDF5 (or zeros if not present)
+            xs, ys = read_seed_shifts_mm_from_src(src)
+            N = len(xs)
+            sc = SourceContext(h5_src=src, overlay="", N_images=N)  # overlay filled per run
             controllers: Dict[int, ImageController] = {}
             for idx in range(N):
                 ctrl = ImageController(
                     h5_src=src,
-                    overlay=overlay_path,
+                    overlay="",  # filled per run
                     image_idx=idx,
                     geom_res_value=self.res_value,
                     seed_mm=(float(xs[idx]), float(ys[idx])),
@@ -481,6 +483,7 @@ class AdaptiveEngine:
                 controllers[idx] = ctrl
             sc.controllers = controllers
             self.sources[src] = sc
+
 
     # ----- Wave construction -----
 
@@ -502,50 +505,67 @@ class AdaptiveEngine:
 
     def _build_wave_files(self, grouped: Dict[str, List[Candidate]]) -> List[RunWave]:
         """
-        For each overlay group, create a run wave:
-          - write absolute shifts to overlay for the listed indices
-          - create run_X/list, stream path, and meta json
+        For each SOURCE (group), create ONE overlay in this run, ONE .lst, and ONE .stream.
+        Overlay lives in the run dir and is named <src>-overlay%04d.h5.
         """
         waves: List[RunWave] = []
         if not grouped:
             return waves
 
-        # new run id
+        # Bump run id and create run dir
         self.run_counter += 1
         run_id = self.run_counter
         run_dir = os.path.join(self.runs_dir, f"run_{run_id:04d}")
         os.makedirs(run_dir, exist_ok=True)
 
-        # We'll create one .lst per overlay group, but share run_id namespace
-        # If you prefer one global .lst across overlays, adapt here.
-        for overlay_path, candidates in grouped.items():
-            # order candidates deterministically by (h5_src, image_idx)
+        for overlay_key, candidates in grouped.items():
+            # overlay_key came from previous design; recover the source from first candidate
+            if not candidates:
+                continue
+            src_path = candidates[0].h5_src
+            base = os.path.basename(src_path).rsplit(".h5", 1)[0]
+            # New overlay path for THIS run & THIS source:
+            run_overlay = os.path.join(run_dir, f"{base}-overlay{run_id:04d}.h5")
+
+            # Create the overlay (VDS recommended)
+            create_overlay(src_path, run_overlay, use_vds=True)
+
+            # Deterministic order for candidates
             candidates.sort(key=lambda c: (c.h5_src, c.image_idx))
 
-            lst_path = os.path.join(run_dir, f"{os.path.basename(overlay_path)}.lst")
-            meta_path = os.path.join(run_dir, f"{os.path.basename(overlay_path)}_meta.json")
-            stream_path = os.path.join(run_dir, f"{os.path.basename(overlay_path)}.stream")
+            # These files belong to THIS run & THIS source
+            lst_path = os.path.join(run_dir, f"{base}-overlay{run_id:04d}.lst")
+            meta_path = os.path.join(run_dir, f"{base}-overlay{run_id:04d}_meta.json")
+            stream_path = os.path.join(run_dir, f"{base}-overlay{run_id:04d}.stream")
 
+            # Indices and absolute shifts (mm)
             indices = [c.image_idx for c in candidates]
             dx_mm = [c.abs_mm[0] for c in candidates]
             dy_mm = [c.abs_mm[1] for c in candidates]
 
-            # Write overlay shifts (absolute)
-            write_shifts_mm(overlay_path, indices, dx_mm, dy_mm)
-            # Write lst
-            write_lst(lst_path, overlay_path, indices)
-            # Write meta
+            # Write shifts to THIS run's overlay
+            write_shifts_mm(run_overlay, indices, dx_mm, dy_mm)
+
+            # IMPORTANT: this run uses run_overlay; update entries to carry the correct overlay path
+            # (so downstream matching finds the same filename that indexamajig writes)
+            from dataclasses import replace as dc_replace
+            entries = [dc_replace(c, overlay=run_overlay) for c in candidates]
+
+            # One .lst for THIS overlay
+            write_lst(lst_path, run_overlay, indices)
+
+            # Meta (purposes may differ per line, that's fine)
             meta = [
                 {
                     "h5_path": c.h5_src,
-                    "overlay": c.overlay,
+                    "overlay": run_overlay,
                     "image_idx": c.image_idx,
                     "purpose": c.purpose,
                     "seed_mm": [c.seed_mm[0], c.seed_mm[1]],
                     "delta_px": [c.delta_px[0], c.delta_px[1]],
                     "abs_shift_mm": [c.abs_mm[0], c.abs_mm[1]],
                 }
-                for c in candidates
+                for c in entries
             ]
             with open(meta_path, "w") as f:
                 json.dump(meta, f, indent=2)
@@ -555,18 +575,21 @@ class AdaptiveEngine:
                 lst_path=lst_path,
                 meta_path=meta_path,
                 stream_path=stream_path,
-                entries=candidates,
+                entries=entries,
             )
             waves.append(wave)
 
             # Log
             jsonl_append(self.log_path, {
                 "ts": time.time(), "type": "run_start",
-                "run_id": run_id, "overlay": overlay_path,
-                "lst_size": len(indices), "lst_path": lst_path
+                "run_id": run_id,
+                "overlay": run_overlay,
+                "lst_size": len(indices),
+                "lst_path": lst_path
             })
 
         return waves
+
 
 from gi_util import (
     jsonl_append,
@@ -593,70 +616,111 @@ def _read_text(path: str) -> str:
 class AdaptiveEngine(AdaptiveEngine):  # extend the class defined in Part 1
     # ----- Running waves -----
 
-    def _run_wave(self, wave: RunWave) -> RunResult:
-        # Execute indexamajig for this overlay-specific .lst
-        result = run_indexamajig(
-            lst_path=wave.lst_path,
-            geom_path=os.path.join(self.inputs_dir, os.path.basename(self.geom_path)),
-            cell_path=os.path.join(self.inputs_dir, os.path.basename(self.cell_path)),
-            out_stream_path=wave.stream_path,
-            flags_passthrough=self.idx_flags,
-        )
-        # log
-        jsonl_append(self.log_path, {
-            "ts": time.time(), "type": "run_end",
-            "run_id": wave.run_id, "overlay": os.path.basename(wave.lst_path).replace(".lst", ""),
-            "lst_size": len(wave.entries),
-            "elapsed_s": result.elapsed_s,
-            "returncode": result.returncode,
-            "stderr_tail": result.stderr_tail,
-            "stream_path": wave.stream_path,
-        })
-        return result
 
+    def _run_wave(self, wave: RunWave) -> int:
+        """
+        Execute ONE run (ONE overlay + ONE .lst) and produce ONE .stream.
+        Returns indexamajig return code.
+        """
+        # Derive paths for the reproducer and stderr
+        run_dir = os.path.dirname(wave.lst_path)
+        base = os.path.splitext(os.path.basename(wave.stream_path))[0]   # e.g., <src>-overlay0001
+        sh_path = os.path.join(run_dir, f"{base}.sh")
+        err_path = os.path.join(run_dir, f"{base}.err")
+
+        # Optional: log the exact command we’re about to run
+        jsonl_append(self.log_path, {
+            "ts": time.time(), "type": "idx_cmd",
+            "lst": wave.lst_path, "geom": self.geom_path, "cell": self.cell_path,
+            "stream": wave.stream_path, "script": sh_path
+        })
+
+        rc = run_indexamajig(
+            lst_path=wave.lst_path,
+            geom_path=self.geom_path,
+            cell_path=self.cell_path,
+            out_stream_path=wave.stream_path,
+            flags=self.indexamajig_flags,
+            log_jsonl_path=self.log_path,
+            run_script_path=sh_path,   # <-- write the .sh reproducer here
+            stderr_path=err_path,      # <-- capture stderr to file
+        )
+        return rc
+
+    
     def _process_wave_results(self, wave: RunWave) -> None:
         """
-        For each candidate in the wave, try to find its chunk in the .stream;
-        if found, score wRMSD and update controller; else mark as not indexed.
+        For each candidate in this overlay-run, look up its chunk in the run's .stream.
+        If found: score wRMSD, update controller, and remember this exact stream path.
+        If not: mark as not indexed for this attempt (controller will propose next step).
         """
-        # Load stream text once
-        if not os.path.exists(wave.stream_path):
-            # No stream produced (crash); mark all as failed attempt
+        # If indexamajig didn't produce a stream, mark all as failed attempt
+        if not os.path.exists(wave.stream_path) or os.path.getsize(wave.stream_path) == 0:
             for cand in wave.entries:
                 ctrl = self.sources[cand.h5_src].controllers[cand.image_idx]
                 ctrl.incorporate_result(cand, indexed=False, metrics=None, params=self.params)
                 jsonl_append(self.log_path, {
                     "ts": time.time(), "type": "candidate_result",
                     "h5": cand.h5_src, "idx": cand.image_idx, "purpose": cand.purpose,
-                    "indexed": False, "reason": "no_stream"
+                    "indexed": False, "reason": "no_stream_or_empty",
+                    "stream": wave.stream_path
                 })
             return
 
-        text = _read_text(wave.stream_path)
-
-        for cand in wave.entries:
-            ctrl = self.sources[cand.h5_src].controllers[cand.image_idx]
-            span = find_chunk_span_for_image(
-                stream_path=wave.stream_path,
-                overlay_path=cand.overlay,
-                image_idx=cand.image_idx,
-            )
-
-            if span is None:
-                # Not indexed / not present
+        # Load stream text once; we will slice per chunk
+        try:
+            with open(wave.stream_path, "r", encoding="utf-8", errors="ignore") as f:
+                stream_text = f.read()
+        except Exception as e:
+            # Be conservative: treat as a missing stream
+            for cand in wave.entries:
+                ctrl = self.sources[cand.h5_src].controllers[cand.image_idx]
                 ctrl.incorporate_result(cand, indexed=False, metrics=None, params=self.params)
                 jsonl_append(self.log_path, {
                     "ts": time.time(), "type": "candidate_result",
                     "h5": cand.h5_src, "idx": cand.image_idx, "purpose": cand.purpose,
-                    "indexed": False
+                    "indexed": False, "reason": f"stream_read_error:{e}",
+                    "stream": wave.stream_path
+                })
+            return
+
+        for cand in wave.entries:
+            ctrl = self.sources[cand.h5_src].controllers[cand.image_idx]
+
+            # Try to find the exact chunk for (overlay in this run, image_idx).
+            # We pass allow_off_by_one=True to be tolerant of Event numbering differences.
+            span = find_chunk_span_for_image(
+                stream_path=wave.stream_path,
+                overlay_path=cand.overlay,            # per-run overlay path
+                image_idx=cand.image_idx,
+                source_path=cand.h5_src,              # tolerate CrystFEL writing source path
+                allow_off_by_one=True
+            )
+
+            if span is None:
+                # Not indexed / not present for this attempt
+                ctrl.incorporate_result(cand, indexed=False, metrics=None, params=self.params)
+                jsonl_append(self.log_path, {
+                    "ts": time.time(), "type": "candidate_result",
+                    "h5": cand.h5_src, "idx": cand.image_idx, "purpose": cand.purpose,
+                    "indexed": False, "stream": wave.stream_path
                 })
                 continue
 
-            # Score the chunk using text slice (avoids temp files)
-            chunk_text = text[span[0]:span[1]]
+            # Score the matched chunk
+            s, e = span
+            chunk_text = stream_text[s:e]
             try:
                 metrics = score_single_chunk_text(chunk_text)
                 ctrl.incorporate_result(cand, indexed=True, metrics=metrics, params=self.params)
+
+                # Remember exactly which stream produced this success
+                ctrl.last_success_stream_path = wave.stream_path
+
+                # Ensure the controller carries the current per-run overlay path (useful for later extraction)
+                if not ctrl.overlay or os.path.basename(ctrl.overlay) != os.path.basename(cand.overlay):
+                    ctrl.overlay = cand.overlay
+
                 jsonl_append(self.log_path, {
                     "ts": time.time(), "type": "candidate_result",
                     "h5": cand.h5_src, "idx": cand.image_idx, "purpose": cand.purpose,
@@ -664,14 +728,16 @@ class AdaptiveEngine(AdaptiveEngine):  # extend the class defined in Part 1
                     "n_reflections": metrics.get("n_reflections"),
                     "n_peaks": metrics.get("n_peaks"),
                     "cell_dev_pct": metrics.get("cell_dev_pct"),
+                    "stream": wave.stream_path
                 })
             except Exception as e:
-                # If scoring failed, treat as not indexed (conservative)
+                # Scoring failed → treat as not indexed to stay conservative
                 ctrl.incorporate_result(cand, indexed=False, metrics=None, params=self.params)
                 jsonl_append(self.log_path, {
                     "ts": time.time(), "type": "candidate_result",
                     "h5": cand.h5_src, "idx": cand.image_idx, "purpose": cand.purpose,
-                    "indexed": False, "reason": f"score_error:{e}"
+                    "indexed": False, "reason": f"score_error:{e}",
+                    "stream": wave.stream_path
                 })
 
     # ----- Completion checks & finalization -----
@@ -685,51 +751,179 @@ class AdaptiveEngine(AdaptiveEngine):  # extend the class defined in Part 1
 
     def _finalize_winners(self) -> List[str]:
         """
-        Extract per-image winner streams for all FINAL images that don't yet
-        have a streams/<src>_<idx>.stream file. Return list of paths created.
+        Extract per-image winner streams for images with FINAL state (only).
+        Returns list of paths created during this call.
         """
-        winner_paths: List[str] = []
-
-        # Iterate runs newest to oldest to find the chunk where best was achieved
-        # Simpler approach: try each run stream until we can extract a chunk at 'best' (overlay, idx).
-        # For performance, we could track last-success run, but correctness first.
-        run_dirs = sorted(
-            [os.path.join(self.runs_dir, d) for d in os.listdir(self.runs_dir) if d.startswith("run_")],
-            key=lambda p: p, reverse=True
-        )
+        os.makedirs(self.streams_dir, exist_ok=True)
+        created: List[str] = []
 
         for sc in self.sources.values():
             for idx, ctrl in sc.controllers.items():
                 if ctrl.state != ImgState.FINAL or ctrl.best is None:
                     continue
-                out_name = f"{os.path.basename(sc.h5_src).replace('.h5','')}_{idx}.stream"
+
+                out_name = f"{os.path.basename(sc.h5_src).rsplit('.h5',1)[0]}_{idx}.stream"
                 out_path = os.path.join(self.streams_dir, out_name)
                 if os.path.exists(out_path):
-                    continue  # already extracted
+                    continue
 
-                # Find the stream where this final-best was produced:
-                # We search backward over run streams for this overlay that contain this (overlay, idx) chunk.
-                found = False
-                for run_dir in run_dirs:
-                    # Streams are named per overlay in our design
-                    candidate_stream = os.path.join(run_dir, f"{os.path.basename(sc.overlay)}.stream")
-                    if not os.path.exists(candidate_stream):
-                        continue
-                    span = find_chunk_span_for_image(candidate_stream, sc.overlay, idx)
-                    if span is None:
-                        continue
-                    try:
-                        extract_winner_stream(candidate_stream, out_path, span)
-                        ctrl.winner_stream_path = out_path
-                        winner_paths.append(out_path)
-                        found = True
-                        break
-                    except Exception as e:
-                        # Try older streams if extraction fails
-                        continue
+                cand_stream = getattr(ctrl, "last_success_stream_path", None)
+                overlay_hint = ctrl.overlay if getattr(ctrl, "overlay", "") else ""
 
-                # If not found, we can skip (image may have finalized without a valid chunk, rare)
-        return winner_paths
+                span = None
+                if cand_stream and os.path.exists(cand_stream):
+                    span = find_chunk_span_for_image(
+                        stream_path=cand_stream,
+                        overlay_path=overlay_hint,
+                        image_idx=idx,
+                        source_path=sc.h5_src,
+                        allow_off_by_one=True
+                    )
+
+                if span is None:
+                    # Fallback search across run streams (most-recent-first)
+                    run_dirs = sorted(
+                        [os.path.join(self.runs_dir, d) for d in os.listdir(self.runs_dir) if d.startswith("run_")],
+                        key=lambda p: p, reverse=True
+                    )
+                    for run_dir in run_dirs:
+                        for nm in os.listdir(run_dir):
+                            if not nm.endswith(".stream"):
+                                continue
+                            sp = os.path.join(run_dir, nm)
+                            span = find_chunk_span_for_image(
+                                stream_path=sp,
+                                overlay_path=overlay_hint,
+                                image_idx=idx,
+                                source_path=sc.h5_src,
+                                allow_off_by_one=True
+                            )
+                            if span is not None:
+                                cand_stream = sp
+                                break
+                        if span is not None:
+                            break
+
+                if span is None or not cand_stream or not os.path.exists(cand_stream):
+                    # No extractable chunk yet (unexpected for FINAL, but tolerate)
+                    continue
+
+                try:
+                    extract_winner_stream(cand_stream, out_path, span)
+                    ctrl.winner_stream_path = out_path
+                    created.append(out_path)
+                except Exception as e:
+                    jsonl_append(self.log_path, {
+                        "ts": time.time(), "type": "winner_extract_error",
+                        "h5": sc.h5_src, "idx": idx, "err": str(e),
+                        "source_stream": cand_stream
+                    })
+
+        return created
+
+    def _finalize_current_winners(self, allow_nonfinal: bool = True) -> int:
+        """
+        Extract per-image best-so-far chunks into per-image winner streams under self.streams_dir.
+        - If allow_nonfinal=True: include any image with a seen 'best' (even if not FINAL yet).
+        - If allow_nonfinal=False: only include images whose state is FINAL.
+
+        Returns:
+            total number of per-image winner streams present after this call.
+        """
+        os.makedirs(self.streams_dir, exist_ok=True)
+
+        # Track what's already extracted to avoid repeated work
+        existing = set()
+        for nm in os.listdir(self.streams_dir):
+            if nm.endswith(".stream"):
+                existing.add(os.path.join(self.streams_dir, nm))
+
+        for sc in self.sources.values():
+            for idx, ctrl in sc.controllers.items():
+                if ctrl.best is None:
+                    continue
+                if (not allow_nonfinal) and (ctrl.state != ImgState.FINAL):
+                    continue
+
+                out_name = f"{os.path.basename(sc.h5_src).rsplit('.h5',1)[0]}_{idx}.stream"
+                out_path = os.path.join(self.streams_dir, out_name)
+                if out_path in existing or os.path.exists(out_path):
+                    continue
+
+                # Prefer the exact stream that produced the last success
+                cand_stream = getattr(ctrl, "last_success_stream_path", None)
+
+                # We need to find the chunk in that stream; use the controller's current overlay path if present
+                overlay_hint = ctrl.overlay if getattr(ctrl, "overlay", "") else ""
+
+                span = None
+                if cand_stream and os.path.exists(cand_stream):
+                    span = find_chunk_span_for_image(
+                        stream_path=cand_stream,
+                        overlay_path=overlay_hint,
+                        image_idx=idx,
+                        source_path=sc.h5_src,
+                        allow_off_by_one=True
+                    )
+
+                # Fallback: search recent run streams if we didn't find it on the remembered stream
+                if span is None:
+                    run_dirs = sorted(
+                        [os.path.join(self.runs_dir, d) for d in os.listdir(self.runs_dir) if d.startswith("run_")],
+                        key=lambda p: p, reverse=True
+                    )
+                    for run_dir in run_dirs:
+                        # Try any stream in this run directory
+                        for nm in os.listdir(run_dir):
+                            if not nm.endswith(".stream"):
+                                continue
+                            sp = os.path.join(run_dir, nm)
+                            span = find_chunk_span_for_image(
+                                stream_path=sp,
+                                overlay_path=overlay_hint,
+                                image_idx=idx,
+                                source_path=sc.h5_src,
+                                allow_off_by_one=True
+                            )
+                            if span is not None:
+                                cand_stream = sp
+                                break
+                        if span is not None:
+                            break
+
+                if span is None or not cand_stream or not os.path.exists(cand_stream):
+                    # We don't yet have a successful chunk on disk for this image; skip for now
+                    continue
+
+                try:
+                    extract_winner_stream(cand_stream, out_path, span)
+                    ctrl.winner_stream_path = out_path
+                    existing.add(out_path)
+                except Exception as e:
+                    # Skip on extraction failure; later waves may still succeed
+                    jsonl_append(self.log_path, {
+                        "ts": time.time(), "type": "winner_extract_error",
+                        "h5": sc.h5_src, "idx": idx, "err": str(e),
+                        "source_stream": cand_stream
+                    })
+
+        return len(existing)
+
+
+    def _merge_early_break(self, run_id: int) -> Optional[str]:
+        """Merge whatever per-image streams exist into an early-break stream for this run."""
+        streams = []
+        if not os.path.isdir(self.streams_dir):
+            return None
+        for nm in sorted(os.listdir(self.streams_dir)):
+            if nm.endswith(".stream"):
+                streams.append(os.path.join(self.streams_dir, nm))
+        if not streams:
+            return None
+        out_path = os.path.join(self.merged_dir, f"early_break_run_{run_id:04d}.stream")
+        merge_winner_streams(streams, out_path)
+        return out_path
+
 
     def _write_best_centers_csv(self) -> None:
         """
@@ -811,6 +1005,8 @@ class AdaptiveEngine(AdaptiveEngine):  # extend the class defined in Part 1
                 result = self._run_wave(wave)
                 # Process results even if returncode != 0 (partial outputs may exist)
                 self._process_wave_results(wave)
+                self._finalize_current_winners(allow_nonfinal=True)
+                self._merge_early_break(run_id=wave.run_id)
 
             # Optional pruning: delete old run streams whose images are all finalized
             # (We keep them until the very end for robust extraction.)
