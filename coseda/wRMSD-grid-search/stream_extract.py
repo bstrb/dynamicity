@@ -41,10 +41,18 @@ END_CHUNK_RE   = re.compile(r"-{3,}\s*End\s+chunk\s*-{3,}", re.IGNORECASE)
 IMAGE_FILE_RE = re.compile(r"^\s*Image\s+filename\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
 # Common fields for event/index (we try several):
-EVENT_RE       = re.compile(r"^\s*Event\s*:\s*([0-9]+)\s*$", re.IGNORECASE | re.MULTILINE)
+EVENT_RE = re.compile(
+    r"^\s*Event\s*:\s*.*?([0-9]+)\s*$",
+    re.IGNORECASE | re.MULTILINE
+)
+IMG_SERIAL_RE = re.compile(
+    r"^\s*Image\s+serial\s+number\s*:\s*([0-9]+)\s*$",
+    re.IGNORECASE | re.MULTILINE
+)
 IMG_INDEX_RE   = re.compile(r"^\s*Image\s+(?:index|number)\s*:\s*([0-9]+)\s*$", re.IGNORECASE | re.MULTILINE)
 SEL_IDX_ORDER  = [EVENT_RE, IMG_INDEX_RE]  # try Event first; fall back to Image index/number
 
+SEL_IDX_ORDER  = [EVENT_RE, IMG_INDEX_RE, IMG_SERIAL_RE]
 
 # ---------- Low-level: header + chunk iteration ----------
 
@@ -120,15 +128,23 @@ def _normalize_path(p: Optional[str]) -> Optional[str]:
     except Exception:
         return p
 
-
-def find_chunk_span_for_image(stream_path: str, overlay_path: str, image_idx: int) -> Optional[Tuple[int, int]]:
+# stream_extract.py
+def find_chunk_span_for_image(
+    stream_path: str,
+    overlay_path: str,
+    image_idx: int,
+    source_path: str | None = None,
+    allow_off_by_one: bool = False,
+) -> Optional[tuple[int, int]]:
     """
-    Return (start, end) character offsets for the chunk corresponding to
-    (overlay_path, image_idx) if found; else None.
+    Return (start, end) offsets for the chunk corresponding to (overlay_path OR source_path, image_idx).
+    If allow_off_by_one=True, accept chunks where |idx - image_idx| == 1 to tolerate Event vs Image index drifts.
     """
     overlay_path = _normalize_path(overlay_path)
+    source_path  = _normalize_path(source_path) if source_path else None
+
     text = read_file_text(stream_path)
-    # quick split to skip header
+    # skip header
     _, body = split_header_and_body(text)
 
     for (s, e) in iter_chunks_with_spans(text):
@@ -136,8 +152,27 @@ def find_chunk_span_for_image(stream_path: str, overlay_path: str, image_idx: in
         img_path, idx = parse_chunk_metadata(chunk)
         if img_path is None or idx is None:
             continue
-        if _normalize_path(img_path) == overlay_path and idx == image_idx:
+
+        norm = _normalize_path(img_path)
+        path_match = (norm == overlay_path) or (source_path is not None and norm == source_path)
+        if not path_match:
+            # Optional: also allow basename match to be extra lenient
+            try:
+                path_match = (
+                    os.path.basename(norm) == os.path.basename(overlay_path) or
+                    (source_path and os.path.basename(norm) == os.path.basename(source_path))
+                )
+            except Exception:
+                pass
+
+        if not path_match:
+            continue
+
+        if idx == image_idx:
             return (s, e)
+        if allow_off_by_one and abs(idx - image_idx) == 1:
+            return (s, e)
+
     return None
 
 

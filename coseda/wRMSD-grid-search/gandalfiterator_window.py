@@ -118,6 +118,109 @@ class WorkerThread(QtCore.QThread):
         except Exception:
             self.finishedRun.emit("")
 
+class FileTailer(QtCore.QObject):
+    """
+    Lightweight file tailer that polls a .err file and emits 'processed' counts
+    whenever it sees lines like: 'XX images processed, YY hits ...'
+    """
+    progressParsed = QtCore.pyqtSignal(int)   # emits 'processed' (int)
+
+    def __init__(self, path: str, poll_ms: int = 250, parent=None):
+        super().__init__(parent)
+        self.path = path
+        self._pos = 0
+        self._timer = QtCore.QTimer(self)
+        self._timer.setInterval(poll_ms)
+        self._timer.timeout.connect(self._poll)
+        import re
+        self._re = re.compile(r"^\s*([0-9]+)\s+images\s+processed\b", re.IGNORECASE)
+
+    def start(self):
+        self._pos = 0
+        self._timer.start()
+
+    def stop(self):
+        self._timer.stop()
+
+    def _poll(self):
+        import os
+        if not self.path or not os.path.exists(self.path):
+            return
+        try:
+            with open(self.path, "rb") as f:
+                f.seek(self._pos)
+                data = f.read()
+                if not data:
+                    return
+                self._pos = f.tell()
+        except Exception:
+            return
+
+        for raw in data.splitlines():
+            try:
+                line = raw.decode("utf-8", errors="ignore")
+                m = self._re.search(line)
+                if m:
+                    self.progressParsed.emit(int(m.group(1)))
+            except Exception:
+                pass
+
+
+class RunRow(QtWidgets.QWidget):
+    """
+    A single row in the 'Run Progress' panel: label + QProgressBar + meta label.
+    """
+    def __init__(self, run_key: str, parent=None):
+        super().__init__(parent)
+        self.run_key = run_key
+        self.total: int | None = None
+        self.processed: int = 0
+
+        h = QtWidgets.QHBoxLayout(self)
+        h.setContentsMargins(6, 6, 6, 6)
+        h.setSpacing(8)
+
+        self.lbl = QtWidgets.QLabel(run_key)
+        self.lbl.setMinimumWidth(160)
+
+        self.bar = QtWidgets.QProgressBar()
+        self.bar.setMinimum(0)
+        self.bar.setTextVisible(True)
+
+        self.meta = QtWidgets.QLabel("")
+        self.meta.setMinimumWidth(140)
+
+        h.addWidget(self.lbl)
+        h.addWidget(self.bar, 1)
+        h.addWidget(self.meta)
+
+    def set_total(self, total: int):
+        self.total = max(1, int(total))
+        self.bar.setMaximum(self.total)
+        self._render()
+
+    def update_processed(self, processed: int):
+        # Make monotonic: indexamajig may sometimes log duplicates
+        self.processed = max(self.processed, int(processed))
+        self.bar.setValue(self.processed)
+        self._render()
+
+    def _render(self):
+        if self.total:
+            pct = int(round(100.0 * self.processed / max(1, self.total)))
+            self.bar.setFormat(f"%p%   ({self.processed}/{self.total})")
+            self.meta.setText(f"{pct}% • {self.run_key}")
+        else:
+            self.bar.setFormat(f"{self.processed} done")
+            self.meta.setText(f"{self.processed} • {self.run_key}")
+
+    def mark_done_if_complete(self):
+        if self.total and self.processed >= self.total:
+            self.meta.setText(f"Done • {self.run_key}")
+
+    def mark_failed(self):
+        self.meta.setText(f"Failed • {self.run_key}")
+
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -136,6 +239,8 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(grp_paths)
         form_paths = QtWidgets.QFormLayout(grp_paths)
 
+        self._run_stats = {}  # key: run_id, val: dict(counts/medians)
+
         self.runRootEdit = QtWidgets.QLineEdit()
         self.geomEdit = QtWidgets.QLineEdit()
         self.cellEdit = QtWidgets.QLineEdit()
@@ -145,11 +250,18 @@ class MainWindow(QtWidgets.QMainWindow):
         # ---- Defaults for debugging (comment out later) ----
         DEBUG = True
         if DEBUG:
-            default_root = ("/home/bubl3932/files/grid-search-wRMSD-optimization")
+            # DESKTOP
+            # default_root = ("/home/bubl3932/files/grid-search-wRMSD-optimization")
+            # self.runRootEdit.setText(default_root)
+            # self.geomEdit.setText(default_root + "/MFM.geom")
+            # self.cellEdit.setText(default_root + "/MFM.cell")
+            # self.h5List.addItem(default_root + "/MFM.h5")
+            # LAPTOP
+            default_root = ("/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_002")
             self.runRootEdit.setText(default_root)
-            self.geomEdit.setText(default_root + "/MFM.geom")
-            self.cellEdit.setText(default_root + "/MFM.cell")
-            self.h5List.addItem(default_root + "/MFM.h5")
+            self.geomEdit.setText(default_root + "/MFM300-VIII.geom")
+            self.cellEdit.setText(default_root + "/MFM300-VIII.cell")
+            self.h5List.addItem(default_root + "/sim.h5")
         # ---------------------------------------------------
 
         btnRunRoot = QtWidgets.QPushButton("Browse…")
@@ -267,6 +379,77 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.worker: Optional[WorkerThread] = None
         self.tailer: Optional[LogTailer] = None
+
+        self._top_vbox_layout = layout
+        self._init_progress_panel()
+
+    def _init_progress_panel(self):
+        """Insert a 'Run Progress' scrollable panel above the log."""
+        grp_prog = QtWidgets.QGroupBox("Run Progress")
+        # We assume `layout` is the top-level VBox in your existing __init__
+        # If your variable is named differently, adjust this line accordingly:
+        self._top_vbox_layout.addWidget(grp_prog)  # <-- set this reference in __init__
+
+        vbox_prog = QtWidgets.QVBoxLayout(grp_prog)
+        self.progScroll = QtWidgets.QScrollArea()
+        self.progScroll.setWidgetResizable(True)
+        vbox_prog.addWidget(self.progScroll)
+
+        self._progHost = QtWidgets.QWidget()
+        self.progScroll.setWidget(self._progHost)
+
+        self._progLayout = QtWidgets.QVBoxLayout(self._progHost)
+        self._progLayout.setContentsMargins(6, 6, 6, 6)
+        self._progLayout.setSpacing(6)
+
+        # Per-run state (existing)
+        self._runRows: dict[str, RunRow] = {}     # run_key -> RunRow
+        self._tailers: dict[str, FileTailer] = {} # run_key -> FileTailer
+
+        # NEW: accumulate counts & wRMSD per run (keyed by run_key)
+        # schema: { run_key: {"n":int, "idx":int, "wrmsd":List[float], "total": Optional[int]} }
+        self._runStats: dict[str, dict] = {}
+
+
+    def _startErrTailer(self, run_key: str, err_path: str, lst_path: str, total: int | None):
+        """Start (or restart) a FileTailer on the given .err file."""
+        # Stop existing tailer if present
+        old = self._tailers.get(run_key)
+        if old:
+            try:
+                old.stop()
+            except Exception:
+                pass
+
+        tailer = FileTailer(err_path, parent=self)
+        # Connect so each parsed 'processed' count updates the row
+        tailer.progressParsed.connect(lambda processed, rk=run_key, lp=lst_path, tot=total:
+                                    self._onProgress(rk, processed, tot, lp))
+        tailer.start()
+        self._tailers[run_key] = tailer
+
+    def _onProgress(self, run_key: str, processed: int, total_hint: int | None, lst_path: str):
+        """Update (or create) the UI row for a run."""
+        row = self._runRows.get(run_key)
+        if not row:
+            row = RunRow(run_key)
+            self._progLayout.addWidget(row)
+            self._runRows[run_key] = row
+
+        # If total unknown, compute once from .lst
+        if row.total is None:
+            total = total_hint
+            if total is None and lst_path:
+                try:
+                    with open(lst_path, "r") as f:
+                        total = sum(1 for ln in f if ln.strip())
+                except Exception:
+                    total = None
+            if total is not None:
+                row.set_total(int(total))
+
+        row.update_processed(int(processed))
+
 
     # ---- Path pickers ----
     def _chooseRunRoot(self):
@@ -453,15 +636,93 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.logView.appendPlainText("No merged stream produced (no FINAL images or failure).")
             QtWidgets.QMessageBox.warning(self, "Run finished", "No merged stream produced.")
-
+            
     def _onLogLine(self, line: str):
+        """Handle one line from log.jsonl."""
+        # Always echo to the log pane (pretty if JSON)
+        obj = None
         try:
             obj = json.loads(line)
-            # Compact pretty
             pretty = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
             self.logView.appendPlainText(pretty)
         except Exception:
             self.logView.appendPlainText(line)
+
+        if not isinstance(obj, dict):
+            return
+
+        t = obj.get("type")
+
+        if t == "run_started":
+            lst = obj.get("lst", "")
+            err = obj.get("stderr", "")
+            total = obj.get("total")
+            run_key = obj.get("run_id") or Path(lst).stem or "run"
+
+            # Ensure row exists
+            row = self._runRows.get(run_key)
+            if not row:
+                row = RunRow(run_key)
+                self._progLayout.addWidget(row)
+                self._runRows[run_key] = row
+            if total is not None:
+                try:
+                    row.set_total(int(total))
+                except Exception:
+                    pass
+
+            # Init stats for this run
+            self._runStats[run_key] = {"n": 0, "idx": 0, "wrmsd": [], "total": int(total) if total is not None else None}
+
+            # Start tailing the .err for live progress
+            self._startErrTailer(run_key, err, lst, total)
+
+        elif t == "candidate_result":
+            # Derive run_key from the stream path (engine uses basename(stream) as run_id)
+            import os, statistics
+            stream_path = obj.get("stream", "") or ""
+            run_key = os.path.splitext(os.path.basename(stream_path))[0] or "run"
+
+            st = self._runStats.setdefault(run_key, {"n": 0, "idx": 0, "wrmsd": [], "total": None})
+
+            # Update counts
+            st["n"] += 1
+            if obj.get("indexed"):
+                st["idx"] += 1
+                wr = obj.get("wrmsd")
+                if isinstance(wr, (int, float)):
+                    try:
+                        st["wrmsd"].append(float(wr))
+                    except Exception:
+                        pass
+
+            # Update the corresponding row's meta text
+            row = self._runRows.get(run_key)
+            if row:
+                # prefer row.total if set; otherwise use stats.total; fallback to "?"
+                total_disp = row.total or st.get("total") or "?"
+                med = None
+                try:
+                    if st["wrmsd"]:
+                        med = statistics.median(st["wrmsd"])
+                except Exception:
+                    med = None
+                txt = f"{row.processed}/{total_disp} • indexed {st['idx']}/{st['n']}"
+                if med is not None:
+                    txt += f" • med wRMSD={med:.3f}"
+                row.meta.setText(txt)
+
+        elif t == "indexamajig_exec":
+            # Process end marker; mark done/failed for any visible rows (keep your logic)
+            try:
+                rc = int(obj.get("returncode") or 0)
+            except Exception:
+                rc = 1
+            for row in self._runRows.values():
+                if rc == 0:
+                    row.mark_done_if_complete()
+                else:
+                    row.mark_failed()
 
 
 def main():

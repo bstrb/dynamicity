@@ -1,0 +1,126 @@
+GANDALF ADAPTIVE CENTER-SEARCH — TEXT DIAGRAM
+=============================================
+
+LEGEND
+------
+[Box]        = step/action     (rounded = state)
+-->          = flow/transition
+( k:v )      = key parameter
+{file.ext}   = file artifact
+
+TOP-LEVEL FLOW (per run)
+------------------------
+[CLI/GUI inputs]
+    (.geom, .cell, sources .h5, user flags, Params)
+        -->
+[Seed read]
+    - read /det_shift_x_mm,y_mm from sources if present
+    - else seed = (0,0)
+        -->
+[Initialize ImageControllers]
+    (R_px, s_init_px, K_dir, s_refine_px, s_min_px, eps_rel, N_eval_max, eight_conn?, dir_bias?)
+        -->
++--------------------------- WAVE LOOP ---------------------------+
+| [Select 1 candidate per ACTIVE image]                           |
+|    - state decides (seed / ring / refine)                       |
+|    - convert px->mm via (.geom res)                             |
+|                                                                 |
+| [Group by SOURCE]                                               |
+|    --> for each source:                                         |
+|        [Build overlay.h5] {runs/run_XXXX/overlay.h5}            |
+|           - link images from source                             |
+|           - write absolute shifts (mm) for chosen indices       |
+|        [Write .lst] {runs/run_XXXX/batch.lst}                   |
+|                                                                 |
+|        [Run indexamajig once]                                   |
+|           - defaults + user flags                               |
+|           - outputs .stream {runs/run_XXXX/batch.stream}        |
+|           - logs: .sh, .err, log.jsonl                          |
+|                                                                 |
+|        [Parse & SCORE stream]                                   |
+|           - locate chunk by overlay path + Event/Image index    |
+|           - compute wRMSD (+ counts, cell dev...)               |
+|                                                                 |
+| [Update ImageControllers]                                       |
+|    - success? improve best?                                     |
+|    - advance state (see FSM below)                              |
+|                                                                 |
+| [Extract winners so far]                                        |
+|    - write per-image one-chunk streams                          |
+|    - rewrite best_centers.csv                                   |
++-----------------------------------------------------------------+
+        -->
+[All images FINAL or UNINDEXED]
+        -->
+[Merge winners]
+    - merged_best.stream (FINAL/Best of each image)
+    - DONE
+
+
+PER-IMAGE FINITE-STATE MACHINE (FSM)
+------------------------------------
+              start
+                |
+                v
+          (SEED_TRY)
+          [index at seed]
+            | success               | fail
+            v                       v
+          (REFINE)             (RING_SEARCH)
+      step = s_refine_px        ring r = s_init_px
+      sweep 4/8-neighbors       try K_dir angles (golden-angle)
+      if improved:              success -> (REFINE)
+         - update best          fail all rings up to R_px -> (UNINDEXED)
+         - optional directional
+           prioritization after
+           2 improvements
+      if no improve in sweep:
+         - step = step/2
+         - stop if step < s_min_px
+           -> (FINAL)
+
+Transitions honor trust radius:
+- Any candidate must be within R_px from seed (in px).
+
+SCORE & TIE-BREAK
+-----------------
+Primary:    minimize wRMSD
+Secondary:  if |ΔwRMSD| <= (tie_tol_rel * best), prefer:
+            - higher #indexed reflections
+            - then higher #peaks (if used)
+            - then smaller |shift| from seed
+
+KEY PARAMETERS (examples; units px unless stated)
+-------------------------------------------------
+R_px          : trust radius for dx,dy relative to seed
+s_init_px     : initial ring radius & increment
+K_dir         : number of directions per ring (golden-angle order)
+s_refine_px   : refinement neighbor step size (initial)
+s_min_px      : minimal refinement step to stop
+eps_rel       : required relative improvement to accept new best
+N_eval_max    : cap on total candidate evaluations per image
+eight_conn?   : use 8 neighbors (if false, use 4)
+dir_bias?     : prioritize neighbors along recent descent
+
+FILES & DIRECTORIES
+-------------------
+run root/
+  runs/run_XXXX/
+    overlay.h5              (links images; stores abs shifts in mm)
+    batch.lst               (overlay lines with //image_index)
+    batch.stream            (indexamajig output for this wave)
+    indexamajig.sh          (reproducible command)
+    indexamajig.err         (stderr & live progress)
+    log.jsonl               (structured events: started, scored, ...)
+  streams/
+    <imgid>.stream          (one-chunk winner per image; rewritten)
+  merged_best.stream        (final merge of winners)
+  best_centers.csv          (per-image best dx,dy in px & mm, scores)
+
+NOTES
+-----
+- Overlays store ABSOLUTE shifts (seed_mm + delta_px*mm_per_px).
+- Golden-angle direction sequencing reduces redundant angular sampling.
+- Chunk lookup is robust to path canonicalization and "Event"/"Image index".
+- User-supplied indexamajig flags are appended after curated defaults
+  so overrides work as expected.
