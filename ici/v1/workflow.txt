@@ -2,16 +2,24 @@ no runs?
 
 no_run_prep_singlelist
 run_sh 000
-evaluate stream 000
+evaluate_stream 000
 update_image_run_log
 build_early_break_from_log
 
 runs?
-propose_next_shifts - if all done break else:
+propose_next_shifts
+if all next_shifts == done:
+break 
+else:
 build_overlays_and_list
-copy_next_run_sh
-run_sh latest_run
-fix_stream_paths latest_run
-evaluate latest_run
+copy_next_run_sh current_run
+run_sh current_run
+fix_stream_paths current_run
+evaluate_stream current_run
 update_image_run_log
 build_early_break_from_log
+
+fixes:
+multiprocessing for evaluate_stream
+copy_next_sh current_run bug
+fix_stream current_run

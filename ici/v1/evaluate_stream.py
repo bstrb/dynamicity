@@ -11,11 +11,9 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
-# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-run = "003"
-DEFAULT_RUN_DIR = os.path.join(DEFAULT_ROOT, "runs", f"run_{run}")
-DEFAULT_STREAM = f"stream_{run}.stream"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_RUN = "000"  # will be zero-padded to width 3 at runtime
 DEFAULT_MATCH_RADIUS = 4.0
 DEFAULT_OUTLIER_SIGMA = 2.0
 
@@ -62,6 +60,13 @@ def _nn_dists_numpy(pfs: np.ndarray, pss: np.ndarray, rfs: np.ndarray, rss: np.n
     df = pfs[:, None] - rfs[None, :]
     ds = pss[:, None] - rss[None, :]
     return np.sqrt((df * df + ds * ds).min(axis=1)).astype(np.float32, copy=False)
+
+def _normalize_run(run: str) -> str:
+    """Return zero-padded run string (e.g. '0' -> '000'). If not numeric, return as-is."""
+    try:
+        return f"{int(run):03d}"
+    except (TypeError, ValueError):
+        return str(run)
 
 def compute_wrmsd_details(
     peaks: List[Tuple[float, float, float, str]],
@@ -208,28 +213,31 @@ def write_csv(path: str, rows: List[Dict[str, object]], header: List[str]) -> No
             w.writerow(r)
 
 def main(argv: List[str]) -> int:
-    ap = argparse.ArgumentParser(description="Parse stream_xxx.stream and compute per-chunk wRMSD (robust).")
-    ap.add_argument("--run-root")
-    ap.add_argument("--run-dir")
+    ap = argparse.ArgumentParser(description="Parse stream_<run>.stream and compute per-chunk wRMSD (robust).")
+    ap.add_argument("--run-root", help='Root folder that contains runs/run_<run>')
+    ap.add_argument("--run", help='Run identifier (e.g., "0", "3", "12", "003"); will be zero-padded to width 3')
     ap.add_argument("--match-radius", type=float, default=DEFAULT_MATCH_RADIUS)
     ap.add_argument("--sigma", type=float, default=DEFAULT_OUTLIER_SIGMA)
+
     args = ap.parse_args(argv)
 
-    if len(argv) == 0:
-        run_dir = DEFAULT_RUN_DIR; mr = DEFAULT_MATCH_RADIUS; sg = DEFAULT_OUTLIER_SIGMA
-    else:
-        if args.run_dir:
-            run_dir = args.run_dir
-        elif args.run_root:
-            run_dir = os.path.join(args.run_root, "runs", "run_{run}".format(run=run))
-        else:
-            print("Provide --run-root or --run-dir, or run with no args for defaults.", file=sys.stderr); return 2
-        mr = float(args.match_radius); sg = float(args.sigma)
+    # Resolve parameters (defaults if not provided)
+    run_root = args.run_root if args.run_root else DEFAULT_ROOT
+    run_str  = _normalize_run(args.run if args.run else DEFAULT_RUN)
+    mr = float(args.match_radius)
+    sg = float(args.sigma)
 
+    # Construct paths from resolved values
+    run_dir = os.path.join(run_root, "runs", f"run_{run_str}")
     run_dir = os.path.abspath(os.path.expanduser(run_dir))
-    stream_path = os.path.join(run_dir, DEFAULT_STREAM)
+    stream_path = os.path.join(run_dir, f"stream_{run_str}.stream")
+    print(f"Run root : {os.path.abspath(os.path.expanduser(run_root))}")
+    print(f"Run      : {run_str}")
+    print(f"Run dir  : {run_dir}")
+
     if not os.path.isfile(stream_path):
-        print(f"ERROR: not found: {stream_path}", file=sys.stderr); return 2
+        print(f"ERROR: not found: {stream_path}", file=sys.stderr)
+        return 2
 
     rows: List[Dict[str, object]] = []
     wr_vals: List[float] = []
@@ -259,12 +267,12 @@ def main(argv: List[str]) -> int:
             "indexed": 1, "wrmsd": (f"{wr:.6f}" if wr is not None else ""),
             "n_matches": nm, "n_kept": nk, "reason": (reason or "")
         })
-    csv_path = os.path.join(run_dir, "chunk_metrics_{run}.csv".format(run=run))
+    csv_path = os.path.join(run_dir, f"chunk_metrics_{run_str}.csv")
     write_csv(csv_path, rows, header=[
         "image","event","det_shift_x_mm","det_shift_y_mm",
         "indexed","wrmsd","n_matches","n_kept","reason"
     ])
-    sum_path = os.path.join(run_dir, "summary_{run}.txt".format(run=run))
+    sum_path = os.path.join(run_dir, f"summary_{run_str}.txt")
     with open(sum_path, "w", encoding="utf-8") as f:
         def _summ(vs: List[float]) -> str:
             if not vs: return "n=0"
@@ -278,7 +286,7 @@ def main(argv: List[str]) -> int:
         f.write(f"Chunks with peak lines: {n_any_peaks}\n")
         f.write(f"Index rate: {(100.0*n_found_refl_hdr/n_chunks if n_chunks>0 else 0.0):.2f}%\n")
         f.write(f"WRMSD: {_summ(wr_vals)}\n")
-    dbg_path = os.path.join(run_dir, "parse_debug_{run}.txt".format(run=run))
+    dbg_path = os.path.join(run_dir, f"parse_debug_{run_str}.txt")
     with open(dbg_path, "w", encoding="utf-8") as f:
         f.write("Debug counters:\n")
         f.write(f"  Total chunks parsed:         {n_chunks}\n")

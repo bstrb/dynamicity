@@ -37,8 +37,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 HeaderKey = Tuple[str, int]  # (abs_image_path, event)
 
-DEFAULT_RUN_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004/runs"
-# DEFAULT_RUN_ROOT = "/home/bubl3932/files/ici_trials/runs"
+# DEFAULT_RUN_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004/runs"
+DEFAULT_RUN_ROOT = "/home/bubl3932/files/ici_trials/runs"
 DEFAULT_LOG_NAME = "image_run_log.csv"
 DEFAULT_OUT_NAME = "early_break.stream"
 
@@ -250,31 +250,119 @@ def build_early_break(run_root: str,
                 loaded[rn] = (bounds, lines, header, mapping)
 
     # Write deterministically in ascending rn
-    wrote_header = False
-    total = 0
-    with open(out_path, "w", encoding="utf-8") as out_f:
-        for rn in run_list:
-            if rn not in loaded:
+    # wrote_header = False
+    # total = 0
+    # with open(out_path, "w", encoding="utf-8") as out_f:
+    #     for rn in run_list:
+    #         if rn not in loaded:
+    #             continue
+    #         bounds, lines, header, mapping = loaded[rn]
+
+    #         if not wrote_header and header:
+    #             out_f.writelines(header)
+    #             wrote_header = True
+
+    #         for (img, ev) in sorted(by_run[rn], key=lambda t: (t[0], t[1])):
+    #             key = (_abs(img), int(ev))
+    #             cid = mapping.get(key)
+    #             if cid is None:
+    #                 print(f"[WARN] No chunk for ({img}, event {ev}) in run_{rn:03d}")
+    #                 continue
+    #             a, b = bounds[cid]
+    #             out_f.writelines(lines[a:b])
+    #             total += 1
+
+    # print(f"[early-break] Selected {len(picks)} groups; wrote {total} chunk(s) to {out_path}")
+    # return out_path
+
+    # -------------------- Build new chunks in memory --------------------
+    # Collect the selected chunks' text per (abs_image_path, event).
+    new_chunks: Dict[HeaderKey, List[str]] = {}
+    first_loaded_header: List[str] = []
+    for rn in run_list:
+        if rn not in loaded:
+            continue
+        bounds, lines, header, mapping = loaded[rn]
+        if not first_loaded_header and header:
+            first_loaded_header = header
+        for (img, ev) in sorted(by_run[rn], key=lambda t: (t[0], t[1])):
+            key = (_abs(img), int(ev))
+            cid = mapping.get(key)
+            if cid is None:
+                print(f"[WARN] No chunk for ({img}, event {ev}) in run_{rn:03d}")
                 continue
-            bounds, lines, header, mapping = loaded[rn]
+            a, b = bounds[cid]
+            new_chunks[key] = lines[a:b]
 
-            if not wrote_header and header:
-                out_f.writelines(header)
-                wrote_header = True
+    # -------------------- Load existing early_break (if any) --------------------
+    existing_bounds: List[Tuple[int, int]] = []
+    existing_lines: List[str] = []
+    existing_header: List[str] = []
+    existing_mapping: Dict[HeaderKey, int] = {}
 
-            for (img, ev) in sorted(by_run[rn], key=lambda t: (t[0], t[1])):
-                key = (_abs(img), int(ev))
-                cid = mapping.get(key)
-                if cid is None:
-                    print(f"[WARN] No chunk for ({img}, event {ev}) in run_{rn:03d}")
-                    continue
-                a, b = bounds[cid]
-                out_f.writelines(lines[a:b])
-                total += 1
+    if os.path.isfile(out_path):
+        try:
+            existing_bounds, existing_lines, existing_header = parse_stream_chunks(out_path)
+            existing_mapping = map_chunk_ids_by_image_event(existing_lines, existing_bounds)
+        except Exception as e:
+            print(f"[WARN] Failed to parse existing {out_path}: {e}")
 
-    print(f"[early-break] Selected {len(picks)} groups; wrote {total} chunk(s) to {out_path}")
-    return out_path
+    # -------------------- Merge & write --------------------
+    # Policy:
+    # - Header: keep existing header if present; otherwise use header from first loaded run.
+    # - For each existing chunk (in its current order):
+    #       if a new chunk for that (image,event) exists -> write the new chunk (replace)
+    #       else -> keep the existing chunk
+    # - After that, append any remaining new chunks (those that didn't exist before),
+    #       in deterministic order by (abs_image_path, event).
+    wrote_header = False
+    total_written = 0
+    replaced = 0
+    appended = 0
 
+    with open(out_path, "w", encoding="utf-8") as out_f:
+        header_to_write = existing_header if existing_header else first_loaded_header
+        if header_to_write:
+            out_f.writelines(header_to_write)
+            wrote_header = True
+
+        # Write existing chunks, replacing where we have a new version
+        if existing_bounds and existing_lines:
+            for cid, (a, b) in enumerate(existing_bounds):
+                # Extract this existing chunk's (image,event) by scanning its lines
+                img_path = None
+                ev = None
+                for ln in existing_lines[a:b]:
+                    if "Image filename:" in ln:
+                        img_path = ln.split("Image filename:", 1)[1].strip()
+                    elif "Image file:" in ln:
+                        img_path = ln.split("Image file:", 1)[1].strip()
+                    elif ln.strip().startswith("Event:"):
+                        tail = ln.split("Event:", 1)[1].strip().lstrip("/")
+                        try:
+                            ev = int(tail)
+                        except Exception:
+                            pass
+                key = (_abs(img_path), int(ev)) if (img_path is not None and ev is not None) else None
+
+                if key and key in new_chunks:
+                    out_f.writelines(new_chunks.pop(key))  # replace
+                    replaced += 1
+                else:
+                    out_f.writelines(existing_lines[a:b])   # keep
+                total_written += 1
+
+        # Append remaining new chunks (those not in the existing file)
+        if new_chunks:
+            for key in sorted(new_chunks.keys(), key=lambda t: (t[0], t[1])):
+                out_f.writelines(new_chunks[key])
+                total_written += 1
+                appended += 1
+
+    print(
+        f"[early-break] Merge complete: wrote {total_written} chunk(s) to {out_path} "
+        f"(replaced {replaced}, appended {appended})."
+    )
 
 # ------------------------------ CLI --------------------------------
 

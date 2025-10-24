@@ -28,6 +28,7 @@ SHIFT_Y_DS = "/entry/data/det_shift_y_mm"
 PEAK_I_DS = "/entry/data/peakTotalIntensity"
 PEAK_X_DS = "/entry/data/peakXPosRaw"
 PEAK_Y_DS = "/entry/data/peakYPosRaw"
+NPEAKS_DS = "/entry/data/nPeaks"
 
 
 # ---------------- Utils ----------------
@@ -86,6 +87,8 @@ def _find_peak_paths(src: h5py.File, n_images: int) -> Dict[str, Optional[str]]:
             found["X"] = abs_name; shapes["X"] = obj.shape
         elif base == "peakYPosRaw":
             found["Y"] = abs_name; shapes["Y"] = obj.shape
+        elif base == "nPeaks":
+            found["N"] = abs_name; shapes["N"] = obj.shape
 
     src.visititems(maybe_take)
 
@@ -156,6 +159,8 @@ def create_overlay(h5_src_path: str, h5_overlay_path: str) -> int:
             _link_dataset(ov, PEAK_Y_DS, h5_src_path, peak_src["Y"]); linked_any = True
         if peak_src["I"]:
             _link_dataset(ov, PEAK_I_DS, h5_src_path, peak_src["I"]); linked_any = True
+        if peak_src["N"]:
+            _link_dataset(ov, NPEAKS_DS, h5_src_path, peak_src["N"]); linked_any = True
 
         # (optional) annotate units if peaks are present
         if linked_any:
@@ -163,6 +168,7 @@ def create_overlay(h5_src_path: str, h5_overlay_path: str) -> int:
                 ov[PEAK_X_DS].attrs["units"] = "pixel"
                 ov[PEAK_Y_DS].attrs["units"] = "pixel"
                 ov[PEAK_I_DS].attrs["description"] = "peak total intensity"
+                ov[NPEAKS_DS].attrs["description"] = "number of peaks"
             except Exception:
                 pass
 

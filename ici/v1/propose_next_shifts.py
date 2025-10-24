@@ -20,8 +20,8 @@ import argparse, csv, hashlib, io, math, os, re, sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional
 
-# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 
 # Defaults matching the original script
 R_MAX_DEFAULT = 0.05
@@ -240,127 +240,7 @@ def write_log(log_path: str, entries) -> None:
             elif row is not None:
                 f.write(",".join(row) + "\n")
     os.replace(tmp_path, log_path)
-
-# ------------- Core proposal logic -------------
-
-# def propose_for_latest(entries, latest_run: int, r_max, r_step, k_base, delta_local, local_patience, seed, tol, sidecar_path: Optional[str]):
-#     # Build history per key and list of row indices for the latest run
-#     history: Dict[Tuple[str,int], List[Tuple[int,float,float,int,Optional[float]]]] = {}
-#     latest_rows_by_key: Dict[Tuple[str,int], List[int]] = {}
-#     current_key: Optional[Tuple[str,int]] = None
-
-#     for idx, (key, row) in enumerate(entries):
-#         if key is not None:
-#             current_key = key
-#             continue
-#         if row is None or len(row) == 0:
-#             continue
-#         if row[0] == "RAW":
-#             continue
-#         run_s, dx_s, dy_s, idx_s, wr_s, ndx_s, ndy_s = row[:7]
-#         try:
-#             run_n = int(run_s)
-#         except Exception:
-#             continue
-#         dx = float(dx_s) if dx_s else 0.0
-#         dy = float(dy_s) if dy_s else 0.0
-#         indexed = int(idx_s or "0")
-#         wr = _float_or_blank(wr_s)
-
-#         if current_key is None:
-#             # Rows without a preceding section header are ignored for proposals
-#             continue
-
-#         # Append to history
-#         history.setdefault(current_key, []).append((run_n, dx, dy, indexed, wr))
-
-#         # Track latest-run row indices
-#         if run_n == latest_run:
-#             latest_rows_by_key.setdefault(current_key, []).append(idx)
-
-#     # Generate proposals per key for latest run rows
-#     proposals: Dict[Tuple[str,int], Tuple[float,float]] = {}
-
-#     for key, trials in history.items():
-#         # Use ALL trials up to latest run
-#         trials_sorted = sorted(trials, key=lambda t: t[0])  # by run_n
-#         S = ImgState(ring_angle_base=_hash_angle(seed, key), nm_step=delta_local)
-#         tried_points = set((_fmt6(dx), _fmt6(dy)) for (_,dx,dy,_,_) in trials_sorted)
-
-#         # Seed last_dx/last_dy from last trial
-#         if trials_sorted:
-#             _, last_dx, last_dy, _, _ = trials_sorted[-1]
-#             S.last_dx, S.last_dy = last_dx, last_dy
-
-#         # Update state by replaying all trials
-#         for (run_n, dx, dy, indexed, wr) in trials_sorted:
-#             update_state_from_run(S, run_n, run_n, bool(indexed), wr, dx, dy, tol)
-
-#         # Decide if we need a new proposal for this key in the latest run
-#         # Find the first latest-run row for this key, if any
-#         if key not in latest_rows_by_key:
-#             continue
-
-#         needs_more = False
-#         last_trial = trials_sorted[-1] if trials_sorted else None
-#         was_indexed_latest = bool(last_trial[3]) if last_trial else False
-
-#         if (not was_indexed_latest) and (S.phase == "ring") and (not S.give_up):
-#             needs_more = True
-#         elif was_indexed_latest and (S.phase == "local") and (not should_stop_local(S, local_patience)):
-#             needs_more = True
-#         else:
-#             needs_more = False
-
-#         if needs_more:
-#             # Generate next candidate; skip to avoid repeats
-#             for _ in range(1000):  # hard cap to avoid infinite loops
-#                 if S.phase == "ring" and not S.give_up:
-#                     ndx, ndy, _ = pick_ring_probe(S, S.last_dx, S.last_dy, r_step, r_max, k_base)
-#                 else:
-#                     ndx, ndy, _ = pick_local_nm_probe(S)
-#                 keyfmt = (_fmt6(ndx), _fmt6(ndy))
-#                 if keyfmt not in tried_points:
-#                     proposals[key] = (ndx, ndy)
-#                     break
-#             else:
-#                 # Could not find a novel point; fall back to best or last
-#                 # ndx = S.best_dx if S.best_dx is not None else S.last_dx
-#                 # ndy = S.best_dy if S.best_dy is not None else S.last_dy
-#                 proposals[key] = ("done", "done")
-#         else:
-#             ndx = S.best_dx if S.best_dx is not None else S.last_dx
-#             ndy = S.best_dy if S.best_dy is not None else S.last_dy
-#             proposals[key] = (ndx, ndy)
-
-#     # Apply proposals to entries (in-place) or write sidecar
-#     if sidecar_path:
-#         with open(sidecar_path, "w", encoding="utf-8") as f:
-#             f.write("real_h5_path,event,run_n,next_dx_mm,next_dy_mm\n")
-#             for key, idx_list in latest_rows_by_key.items():
-#                 if key in proposals:
-#                     # Emit one line per latest-run row (mirrors prior behavior)
-#                     for row_idx in idx_list:
-#                         run_n = int(entries[row_idx][1][0])
-#                         ndx, ndy = proposals[key]
-#                         f.write(f"{key[0]},{key[1]},{run_n},{_fmt6(ndx)},{_fmt6(ndy)}\n")
-#         return entries
-
-#     # In-place: fill only latest-run rows' next_* if empty
-#     for key, idx_list in latest_rows_by_key.items():
-#         if key not in proposals:
-#             continue
-#         ndx, ndy = proposals[key]
-#         for row_idx in idx_list:
-#             row = list(entries[row_idx][1])
-#             # Only update if blank or missing
-#             if len(row) < 7:
-#                 row += [""] * (7 - len(row))
-#             if row[0].isdigit():
-#                 row[5] = _fmt6(ndx)
-#                 row[6] = _fmt6(ndy)
-#                 entries[row_idx] = (None, tuple(row))
-#     return entries
+    
 def propose_for_latest(entries, latest_run: int,
                        r_max, r_step, k_base,
                        delta_local, local_patience,

@@ -27,8 +27,10 @@ Example:
 import os, sys, json, argparse
 
 # --- Hardcoded trial defaults (as requested) ---
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-run = "003"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_RUN = "003"
+run = DEFAULT_RUN
 DEFAULT_RUN_DIR = os.path.join(os.path.abspath(DEFAULT_ROOT), "runs", f"run_{run}")
 # ------------------------------------------------
 
