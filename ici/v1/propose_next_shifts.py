@@ -20,7 +20,8 @@ import argparse, csv, hashlib, io, math, os, re, sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional
 
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
 
 # Defaults matching the original script
 R_MAX_DEFAULT = 0.05
@@ -30,7 +31,7 @@ DELTA_LOCAL_DEFAULT = 0.01
 LOCAL_PATIENCE_DEFAULT = 3
 SEED_DEFAULT = 1337
 CONVERGE_TOL_DEFAULT = 1e-4
-
+ 
 # Nelder–Mead params (same as original)
 NM_ALPHA = 1.0
 NM_GAMMA = 2.0

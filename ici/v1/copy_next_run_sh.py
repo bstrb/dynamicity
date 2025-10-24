@@ -6,23 +6,17 @@ copy_next_run_sh.py
 Duplicate the previous run's .sh script and update the -i (input .lst)
 and -o (output .stream) paths for the next run number.
 Keeps all other parameters identical.
-"""
+""" 
 import os, re, shutil, sys
 
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-
-def find_latest_run(runs_dir):
-    latest = -1
-    for name in os.listdir(runs_dir):
-        m = re.match(r"^run_(\d{3})$", name)
-        if m:
-            n = int(m.group(1))
-            latest = max(latest, n)-1
-    return latest
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_RUN = 3
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 
 def copy_and_update_sh(run_root):
     runs_dir = os.path.join(run_root, "runs")
-    last_n = find_latest_run(runs_dir)
+    # last_n = find_latest_run(runs_dir)
+    last_n = DEFAULT_RUN-1
     if last_n < 0:
         print("ERROR: No run_### folders found.")
         sys.exit(2)

@@ -37,7 +37,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 HeaderKey = Tuple[str, int]  # (abs_image_path, event)
 
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials/runs"
+DEFAULT_RUN_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004/runs"
+# DEFAULT_RUN_ROOT = "/home/bubl3932/files/ici_trials/runs"
 DEFAULT_LOG_NAME = "image_run_log.csv"
 DEFAULT_OUT_NAME = "early_break.stream"
 
@@ -159,7 +160,7 @@ def parse_stream_chunks(stream_path: str):
             start = None
 
     return bounds, lines, header
-
+ 
 
 def map_chunk_ids_by_image_event(lines: List[str], bounds: List[Tuple[int, int]]) -> Dict[HeaderKey, int]:
     """
@@ -286,8 +287,8 @@ def main(argv=None):
     )
     ap.add_argument(
         "--run-root",
-        default=DEFAULT_ROOT,
-        help=f"Path containing image_run_log.csv and run_*/ (default: {DEFAULT_ROOT})",
+        default=DEFAULT_RUN_ROOT,
+        help=f"Path containing image_run_log.csv and run_*/ (default: {DEFAULT_RUN_ROOT})",
     )
     ap.add_argument(
         "--log-name",

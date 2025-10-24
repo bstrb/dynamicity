@@ -15,7 +15,8 @@ import argparse, csv, math, os, re, sys
 from typing import Dict, List, Tuple, Optional
 import h5py
 
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 IMAGES_DS = "/entry/data/images"
 
 def resolve_real_source(h5_path: str) -> str:

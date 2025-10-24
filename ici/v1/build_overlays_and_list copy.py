@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-build_overlays_and_list.py (adjusted)
+build_overlays_and_list.py
 
 From image_run_log.csv (latest run only), create per-source overlay HDF5 files
 (named with the next run number) and a lst_XXX.lst that lists lines like:
 
   /path/to/overlay_run_number.h5 //event_number
 
-Additions in this adjusted version:
-- Persist a JSON + TSV mapping from overlay .h5 → original .h5 in each run folder:
-    runs/run_XXX/overlay_to_original.json
-    runs/run_XXX/overlay_to_original.tsv
-- (Optional) Tag each overlay file with an HDF5 attribute 'overlay_original_path'
-  if h5py is available.
-
 Notes:
 - Skips entries whose next_* fields are "done".
 - Overlays are created in runs/run_{next:03d}/
-- Each overlay filename is <src_basename>_overlay_{next:03d}.h5
+- Each overlay filename is <src_basename>__run_{next:03d}.h5
 - Requires overlay_elink.py to be importable (create_overlay, write_shifts_mm)
 """
 from __future__ import annotations
-
-import argparse, os, sys, math, json
+import argparse, os, sys, math
 
 DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
 # DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
@@ -60,8 +52,6 @@ def parse_log(log_path: str):
                     pass
                 continue
             parts = [p.strip() for p in ln.rstrip("\n").split(",")]
-
-            # ensure we have at least 7 entries
             while len(parts) < 7:
                 parts.append("")
             run_s, dx_s, dy_s, idx_s, wr_s, ndx_s, ndy_s = parts[:7]
@@ -109,21 +99,6 @@ def collect_latest_numeric_proposals(entries, latest_run: int):
 
     return by_src
 
-def tag_overlay_with_original(overlay_path: str, original_path: str) -> None:
-    """Optionally store the original path as an attribute in the overlay HDF5 file.
-    Skips silently if h5py is unavailable or file isn't writeable.
-    """
-    try:
-        import h5py
-    except Exception:
-        return
-    try:
-        with h5py.File(overlay_path, "r+") as h5:
-            h5.attrs["overlay_original_path"] = original_path
-    except Exception:
-        # non-fatal
-        pass
-
 def ensure_overlay_for_run(src_path: str, run_dir: str, next_run: int) -> str:
     """
     Create (or overwrite) an overlay for src_path under run_dir.
@@ -137,11 +112,6 @@ def ensure_overlay_for_run(src_path: str, run_dir: str, next_run: int) -> str:
     overlay_path = os.path.join(run_dir, overlay_name)
     # Create/overwrite and seed arrays
     create_overlay(src_path, overlay_path)
-    # (optional) embed original path as HDF5 attribute
-    try:
-        tag_overlay_with_original(overlay_path, _abs(src_path))
-    except Exception:
-        pass
     return _abs(overlay_path)
 
 def write_all_shifts(run_dir: str, next_run: int, proposals_by_src: dict):
@@ -180,31 +150,8 @@ def write_lst(lst_path: str, proposals_by_src: dict, overlay_paths: dict):
                 n += 1
     return n
 
-def write_overlay_mapping(run_dir: str, overlay_paths: dict) -> str:
-    """
-    Persist mapping files that relate overlays to originals within the run folder.
-    Writes:
-      - overlay_to_original.json : {"/abs/overlay.h5": "/abs/original.h5", ...}
-      - overlay_to_original.tsv  : tab-delimited table for quick inspection
-    Returns the path to the JSON file.
-    """
-    os.makedirs(run_dir, exist_ok=True)
-    map_json = os.path.join(run_dir, "overlay_to_original.json")
-    map_tsv  = os.path.join(run_dir, "overlay_to_original.tsv")
-
-    overlay_to_src = { _abs(ov): _abs(src) for src, ov in overlay_paths.items() }
-
-    with open(map_json, "w", encoding="utf-8") as f:
-        json.dump(overlay_to_src, f, indent=2)
-
-    with open(map_tsv, "w", encoding="utf-8") as f:
-        f.write("# overlay_path\toriginal_path\n")
-        for ov, src in sorted(overlay_to_src.items()):
-            f.write(f"{ov}\t{src}\n")
-    return map_json
-
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Create run-named overlays and a .lst with '<overlay> //<event>' lines from latest proposals. Also writes overlay→original mapping files.")
+    ap = argparse.ArgumentParser(description="Create run-named overlays and a .lst with '<overlay> //<event>' lines from latest proposals.")
     ap.add_argument("--run-root", default=None,
                     help="Path to run root that contains 'runs/'. Defaults to DEFAULT_ROOT if omitted.")
     args = ap.parse_args(argv)
@@ -237,12 +184,8 @@ def main(argv=None) -> int:
     lst_path = os.path.join(next_run_dir, f"lst_{next_run:03d}.lst")
     n_lines = write_lst(lst_path, proposals_by_src, overlay_paths)
 
-    # Persist the overlay→original mapping (JSON + TSV)
-    map_json_path = write_overlay_mapping(next_run_dir, overlay_paths)
-
     print(f"[overlay] Created/updated {len(overlay_paths)} overlay files in {next_run_dir}")
     print(f"[overlay] Wrote {n_lines} lines to {lst_path}")
-    print(f"[overlay] Wrote overlay→original map to {map_json_path}")
     return 0
 
 if __name__ == "__main__":

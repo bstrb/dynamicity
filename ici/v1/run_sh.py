@@ -14,9 +14,9 @@ Defaults (no args):
 import argparse, os, sys, subprocess
 from pathlib import Path
 
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-run = "001"
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+run = "003"
 DEFAULT_RUN_DIR = os.path.join(DEFAULT_ROOT, "runs", "run_{run}".format(run=run))
 DEFAULT_SH = "sh_{run}.sh".format(run=run)
 
