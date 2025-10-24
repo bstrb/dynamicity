@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-step2_run_only.py
+run_sh.py
 
 Step 2: run the command script (sh_000.sh) for run_000 and return.
 
@@ -14,15 +14,17 @@ Defaults (no args):
 import argparse, os, sys, subprocess
 from pathlib import Path
 
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_RUN_DIR = os.path.join(DEFAULT_ROOT, "runs", "run_000")
-DEFAULT_SH = "sh_000.sh"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+run = "001"
+DEFAULT_RUN_DIR = os.path.join(DEFAULT_ROOT, "runs", "run_{run}".format(run=run))
+DEFAULT_SH = "sh_{run}.sh".format(run=run)
 
 def build_ap():
-    ap = argparse.ArgumentParser(description="Run sh_000.sh (indexamajig) for run_000.",
+    ap = argparse.ArgumentParser(description="Run sh_xxx.sh (indexamajig) for xxx.",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    ap.add_argument("--run-root", help="Root folder that contains runs/run_000.")
-    ap.add_argument("--run-dir", help="Explicit run directory (e.g., .../runs/run_000).")
+    ap.add_argument("--run-root", help="Root folder that contains runs/xxx.")
+    ap.add_argument("--run-dir", help="Explicit run directory (e.g., .../runs/run_xxx).")
     ap.add_argument("--shell", default="/bin/bash", help="Shell to execute the .sh script.")
     return ap
 

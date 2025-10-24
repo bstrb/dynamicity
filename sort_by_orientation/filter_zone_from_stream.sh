@@ -3,8 +3,8 @@ set -euo pipefail
 
 # --- USER SETTINGS ---
 
-IN="/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741/filtered_metrics_sorted.stream"
-ZONE_LIST="/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741/filtered_metrics_report.txt"
+IN="/home/bubl3932/files/LauraPacoste_Dynamical-filtering-Buster/no-refine/ReOx-M_sorted.stream"
+ZONE_LIST="/home/bubl3932/files/LauraPacoste_Dynamical-filtering-Buster/no-refine/ReOx-M_report.txt"
 NUM_CRYSTALS=all   # "all" or an integer like 0, 1, 200
 TOL=0.1            # tolerance, e.g. 0, 0.1, 1.5
 # ---------------------

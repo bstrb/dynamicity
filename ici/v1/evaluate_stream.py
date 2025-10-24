@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 DEFAULT_RUN_DIR = os.path.join(DEFAULT_ROOT, "runs", "run_000")
 DEFAULT_STREAM = "stream_000.stream"
 DEFAULT_MATCH_RADIUS = 4.0
@@ -36,7 +37,7 @@ RE_REFL_LINE     = re.compile(rf".*?\s({FLOAT_RE})\s+({FLOAT_RE})\s+(\S+)\s*$")
 
 @dataclass
 class Chunk:
-    cid: int
+    # cid: int
     image: Optional[str]
     event: Optional[str]
     indexed: bool
@@ -117,7 +118,7 @@ def compute_wrmsd_details(
     return float(wr), n_matches, n_kept, None
 
 def parse_stream(stream_path: str) -> Iterable[Chunk]:
-    cid = -1
+    # cid = 0
     ch: Optional[Chunk] = None
     in_chunk = False
     in_peaks = False
@@ -136,10 +137,11 @@ def parse_stream(stream_path: str) -> Iterable[Chunk]:
         for raw in f:
             line = raw.rstrip("\r\n")
             if RE_BEGIN_CHUNK.search(line):
-                cid += 1
+                # cid += 1
                 in_chunk = True
                 in_peaks = in_crystal = in_refl = False
-                ch = Chunk(cid, None, None, False, [], [], None, None)
+                # ch = Chunk(cid, None, None, False, [], [], None, None)
+                ch = Chunk(None, None, False, [], [], None, None)
                 continue
             if not in_chunk:
                 continue
@@ -241,7 +243,7 @@ def main(argv: List[str]) -> int:
 
         if not ch.indexed:
             rows.append({
-                "chunk_id": ch.cid, "image": ch.image or "", "event": ch.event or "",
+                "image": ch.image or "", "event": ch.event or "",
                 "det_shift_x_mm": (f"{ch.det_dx_mm:.6f}" if ch.det_dx_mm is not None else ""),
                 "det_shift_y_mm": (f"{ch.det_dy_mm:.6f}" if ch.det_dy_mm is not None else ""),
                 "indexed": 0, "wrmsd": "", "n_matches": 0, "n_kept": 0, "reason": "unindexed"
@@ -250,16 +252,15 @@ def main(argv: List[str]) -> int:
         wr, nm, nk, reason = compute_wrmsd_details(ch.peaks, ch.refls, mr, sg)
         if wr is not None: wr_vals.append(wr)
         rows.append({
-            "chunk_id": ch.cid, "image": ch.image or "", "event": ch.event or "",
+            "image": ch.image or "", "event": ch.event or "",
             "det_shift_x_mm": (f"{ch.det_dx_mm:.6f}" if ch.det_dx_mm is not None else ""),
             "det_shift_y_mm": (f"{ch.det_dy_mm:.6f}" if ch.det_dy_mm is not None else ""),
             "indexed": 1, "wrmsd": (f"{wr:.6f}" if wr is not None else ""),
             "n_matches": nm, "n_kept": nk, "reason": (reason or "")
         })
-
     csv_path = os.path.join(run_dir, "chunk_metrics_000.csv")
     write_csv(csv_path, rows, header=[
-        "chunk_id","image","event","det_shift_x_mm","det_shift_y_mm",
+        "image","event","det_shift_x_mm","det_shift_y_mm",
         "indexed","wrmsd","n_matches","n_kept","reason"
     ])
     sum_path = os.path.join(run_dir, "summary_000.txt")

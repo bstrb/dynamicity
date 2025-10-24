@@ -76,7 +76,7 @@ def convert_hkl_to_mtz(
 # Example usage:
 if __name__ == "__main__":
     # Replace these paths with valid ones in your environment
-    example_output_dir = "/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741/filtered_metrics_sorted_noZOLZ_tol0.1_merge_res_20-1.3"
+    example_output_dir = "/home/bubl3932/files/LauraPacoste_Dynamical-filtering-Buster/with-refine/ReOx-WT_merge_res_25-1.5"
     example_cellfile_path = os.path.join(example_output_dir, "cell.cell")
     try:
         convert_hkl_to_mtz(

@@ -1,6 +1,9 @@
+# rcis_ref_def.py
+
 import subprocess
 import os
 from tqdm import tqdm
+
 
 def run_ctruncate(hklin, hklout):
     ctruncate_command = f"ctruncate -hklin {hklin} -hklout {hklout} -colin '/*/*/[I,SIGI]'"
@@ -40,28 +43,38 @@ def run_refmac5(base_dir, pdb_file, mtz_file, output_file, res_max=20, res_min=1
             f.write(line)
         pbar.close()
 
+import os
 
-def process_single_mtz(mtz_path, pdb_file, bins, min_res):
-    folder_path = os.path.dirname(mtz_path)
-    print(f"Processing MTZ file: {mtz_path}")
+def process_folder(folder_path, pdb_file, bins, min_res):
+    print(f"Processing folder: {folder_path}")
 
-    # Extract the parent folder name for naming
-    parent_folder = os.path.basename(os.path.dirname(mtz_path))
+    # Extract the parent folder name
+    parent_folder = os.path.basename(os.path.dirname(folder_path))
 
+    mtz_file = os.path.join(folder_path, "output.mtz")
     ctruncate_mtz_file = os.path.join(folder_path, "output_ctruncate.mtz")
     ctruncatefr_mtz_file = os.path.join(folder_path, "output_ctruncatefr.mtz")
 
+    # Include the parent folder name in the output file name
     output_file = os.path.join(folder_path, f"{parent_folder}_output_bins_{bins}_minres_{min_res}.txt")
 
-    run_ctruncate(mtz_path, ctruncate_mtz_file)
+    # Run ctruncate and freerflag
+    run_ctruncate(mtz_file, ctruncate_mtz_file)
     run_freerflag(ctruncate_mtz_file, ctruncatefr_mtz_file)
+
+    # Run refmac5 with the output of freerflag as input
     run_refmac5(folder_path, pdb_file, ctruncatefr_mtz_file, output_file, res_min=min_res, bins=bins)
 
+def process_run_folders(base_path, pdb_file, bins, min_res):
+    folder_paths = [f.path for f in os.scandir(base_path) if f.is_dir()]
+    
+    for folder_path in folder_paths:
+        process_folder(folder_path, pdb_file, bins, min_res)
 
+# Example usage
 if __name__ == "__main__":
-    mtz_path = "/home/bubl3932/files/LauraPacoste_Dynamical-filtering-Buster/with-refine/ReOx-WT_merge_res_25-1.5/output.mtz"
-    pdb_file = "/home/bubl3932/files/LauraPacoste_Dynamical-filtering-Buster/Ox-ReOx.pdb"
+    integration_output_folder =  "/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741" 
+    pdb_file = "/home/bubl3932/files/LauraPacoste_Dynamical-filtering-Buster/Ox-ReOx.pdb"  # Replace with your actual pdb file path
     bins = 20
     min_res = 1.7
-
-    process_single_mtz(mtz_path, pdb_file, bins, min_res)
+    process_run_folders(integration_output_folder, pdb_file, bins, min_res)

@@ -135,8 +135,8 @@ def plot_two_runs(path_a: str, path_b: str, label_a: str = None, label_b: str = 
 
 # --------- inputs (your exact two files) ---------
 
-path1 = "/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741/filtered_metrics_sorted_noZOLZ_tol0.1_merge_res_20-1.3/metrics_run_20250922-151741_output_bins_20_minres_2.txt"
-path2 = "/home/bubl3932/files/UOX1/xgandalf_iterations_max_radius_0.71_step_0.5/metrics_run_20250922-151741/filtered_metrics_merge_res_20-1.3/metrics_run_20250922-151741_output_bins_20_minres_2.txt"
+path1 = "/home/bubl3932/files/LauraPacoste_Dynamical-filtering-Buster/with-refine/ReOx-WT_sorted_noZOLZ_tol0.1_merge_res_25-1.5_no-Bscale/ReOx-WT_sorted_noZOLZ_tol0.1_merge_res_25-1.5_no-Bscale_output_bins_20_minres_1.7.txt"
+path2 = "/home/bubl3932/files/LauraPacoste_Dynamical-filtering-Buster/with-refine/ReOx-WT_merge_res_25-1.5/ReOx-WT_merge_res_25-1.5_output_bins_20_minres_1.7.txt"
 
 # Optional output image (uncomment to save):
 # out_png = "/home/bubl3932/files/UOX1/rf_used_vs_resolution.png"

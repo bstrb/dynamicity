@@ -16,7 +16,7 @@ Requires: h5py >= 3.x
 """
 from __future__ import annotations
 import os
-from typing import Optional, Sequence, Dict
+from typing import Optional, Sequence
 import numpy as np
 import h5py
 
@@ -29,13 +29,10 @@ PEAK_I_DS = "/entry/data/peakTotalIntensity"
 PEAK_X_DS = "/entry/data/peakXPosRaw"
 PEAK_Y_DS = "/entry/data/peakYPosRaw"
 
-
-# ---------------- Utils ----------------
 def _ensure_parent(path: str) -> None:
     p = os.path.dirname(os.path.abspath(path))
     if p and not os.path.exists(p):
         os.makedirs(p, exist_ok=True)
-
 
 def _copy_initial_seeds(src: h5py.File, ov: h5py.File) -> None:
     n_images = src[IMAGES_DS].shape[0]
@@ -48,73 +45,59 @@ def _copy_initial_seeds(src: h5py.File, ov: h5py.File) -> None:
     else:
         x[...] = 0.0; y[...] = 0.0
 
-
-def _link_dataset(ov: h5py.File, ov_path: str, target_filename: str, target_path: str) -> None:
+def _link_if_present(src: h5py.File, ov: h5py.File, src_path: str, ov_path: Optional[str] = None) -> bool:
     """
-    Create/overwrite an ExternalLink at ov_path pointing to target_filename::target_path.
-    Ensures parent groups exist.
+    Create an ExternalLink in 'ov' pointing to 'src_path' in 'src' if it exists.
+    Returns True if linked, False otherwise.
     """
+    if ov_path is None:
+        ov_path = src_path
+    try:
+        # verify existence & shape
+        _ = src[src_path]
+    except Exception:
+        return False
+    # ensure parent groups exist in overlay
     parts = [p for p in ov_path.split("/") if p]  # ignore leading "/"
     g = ov["/"]
     for name in parts[:-1]:
         g = g.require_group(name)
-    final = parts[-1]
-    if final in g:
-        del g[final]
-    g[final] = h5py.ExternalLink(target_filename, target_path)
+    # install the link at the final name
+    final_name = parts[-1]
+    if final_name in g:
+        del g[final_name]
+    g[final_name] = h5py.ExternalLink(src.filename, src_path)
+    return True
 
-
-def _find_peak_paths(src: h5py.File, n_images: int) -> Dict[str, Optional[str]]:
+def _validate_optional_peaks(src: h5py.File) -> None:
     """
-    Discover peak datasets anywhere in the source file by basename:
-      'peakTotalIntensity', 'peakXPosRaw', 'peakYPosRaw'
-    Return dict {'I': abs_path_or_None, 'X': abs_path_or_None, 'Y': abs_path_or_None}.
-    Validates first dimension == n_images and (when present) that X/Y/I share the same second dimension.
+    If peaks are present in the source, perform light validation:
+    - they share the same first dimension (n_images) as images
+    - X/Y/Intensity shapes agree with each other
     """
-    found = {"I": None, "X": None, "Y": None}
-    shapes: Dict[str, tuple] = {}
+    if not (PEAK_X_DS in src and PEAK_Y_DS in src and PEAK_I_DS in src):
+        return
+    n_img = src[IMAGES_DS].shape[0]
+    sx = src[PEAK_X_DS].shape
+    sy = src[PEAK_Y_DS].shape
+    si = src[PEAK_I_DS].shape
+    if not (sx[0] == sy[0] == si[0] == n_img):
+        raise ValueError(
+            f"Peaks first dimension must match images: "
+            f"images={n_img}, peakX={sx}, peakY={sy}, peakI={si}"
+        )
+    if not (sx[1] == sy[1] == si[1]):
+        raise ValueError(
+            f"Peak arrays second dimension (n_peaks) must agree: "
+            f"peakX={sx}, peakY={sy}, peakI={si}"
+        )
 
-    def maybe_take(name, obj):
-        if not isinstance(obj, h5py.Dataset):
-            return
-        base = name.split("/")[-1]
-        # Normalize to absolute path
-        abs_name = "/" + name.lstrip("/")
-        if base == "peakTotalIntensity":
-            found["I"] = abs_name; shapes["I"] = obj.shape
-        elif base == "peakXPosRaw":
-            found["X"] = abs_name; shapes["X"] = obj.shape
-        elif base == "peakYPosRaw":
-            found["Y"] = abs_name; shapes["Y"] = obj.shape
-
-    src.visititems(maybe_take)
-
-    # If none found, bail quietly
-    if not any(found.values()):
-        return found
-
-    # Validate first dimension (when present)
-    for k in ("X", "Y", "I"):
-        if found[k]:
-            s = shapes[k]
-            if len(s) < 1 or s[0] != n_images:
-                raise ValueError(f"Peak dataset {found[k]} has shape {s}, expected first dim = {n_images}")
-
-    # Validate shared second dimension across those present
-    dims = [shapes[k][1] for k in ("X", "Y", "I") if k in shapes and len(shapes[k]) >= 2]
-    if len(dims) >= 2 and not all(d == dims[0] for d in dims):
-        raise ValueError(f"Peak arrays second dimension mismatch: {shapes}")
-
-    return found
-
-
-# ---------------- Public API ----------------
 def create_overlay(h5_src_path: str, h5_overlay_path: str) -> int:
     """
     Create overlay file (overwrite if exists). Returns number of images N.
     - /entry/data/images: ExternalLink -> source
     - /entry/data/det_shift_x_mm, _y_mm: float64 arrays shape (N,)
-    - If present in source (anywhere), link peaks and expose them at:
+    - If present in source, link peaks:
         /entry/data/peakTotalIntensity
         /entry/data/peakXPosRaw
         /entry/data/peakYPosRaw
@@ -135,7 +118,7 @@ def create_overlay(h5_src_path: str, h5_overlay_path: str) -> int:
         g_entry = ov.require_group("/entry")
         g_data  = g_entry.require_group("data")
 
-        # External link to images (use absolute file path for robustness)
+        # External link to images
         if "images" in g_data:
             del g_data["images"]
         g_data["images"] = h5py.ExternalLink(h5_src_path, IMAGES_DS)
@@ -147,15 +130,12 @@ def create_overlay(h5_src_path: str, h5_overlay_path: str) -> int:
         g_data.create_dataset("det_shift_y_mm", shape=(N,), dtype="f8")
         _copy_initial_seeds(src, ov)
 
-        # Optional peaks: auto-discover actual source paths, then expose at standard overlay paths
-        peak_src = _find_peak_paths(src, N)  # {'I': '/.../peakTotalIntensity', 'X': '/.../peakXPosRaw', 'Y': '/.../peakYPosRaw'}
+        # Optional peaks: link at the SAME path names as source
+        _validate_optional_peaks(src)
         linked_any = False
-        if peak_src["X"]:
-            _link_dataset(ov, PEAK_X_DS, h5_src_path, peak_src["X"]); linked_any = True
-        if peak_src["Y"]:
-            _link_dataset(ov, PEAK_Y_DS, h5_src_path, peak_src["Y"]); linked_any = True
-        if peak_src["I"]:
-            _link_dataset(ov, PEAK_I_DS, h5_src_path, peak_src["I"]); linked_any = True
+        linked_any |= _link_if_present(src, ov, PEAK_X_DS)
+        linked_any |= _link_if_present(src, ov, PEAK_Y_DS)
+        linked_any |= _link_if_present(src, ov, PEAK_I_DS)
 
         # (optional) annotate units if peaks are present
         if linked_any:
@@ -167,7 +147,6 @@ def create_overlay(h5_src_path: str, h5_overlay_path: str) -> int:
                 pass
 
     return N
-
 
 def write_shifts_mm(h5_overlay_path: str, indices: Sequence[int], dx_mm: Sequence[float], dy_mm: Sequence[float]) -> None:
     if len(indices) != len(dx_mm) or len(indices) != len(dy_mm):
