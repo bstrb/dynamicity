@@ -5,7 +5,7 @@ run_sh 000
 evaluate_stream 000
 update_image_run_log
 build_early_break_from_log
-
+ 
 runs?
 propose_next_shifts
 if all next_shifts == done:

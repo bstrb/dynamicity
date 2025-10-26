@@ -21,8 +21,8 @@ import sys
 import argparse
 from typing import Optional, List
 
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 
 
 def _normalize_run(run: str) -> str:
