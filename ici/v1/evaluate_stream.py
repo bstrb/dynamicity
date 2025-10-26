@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-DEFAULT_RUN = "000"  # will be zero-padded to width 3 at runtime
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_RUN = "004"  # will be zero-padded to width 3 at runtime
 DEFAULT_MATCH_RADIUS = 4.0
 DEFAULT_OUTLIER_SIGMA = 2.0
 

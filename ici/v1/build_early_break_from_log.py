@@ -37,8 +37,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 HeaderKey = Tuple[str, int]  # (abs_image_path, event)
 
-# DEFAULT_RUN_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004/runs"
-DEFAULT_RUN_ROOT = "/home/bubl3932/files/ici_trials/runs"
+DEFAULT_RUN_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004/runs"
+# DEFAULT_RUN_ROOT = "/home/bubl3932/files/ici_trials/runs"
 DEFAULT_LOG_NAME = "image_run_log.csv"
 DEFAULT_OUT_NAME = "early_break.stream"
 

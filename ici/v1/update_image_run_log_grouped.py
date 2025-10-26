@@ -26,8 +26,8 @@ from typing import Dict, List, Tuple, Optional, OrderedDict
 import h5py
 from collections import OrderedDict as OD
 
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 IMAGES_DS = "/entry/data/images"
 
 CSV_HEADER = "run_n,det_shift_x_mm,det_shift_y_mm,indexed,wrmsd,next_dx_mm,next_dy_mm\n"

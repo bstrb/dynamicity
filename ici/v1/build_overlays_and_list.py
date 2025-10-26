@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import argparse, os, sys, math, json
 
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 
 try:
     from overlay_elink import create_overlay, write_shifts_mm

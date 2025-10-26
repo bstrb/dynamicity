@@ -12,7 +12,7 @@ if all next_shifts == done:
 break 
 else:
 build_overlays_and_list
-copy_next_run_sh current_run
+copy_next_run_sh
 run_sh current_run
 fix_stream_paths current_run
 evaluate_stream current_run
@@ -21,5 +21,4 @@ build_early_break_from_log
 
 fixes:
 multiprocessing for evaluate_stream
-copy_next_sh current_run bug
 fix_stream current_run

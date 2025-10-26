@@ -20,8 +20,8 @@ import argparse, csv, hashlib, io, math, os, re, sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional
 
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 
 # Defaults matching the original script
 R_MAX_DEFAULT = 0.05

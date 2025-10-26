@@ -27,11 +27,10 @@ Example:
 import os, sys, json, argparse
 
 # --- Hardcoded trial defaults (as requested) ---
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-DEFAULT_RUN = "003"
-run = DEFAULT_RUN
-DEFAULT_RUN_DIR = os.path.join(os.path.abspath(DEFAULT_ROOT), "runs", f"run_{run}")
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_RUN = "004"
+DEFAULT_RUN_DIR = os.path.join(os.path.abspath(DEFAULT_ROOT), "runs", f"run_{DEFAULT_RUN}")
 # ------------------------------------------------
 
 def main(argv=None):
@@ -54,14 +53,14 @@ def main(argv=None):
         if args.run_dir:
             run_dir = os.path.abspath(args.run_dir)
         elif args.run_root:
-            run_dir = os.path.join(os.path.abspath(args.run_root), "runs", f"run_{run}")
+            run_dir = os.path.join(os.path.abspath(args.run_root), "runs", f"run_{DEFAULT_RUN}")
         else:
             print("Provide --run-root or --run-dir, or run with no args for defaults.", file=sys.stderr)
             return 2
 
     # Inputs/outputs derived from run_dir and hardcoded 'run'
     map_json = os.path.join(run_dir, "overlay_to_original.json")
-    in_stream = os.path.join(run_dir, f"stream_{run}.stream")
+    in_stream = os.path.join(run_dir, f"stream_{DEFAULT_RUN}.stream")
     # out_stream = os.path.join(run_dir, f"stream_{run}_fixed.stream")
     out_stream = in_stream
 

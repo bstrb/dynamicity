@@ -72,7 +72,7 @@ def _find_peak_paths(src: h5py.File, n_images: int) -> Dict[str, Optional[str]]:
     Return dict {'I': abs_path_or_None, 'X': abs_path_or_None, 'Y': abs_path_or_None}.
     Validates first dimension == n_images and (when present) that X/Y/I share the same second dimension.
     """
-    found = {"I": None, "X": None, "Y": None}
+    found = {"I": None, "X": None, "Y": None, "N": None}
     shapes: Dict[str, tuple] = {}
 
     def maybe_take(name, obj):

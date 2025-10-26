@@ -17,8 +17,9 @@ import argparse, os, sys, subprocess
 from pathlib import Path
 
 # DEFAULTS (kept exactly as provided)
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-DEFAULT_RUN = "001"
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_RUN = "004"
 
 
 def build_ap():
