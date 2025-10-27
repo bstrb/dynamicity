@@ -1,24 +1,117 @@
-no runs?
+input default root then:
 
-no_run_prep_singlelist
-run_sh 000
-evaluate_stream 000
-update_image_run_log
-build_early_break_from_log
+if no runs:
+
+no_run_prep_singlelist.py
+run_sh.py on run_000
+evaluate_stream.py 000
+update_image_run_log.py
+build_early_break_from_log.py
  
-runs?
-propose_next_shifts
+if runs:
+propose_next_shifts.py
 if all next_shifts == done:
 break 
 else:
-build_overlays_and_list
-copy_next_run_sh
-run_sh current_run
-fix_stream_paths current_run
-evaluate_stream current_run
-update_image_run_log
-build_early_break_from_log
+build_overlays_and_list.py
+copy_next_run_sh.py
+run_sh.py on latest run in folder
+fix_stream_paths.py on latest run in folder
+evaluate_stream.py on latest run in folder
+update_image_run_log.py
+build_early_break_from_log.py
 
-fixes:
+todo:
 multiprocessing for evaluate_stream
-fix_stream current_run
+
+SerialED Orchestrator — Workflow Overview
+==========================================
+
+1. INPUT
+---------
+• User provides `--run-root <ROOT>` (experiment directory).  
+• Default geometry (.geom), cell (.cell), HDF5(s), and indexamajig flags
+  are automatically passed to the first initialization step when no runs exist.
+
+-----------------------------------------------------------
+ A. ONE-TIME INITIALIZATION (no runs exist)
+-----------------------------------------------------------
+
+[no_run_prep_singlelist.py]
+    → Prepares the first run directory: runs/run_000/
+      Creates .lst and .sh files for indexamajig.
+
+[run_sh.py --run 000]
+    → Executes sh_000.sh to run indexamajig on initial images.
+
+[evaluate_stream.py --run 000]
+    → Parses stream_000.stream and writes chunk_metrics_000.csv,
+      summary_000.txt, and parse_debug_000.txt.
+
+[update_image_run_log_grouped.py]
+    → Appends run_000 results into runs/image_run_log.csv.
+
+[build_early_break_from_log.py]
+    → Builds runs/early_break.stream (incremental, improvement-only).
+
+Artifacts after initialization:
+    runs/run_000/
+        lst_000.lst, sh_000.sh, stream_000.stream, chunk_metrics_000.csv
+    runs/image_run_log.csv
+    runs/early_break.stream
+
+
+-----------------------------------------------------------
+ B. ITERATIVE LOOP (runs exist)
+-----------------------------------------------------------
+
+Loop continues until the latest run has every row with
+`next_dx_mm` and `next_dy_mm` marked as "done".
+
+1) [propose_next_shifts.py]
+    → Reads image_run_log.csv.
+    → For each (image,event):
+         - Reconstructs expanding ring search state.
+         - Resumes Nelder–Mead optimization (if indexed).
+    → Proposes next (dx,dy) shift → updates next_dx_mm,next_dy_mm.
+
+2) If all next_* == 'done' → STOP.
+
+3) Otherwise:
+
+    [build_overlays_and_list.py]
+        → Generates overlays + .lst for next run.
+
+    [copy_next_run_sh.py --run {latest}]
+        → Creates sh_{latest}.sh for the new run.
+
+    [run_sh.py --run {latest}]
+        → Executes indexamajig → produces stream_{latest}.stream.
+
+    [fix_stream_paths.py --run-dir runs/run_{latest} --inplace]
+        → Rewrites "Image filename:" to original .h5 paths.
+
+    [evaluate_stream.py --run {latest}]
+        → Parses stream_{latest}.stream → writes chunk_metrics_{latest}.csv.
+
+    [update_image_run_log_grouped.py]
+        → Appends new run results to runs/image_run_log.csv.
+
+    [build_early_break_from_log.py]
+        → Incrementally updates runs/early_break.stream:
+            - Appends first-time successes.
+            - Replaces entries only if new run improves wRMSD.
+
+
+-----------------------------------------------------------
+ C. OUTPUTS & STOP CONDITION
+-----------------------------------------------------------
+
+At any stage, these summarize progress:
+
+    runs/run_{N}/stream_{N}.stream       → raw indexamajig output
+    runs/run_{N}/chunk_metrics_{N}.csv   → run-level metrics
+    runs/image_run_log.csv               → cumulative history
+    runs/early_break.stream              → best-so-far subset
+
+The orchestrator stops automatically when all next_* entries are 'done'.

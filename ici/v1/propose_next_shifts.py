@@ -26,7 +26,7 @@ DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 # Defaults matching the original script
 R_MAX_DEFAULT = 0.05
 R_STEP_DEFAULT = 0.01
-K_BASE_DEFAULT = 4.0
+K_BASE_DEFAULT = 20.0
 DELTA_LOCAL_DEFAULT = 0.01
 LOCAL_PATIENCE_DEFAULT = 3
 SEED_DEFAULT = 1337
@@ -59,6 +59,8 @@ class ImgState:
     ring_step: int = 0
     ring_angle_idx: int = -1
     ring_angle_base: Optional[float] = None
+    ring_cx: float = 0.0
+    ring_cy: float = 0.0
     nm_step: float = DELTA_LOCAL_DEFAULT
     nm_vertices: List[NMVertex] = field(default_factory=list)
     nm_initialized: bool = False
@@ -119,12 +121,14 @@ def pick_ring_probe(
     n = n_angles_for_radius(r, r_max, k_base)
     S.ring_angle_idx = (S.ring_angle_idx + 1) % n
     theta = (S.ring_angle_base or 0.0) + 2.0 * math.pi * S.ring_angle_idx / n
-    ndx = seed_dx + r * math.cos(theta)
-    ndy = seed_dy + r * math.sin(theta)
+    # Use fixed ring center
+    ndx = S.ring_cx + r * math.cos(theta)
+    ndy = S.ring_cy + r * math.sin(theta)
     if S.ring_angle_idx == n - 1:
         S.ring_step += 1
         S.ring_angle_idx = -1
     return ndx, ndy, f"ring_r={r:.5f}_n={n}"
+
 
 def pick_local_nm_probe(S: ImgState) -> Tuple[float, float, str]:
     _ensure_nm_initialized(S)
@@ -300,6 +304,37 @@ def propose_for_latest(entries, latest_run: int,
         # Use ALL trials up to latest run
         trials_sorted = sorted(trials, key=lambda t: t[0])  # by run_n
         S = ImgState(ring_angle_base=_hash_angle(seed, key), nm_step=delta_local)
+
+        # Reconstruct ring center and ring counters from history before first success
+        # Center: first trial's dx,dy if present, else (0,0)
+        if trials_sorted:
+            S.ring_cx, S.ring_cy = trials_sorted[0][1], trials_sorted[0][2]
+        else:
+            S.ring_cx, S.ring_cy = 0.0, 0.0
+
+        # Count number of pre-success (ring) attempts (no finite wrmsd)
+        k_ring = 0
+        for (_, dx_t, dy_t, indexed_t, wr_t) in trials_sorted:
+            if indexed_t and (wr_t is not None) and math.isfinite(wr_t):
+                break
+            # skip the exact center
+            if abs(dx_t - S.ring_cx) < 1e-12 and abs(dy_t - S.ring_cy) < 1e-12:
+                continue
+            k_ring += 1
+
+        # Fast-forward ring_step/ring_angle_idx according to k_ring
+        if k_ring > 0:
+            # We must mimic the same stepping logic used in pick_ring_probe
+            for _ in range(k_ring):
+                r_tmp = (S.ring_step + 1) * r_step
+                if r_tmp > r_max + 1e-12:
+                    S.give_up = True
+                    break
+                n_tmp = n_angles_for_radius(r_tmp, r_max, k_base)
+                S.ring_angle_idx = (S.ring_angle_idx + 1) % n_tmp
+                if S.ring_angle_idx == n_tmp - 1:
+                    S.ring_step += 1
+                    S.ring_angle_idx = -1
         tried_points = set((_fmt6(dx), _fmt6(dy)) for (_, dx, dy, _, _) in trials_sorted)
 
         # Seed last_dx/last_dy from the last trial

@@ -25,13 +25,13 @@ import h5py
 
 IMAGES_DS = "/entry/data/images"
 
-# -------- Default config (applies ONLY when run with NO CLI args) --------
+# -------- Default config MacOS (applies ONLY when run with NO CLI args) --------
 DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
 DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
 DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
 DEFAULT_H5   = DEFAULT_ROOT + "/sim.h5"
 
-# -------- Default config (applies ONLY when run with NO CLI args) --------
+# -------- Default config WSL(applies ONLY when run with NO CLI args) --------
 # DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 # DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
 # DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
@@ -115,7 +115,6 @@ def _write_sh(sh_path: str, indexamajig_exec: str, geom: str, cell: str, lst: st
     with open(sh_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     os.chmod(sh_path, 0o755)
-
 
 def build_argparser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
