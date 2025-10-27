@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-build_early_break_from_log.py  —  MP (per-run workers, no per-chunk temp explosion)
+build_early_break_from_log.py  —  MP version (read+prep in parallel, safe merge)
 
 Policy (incremental, improvement-only):
   - For each (image,event) group, consider the latest row in image_run_log.csv.
@@ -10,20 +10,17 @@ Policy (incremental, improvement-only):
   - Otherwise: NO CHANGE for that group.
 If nothing changes, the output file is left untouched.
 
-Multiprocessing (safe & efficient):
-  - Group work by RUN number.
-  - Each worker opens **one** stream file (stream_RRR.stream), builds an index,
-    extracts **all** requested chunks for that run, and returns a mapping
-    {key: chunk_text}.
-  - Avoids thousands of temp files and repeated re-reading of the same stream.
+Multiprocessing:
+  - Chunk extraction from per-run stream files is parallelized.
+  - Each worker writes the extracted chunk to a temp file and returns its path.
+  - The main process concatenates header + existing/replaced/appended chunks
+    deterministically into a temporary output, then atomically replaces the target.
 
 CLI:
   --run-root   path to 'runs/' directory (containing image_run_log.csv and run_*/)
   --log-name   name of csv (default: image_run_log.csv)
   --out-name   output stream name (default: early_break.stream)
   --workers    number of worker processes (default: os.cpu_count())
-  --spill-to-disk  (optional) if set, workers write ONE temp file per run and return its path,
-                   further reducing RAM use while keeping temp files bounded by #runs.
 
 Example:
   python build_early_break_from_log.py --run-root /data/exp/runs --workers 8
@@ -32,6 +29,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import multiprocessing
 import os
@@ -68,9 +66,25 @@ def run_stream_path(run_root: str, run_n: int) -> str:
     return os.path.join(run_root, f"run_{run_n:03d}", f"stream_{run_n:03d}.stream")
 
 
+def _hash_key(key: HeaderKey) -> str:
+    h = hashlib.sha1(f"{key[0]}|{key[1]}".encode("utf-8")).hexdigest()
+    return h[:16]
+
+
 # ------------------------- Log Parsing ----------------------------
 
 def parse_image_run_log(log_path: str) -> Dict[HeaderKey, List[dict]]:
+    """
+    Parse interleaved headers and CSV rows of the global log:
+
+      #/abs/path.h5 event 40
+      run_n,det_shift_x_mm,det_shift_y_mm,indexed,wrmsd,next_dx_mm,next_dy_mm
+      0,0.3285,0.1037,1,0.9361,0.3385,0.1037
+      ...
+
+    Returns: {(abs_image_path, event): [ {'run_n': int, 'wrmsd': float|None}, ... ]}
+             rows in file order (ascending), so last element is "latest".
+    """
     groups: Dict[HeaderKey, List[dict]] = {}
     cur: Optional[HeaderKey] = None
 
@@ -108,6 +122,13 @@ def parse_image_run_log(log_path: str) -> Dict[HeaderKey, List[dict]]:
 
 
 def decide_updates(groups: Dict[HeaderKey, List[dict]]) -> Dict[HeaderKey, int]:
+    """
+    For each group, decide if the latest row qualifies:
+      - latest wrmsd is finite
+      - and (no prior finite wrmsd) -> append
+        OR (latest wrmsd < min_prior - EPS) -> replace
+    Return dict of {key -> run_n_of_latest} for groups that need updating/appending.
+    """
     out: Dict[HeaderKey, int] = {}
     for key, rows in groups.items():
         if not rows:
@@ -115,14 +136,17 @@ def decide_updates(groups: Dict[HeaderKey, List[dict]]) -> Dict[HeaderKey, int]:
         latest = rows[-1]
         w_latest = latest["wrmsd"]
         if w_latest is None:
-            continue
+            continue  # nothing to do
 
+        # prior finite minima
         prior = [r["wrmsd"] for r in rows[:-1] if r["wrmsd"] is not None]
         if not prior:
+            # first success -> append
             out[key] = latest["run_n"]
             continue
         min_prior = min(prior)
         if w_latest < (min_prior - EPS):
+            # strict improvement -> replace
             out[key] = latest["run_n"]
     return out
 
@@ -130,6 +154,12 @@ def decide_updates(groups: Dict[HeaderKey, List[dict]]) -> Dict[HeaderKey, int]:
 # --------------------- Stream Parsing / Indexing -------------------
 
 def parse_stream_chunks(stream_path: str):
+    """
+    Return (bounds, lines, header_lines)
+      - bounds: list of (start_idx, end_idx) covering each chunk
+      - lines: all lines
+      - header_lines: everything before first "Begin chunk"
+    """
     with open(stream_path, "r", encoding="utf-8", errors="ignore") as f:
         lines = f.readlines()
 
@@ -180,51 +210,41 @@ def map_chunk_ids_by_image_event(lines: List[str], bounds: List[Tuple[int, int]]
     return mapping
 
 
-def extract_chunks_for_run(run_root: str, rn: int, keys: List[HeaderKey]):
+def load_chunk_for(run_root: str, rn: int, key: HeaderKey) -> Optional[List[str]]:
     """
-    Worker: open stream_{rn}.stream once, build index, and return {key: chunk_text}.
-    """
-    stream_path = run_stream_path(run_root, rn)
-    if not os.path.isfile(stream_path):
-        return {}
-
-    bounds, lines, _ = parse_stream_chunks(stream_path)
-    index = map_chunk_ids_by_image_event(lines, bounds)
-    out: Dict[HeaderKey, str] = {}
-    for key in keys:
-        cid = index.get(key)
-        if cid is not None:
-            a, b = bounds[cid]
-            out[key] = "".join(lines[a:b])
-    return out
-
-
-def extract_chunks_for_run_spill(run_root: str, rn: int, keys: List[HeaderKey], temp_dir: str):
-    """
-    Worker variant: write a single temp file per RUN (not per chunk), and return
-    a manifest {key: (tmp_path, offset, length)}. Main process concatenates from these.
+    Extract a single chunk (as list of lines) for (image,event) from run rn.
     """
     stream_path = run_stream_path(run_root, rn)
     if not os.path.isfile(stream_path):
-        return {}
+        print(f"[WARN] Missing stream for run_{rn:03d}: {stream_path}")
+        return None
+    try:
+        bounds, lines, _ = parse_stream_chunks(stream_path)
+        mapping = map_chunk_ids_by_image_event(lines, bounds)
+        cid = mapping.get(key)
+        if cid is None:
+            print(f"[WARN] No chunk for {key} in run_{rn:03d}")
+            return None
+        a, b = bounds[cid]
+        return lines[a:b]
+    except Exception as e:
+        print(f"[WARN] Failed to parse {stream_path}: {e}")
+        return None
 
-    bounds, lines, _ = parse_stream_chunks(stream_path)
-    index = map_chunk_ids_by_image_event(lines, bounds)
 
-    tmp_path = os.path.join(temp_dir, f"run_{rn:03d}.chunks")
-    with open(tmp_path, "wb") as wf:
-        manifest = {}
-        pos = 0
-        for key in keys:
-            cid = index.get(key)
-            if cid is None:
-                continue
-            a, b = bounds[cid]
-            data = "".join(lines[a:b]).encode("utf-8")
-            wf.write(data)
-            manifest[key] = (tmp_path, pos, len(data))
-            pos += len(data)
-    return manifest
+# ---- Worker: load and spill chunk to temp file (for parallel IO) ----
+
+def _worker_load_to_temp(args) -> Tuple[HeaderKey, Optional[str]]:
+    run_root, rn, key, temp_dir = args
+    seg = load_chunk_for(run_root, rn, key)
+    if seg is None:
+        return key, None
+    # Write to a unique temp file
+    h = _hash_key(key)
+    tmp_path = os.path.join(temp_dir, f"{rn:03d}_{h}.chunk")
+    with open(tmp_path, "w", encoding="utf-8") as wf:
+        wf.writelines(seg)
+    return key, tmp_path
 
 
 # --------------------------- Main Builder -------------------------
@@ -234,7 +254,6 @@ def build_early_break_incremental(
     log_name: str = DEFAULT_LOG_NAME,
     out_name: str = DEFAULT_OUT_NAME,
     workers: Optional[int] = None,
-    spill_to_disk: bool = False,
 ) -> str:
 
     run_root = _abs(run_root)
@@ -248,6 +267,7 @@ def build_early_break_incremental(
     groups = parse_image_run_log(log_path)
     plans = decide_updates(groups)  # {key -> latest_run}
 
+    # If no file and nothing to add, nothing to do
     if not os.path.isfile(out_path) and not plans:
         print("[early-break] No updates and no existing file; nothing to do.")
         return out_path
@@ -260,69 +280,59 @@ def build_early_break_incremental(
         except Exception as e:
             print(f"[WARN] Could not parse existing {out_path}: {e}")
 
+    # Build map of existing chunks
     existing_map: Dict[HeaderKey, Tuple[int,int]] = {}
     for (a, b) in existing_bounds:
         k = chunk_key_from_slice(existing_lines[a:b])
         if k is not None:
             existing_map[k] = (a, b)
 
-    # Group planned updates by run number
-    plans_by_run: Dict[int, List[HeaderKey]] = {}
-    for key, rn in plans.items():
-        plans_by_run.setdefault(rn, []).append(key)
-
-    # Resolve new/updated chunks in parallel per-run
-    if workers is None or workers <= 0:
-        workers = max(1, multiprocessing.cpu_count())
-    w = min(workers, max(1, len(plans_by_run)))
-    if plans_by_run:
-        print(f"[multi] Using {w} workers for {sum(len(v) for v in plans_by_run.values())} chunk(s) across {len(plans_by_run)} run(s)")
-
-    new_chunks_text: Dict[HeaderKey, str] = {}        # default in-memory
-    new_chunks_manifest: Dict[HeaderKey, Tuple[str,int,int]] = {}  # when spill_to_disk=True
-
-    temp_dir = tempfile.mkdtemp(prefix="early_break_", dir=run_root) if spill_to_disk else None
+    # Resolve new/updated chunks in parallel: spill each to temp file
+    temp_dir = tempfile.mkdtemp(prefix="early_break_", dir=run_root)
     try:
-        if plans_by_run:
+        new_chunk_files: Dict[HeaderKey, str] = {}
+        if plans:
+            # default workers: all cores
+            if workers is None or workers <= 0:
+                workers = max(1, multiprocessing.cpu_count())
+            # Clamp to number of tasks
+            w = min(workers, max(1, len(plans)))
+            print(f"[multi] Using {w} workers for {len(plans)} chunk(s)")
             with ProcessPoolExecutor(max_workers=w) as ex:
-                futs = []
-                if spill_to_disk:
-                    for rn, keys in plans_by_run.items():
-                        futs.append(ex.submit(extract_chunks_for_run_spill, run_root, rn, keys, temp_dir))
-                else:
-                    for rn, keys in plans_by_run.items():
-                        futs.append(ex.submit(extract_chunks_for_run, run_root, rn, keys))
-
-                for fut, (rn, keys) in zip(futs, plans_by_run.items()):
+                futs = {
+                    ex.submit(_worker_load_to_temp, (run_root, rn, key, temp_dir)): key
+                    for key, rn in plans.items()
+                }
+                for fut in as_completed(futs):
+                    key = futs[fut]
                     try:
-                        res = fut.result()
-                        if spill_to_disk:
-                            # res: {key: (tmp_path, offset, length)}
-                            new_chunks_manifest.update(res)
-                        else:
-                            # res: {key: text}
-                            new_chunks_text.update(res)
+                        k, tmp = fut.result()
+                        if tmp is not None:
+                            new_chunk_files[k] = tmp
                     except Exception as e:
-                        print(f"[WARN] Worker failed for run_{rn:03d}: {e}")
+                        print(f"[WARN] Worker failed for {key}: {e}")
 
-        # Nothing to change?
-        if not new_chunks_text and not new_chunks_manifest:
+        # After resolution, if nothing to change, leave file as-is
+        if not new_chunk_files:
             print("[early-break] No improvements or first-success rows detected; leaving file unchanged.")
             return out_path
 
-        # Decide header
+        # Decide header to write
         header_to_write = existing_header
         if not header_to_write:
-            # Borrow header from any contributing stream
+            # attempt to borrow a header from any run stream we just used
+            # (read first contributing temp file's source header via its run number)
             try:
-                any_rn = next(iter(plans_by_run.keys()))
-                sp = run_stream_path(run_root, any_rn)
+                any_key = next(iter(new_chunk_files.keys()))
+                rn_guess = plans[any_key]
+                sp = run_stream_path(run_root, rn_guess)
                 _, _, hdr = parse_stream_chunks(sp)
                 if hdr:
                     header_to_write = hdr
             except Exception:
                 pass
 
+        # Merge deterministically
         replaced = 0
         appended = 0
         total_chunks = 0
@@ -331,7 +341,7 @@ def build_early_break_incremental(
             if header_to_write:
                 wf.writelines(header_to_write)
 
-            # 1) existing chunks (replace where needed)
+            # 1) write existing chunks, replacing where needed
             if existing_bounds and existing_lines:
                 for (a, b) in existing_bounds:
                     key = chunk_key_from_slice(existing_lines[a:b])
@@ -339,42 +349,37 @@ def build_early_break_incremental(
                         wf.writelines(existing_lines[a:b])
                         total_chunks += 1
                         continue
-
-                    if spill_to_disk and key in new_chunks_manifest:
-                        path, off, ln = new_chunks_manifest.pop(key)
-                        with open(path, "rb") as rf:
-                            rf.seek(off)
-                            wf.write(rf.read(ln).decode("utf-8"))
-                        replaced += 1
-                    elif (not spill_to_disk) and key in new_chunks_text:
-                        wf.write(new_chunks_text.pop(key))
+                    tmp = new_chunk_files.pop(key, None)
+                    if tmp is not None:
+                        # replace
+                        with open(tmp, "r", encoding="utf-8") as rf:
+                            shutil.copyfileobj(rf, wf)
                         replaced += 1
                     else:
+                        # keep
                         wf.writelines(existing_lines[a:b])
                     total_chunks += 1
 
             # 2) append remaining new chunks (first successes)
-            pending_keys = list(new_chunks_manifest.keys()) if spill_to_disk else list(new_chunks_text.keys())
-            for key in sorted(pending_keys, key=lambda t: (t[0], t[1])):
-                if spill_to_disk:
-                    path, off, ln = new_chunks_manifest[key]
-                    with open(path, "rb") as rf:
-                        rf.seek(off)
-                        wf.write(rf.read(ln).decode("utf-8"))
-                else:
-                    wf.write(new_chunks_text[key])
-                appended += 1
-                total_chunks += 1
+            if new_chunk_files:
+                for key in sorted(new_chunk_files.keys(), key=lambda t: (t[0], t[1])):
+                    with open(new_chunk_files[key], "r", encoding="utf-8") as rf:
+                        shutil.copyfileobj(rf, wf)
+                    appended += 1
+                    total_chunks += 1
 
+        # Atomic replace
         os.replace(out_tmp, out_path)
         print(f"[early-break] Merge complete: wrote {total_chunks} chunk(s) to {out_path} "
               f"(replaced {replaced}, appended {appended}).")
         return out_path
 
     finally:
-        if temp_dir:
-            try: shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception: pass
+        # cleanup temp dir
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 # ------------------------------ CLI --------------------------------
@@ -384,7 +389,7 @@ def main(argv=None):
         argv = sys.argv[1:]
 
     ap = argparse.ArgumentParser(
-        description="Incrementally update early_break.stream (improvement-only) with parallel per-run extraction."
+        description="Incrementally update early_break.stream (improvement-only) with parallel chunk extraction."
     )
     ap.add_argument("--run-root", default=DEFAULT_RUN_ROOT,
                     help="Path to 'runs/' containing image_run_log.csv and run_*/")
@@ -394,13 +399,10 @@ def main(argv=None):
                     help=f"Output stream filename (default: {DEFAULT_OUT_NAME})")
     ap.add_argument("--workers", type=int, default=multiprocessing.cpu_count(),
                     help="Number of worker processes (default: all cores)")
-    ap.add_argument("--spill-to-disk", action="store_true",
-                    help="Use ONE temp file per run (instead of RAM) to hold extracted chunks")
     args = ap.parse_args(argv)
 
     run_root = _abs(args.run_root)
-    build_early_break_incremental(run_root, args.log_name, args.out_name,
-                                  workers=args.workers, spill_to_disk=args.spill_to_disk)
+    build_early_break_incremental(run_root, args.log_name, args.out_name, args.workers)
     return 0
 
 

@@ -346,6 +346,21 @@ def propose_for_latest(entries, latest_run: int,
         for (run_n, dx, dy, indexed, wr) in trials_sorted:
             update_state_from_run(S, run_n, run_n, bool(indexed), wr, dx, dy, tol)
 
+        if S.phase == "local":
+            _ensure_nm_initialized(S)
+            # Map historical (dx,dy) → wrmsd for indexed points
+            hist_map = {
+                (_fmt6(dx), _fmt6(dy)): wr
+                for (_, dx, dy, ind, wr) in trials_sorted
+                if ind and (wr is not None) and math.isfinite(wr)
+            }
+            # Mark NM vertices already evaluated
+            for v in S.nm_vertices:
+                key = (_fmt6(v.dx), _fmt6(v.dy))
+                if key in hist_map:
+                    v.f = hist_map[key]
+                    v.done = True
+
         # Decide whether a NEW point is warranted
         last_trial = trials_sorted[-1] if trials_sorted else None
         was_indexed_latest = bool(last_trial[3]) if last_trial else False
@@ -353,12 +368,15 @@ def propose_for_latest(entries, latest_run: int,
         needs_more = False
         if (not was_indexed_latest) and (S.phase == "ring") and (not S.give_up):
             needs_more = True
-        elif was_indexed_latest and (S.phase == "local") and (not should_stop_local(S, local_patience)):
+        # elif was_indexed_latest and (S.phase == "local") and (not should_stop_local(S, local_patience)):
+        #     needs_more = True
+        elif (S.phase == "local") and (not should_stop_local(S, local_patience)):
             needs_more = True
 
         if needs_more:
             # Try to generate a novel candidate; skip repeats
             made_new = False
+
             for _ in range(1000):  # safety cap
                 if S.phase == "ring" and not S.give_up:
                     ndx, ndy, _ = pick_ring_probe(S, S.last_dx, S.last_dy, r_step, r_max, k_base)
@@ -369,6 +387,11 @@ def propose_for_latest(entries, latest_run: int,
                     proposals[key] = (ndx, ndy)  # NEW proposal
                     made_new = True
                     break
+                if S.phase == "local" and S.nm_vertices:
+                        for v in S.nm_vertices:
+                            if _fmt6(v.dx) == keyfmt[0] and _fmt6(v.dy) == keyfmt[1]:
+                                v.done = True
+
             if not made_new:
                 # Could not find a novel point; still propose best/last as a fallback
                 ndx = S.best_dx if S.best_dx is not None else S.last_dx
