@@ -45,7 +45,7 @@ from typing import Dict, Tuple, List, Optional
 HeaderKey = Tuple[str, int]  # (abs_image_path, event)
 EPS = 1e-12
 
-DEFAULT_RUN_ROOT = "."
+DEFAULT_RUN_ROOT = "/home/bubl3932/files/ici_trials/runs"
 DEFAULT_LOG_NAME = "image_run_log.csv"
 DEFAULT_OUT_NAME = "early_break.stream"
 

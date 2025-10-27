@@ -1,52 +1,90 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-(Updated) step3_evaluate_stream.py
-Now includes det_shift_x_mm / det_shift_y_mm in the CSV.
+evaluate_stream_fast.py  — panel-aware, robust & parallel
+
+Fast evaluator that preserves the correctness of your original parser:
+- Memory-maps the .stream and finds chunks via your Begin/End patterns.
+- Parses each chunk with your original regexes (incl. panel IDs).
+- Computes peak↔reflection matches **per panel**, then aggregates wRMSD.
+- Parallelizes per-chunk work (no heavy IPC; each worker receives only the chunk bytes).
+
+Outputs (same names):
+  chunk_metrics_<run>.csv
+  summary_<run>.txt
+  parse_debug_<run>.txt
 """
+
 from __future__ import annotations
-import argparse, os, sys, csv, re, math
+
+import argparse
+import mmap
+import os
+import re
+import sys
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor
-from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+
 import numpy as np
 
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-DEFAULT_RUN = "004"  # will be zero-padded to width 3 at runtime
-DEFAULT_MATCH_RADIUS = 4.0
-DEFAULT_OUTLIER_SIGMA = 2.0
+# Keep BLAS single-threaded inside workers
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_RUN = "000"  # will be zero-padded to width 3 at runtime
+
+# ---------------- Regexes (your originals) ----------------
 
 FLOAT_RE = r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?"
+
 RE_BEGIN_CHUNK   = re.compile(r"-{3,}\s*Begin\s+chunk\s*-{3,}", re.IGNORECASE)
 RE_END_CHUNK     = re.compile(r"-{3,}\s*End(?:\s+of)?\s+chunk\s*-{3,}", re.IGNORECASE)
+
 RE_IMG_FN        = re.compile(r"^\s*Image\s+filename\s*:\s*(.+?)\s*$", re.IGNORECASE)
+RE_IMG_FILE      = re.compile(r"^\s*Image\s+file\s*:\s*(.+?)\s*$", re.IGNORECASE)
 RE_EVENT         = re.compile(r"^\s*Event\s*:\s*(?:/+)?\s*([0-9]+)\s*$", re.IGNORECASE)
 RE_IMG_SERIAL    = re.compile(r"^\s*Image\s+serial\s+number\s*:\s*([0-9]+)\s*$", re.IGNORECASE)
 RE_DET_DX        = re.compile(r"^\s*header/float//entry/data/det_shift_x_mm\s*=\s*(" + FLOAT_RE + r")\s*$", re.IGNORECASE)
 RE_DET_DY        = re.compile(r"^\s*header/float//entry/data/det_shift_y_mm\s*=\s*(" + FLOAT_RE + r")\s*$", re.IGNORECASE)
+
 RE_BEGIN_PEAKS   = re.compile(r"^\s*Peaks from peak search", re.IGNORECASE)
 RE_END_PEAKS     = re.compile(r"^\s*End of peak list", re.IGNORECASE)
+# fs ss I panel
 RE_PEAK_LINE     = re.compile(rf"^\s*({FLOAT_RE})\s+({FLOAT_RE})\s+{FLOAT_RE}\s+({FLOAT_RE})\s+(\S+)\s*$")
+
 RE_BEGIN_CRYSTAL = re.compile(r"^\s*---\s*Begin\s+crystal", re.IGNORECASE)
 RE_END_CRYSTAL   = re.compile(r"^\s*---\s*End\s+crystal", re.IGNORECASE)
+
 RE_BEGIN_REFL    = re.compile(r"^\s*Reflections\s+measured\s+after\s+indexing", re.IGNORECASE)
 RE_END_REFL      = re.compile(r"^\s*End\s+of\s+reflections", re.IGNORECASE)
+# ... with panel at end of line
 RE_REFL_LINE     = re.compile(rf".*?\s({FLOAT_RE})\s+({FLOAT_RE})\s+(\S+)\s*$")
 
-@dataclass
-class Chunk:
-    # cid: int
-    image: Optional[str]
-    event: Optional[str]
-    indexed: bool
-    peaks: List[Tuple[float, float, float, str]]
-    refls: List[Tuple[float, float, str]]
-    det_dx_mm: Optional[float]
-    det_dy_mm: Optional[float]
+# Byte regex equivalents for chunk detection
+RE_BEGIN_CHUNK_B = re.compile(br"-{3,}\s*Begin\s+chunk\s*-{3,}", re.IGNORECASE)
+RE_END_CHUNK_B   = re.compile(br"-{3,}\s*End(?:\s+of)?\s+chunk\s*-{3,}", re.IGNORECASE)
 
-def _sigma_mask(values: np.ndarray, sigma: float) -> np.ndarray:
+@dataclass
+class ChunkRow:
+    image: str
+    event: str
+    det_dx_mm: float | None
+    det_dy_mm: float | None
+    indexed: int
+    wrmsd: float | None
+    n_matches: int
+    n_kept: int
+    reason: str
+
+# ---------------- wRMSD helpers ----------------
+# --- replace existing helpers with these ---
+
+def _sigma_mask_upper(values: np.ndarray, sigma: float) -> np.ndarray:
+    """Keep distances <= mean + sigma*std (matches original)."""
     if values.size == 0:
         return np.zeros((0,), dtype=bool)
     mu = float(values.mean())
@@ -55,285 +93,291 @@ def _sigma_mask(values: np.ndarray, sigma: float) -> np.ndarray:
         return np.ones_like(values, dtype=bool)
     return values <= (mu + sigma * sd)
 
-def _nn_dists_numpy(pfs: np.ndarray, pss: np.ndarray, rfs: np.ndarray, rss: np.ndarray) -> np.ndarray:
+def _nn_dists_peaks_to_refl(pfs: np.ndarray, pss: np.ndarray,
+                            rfs: np.ndarray, rss: np.ndarray) -> np.ndarray:
+    """
+    Peak-primary distances: for each peak, distance to nearest reflection.
+    Vector length = #peaks. This matches the original script.
+    """
     if pfs.size == 0 or rfs.size == 0:
+        # no reflections → no matches, return +inf for each peak
         return np.full(pfs.shape[0], np.inf, dtype=np.float32)
     df = pfs[:, None] - rfs[None, :]
     ds = pss[:, None] - rss[None, :]
-    return np.sqrt((df * df + ds * ds).min(axis=1)).astype(np.float32, copy=False)
+    return np.sqrt((df*df + ds*ds).min(axis=1)).astype(np.float32, copy=False)
 
-def _normalize_run(run: str) -> str:
-    """Return zero-padded run string (e.g. '0' -> '000'). If not numeric, return as-is."""
-    try:
-        return f"{int(run):03d}"
-    except (TypeError, ValueError):
-        return str(run)
+def _wrmsd_one_panel_peak_primary(p_fs, p_ss, p_int, r_fs, r_ss,
+                                  match_radius, outlier_sigma):
+    """
+    Compute matches & weighted RMS using peaks as primaries, with intensity weights.
+    Returns (wr, n_matches, n_kept, kept_dists, kept_weights)
+    """
+    if p_fs.size == 0 or r_fs.size == 0:
+        return None, 0, 0, np.empty((0,), float), np.empty((0,), float)
 
-def compute_wrmsd_details(
-    peaks: List[Tuple[float, float, float, str]],
-    refls: List[Tuple[float, float, str]],
-    match_radius: float,
-    outlier_sigma: float
-) -> Tuple[Optional[float], int, int, Optional[str]]:
-    pmap: Dict[str, List[List[float]]] = {}
-    rmap: Dict[str, List[List[float]]] = {}
-    for fs, ss, inten, pan in peaks:
-        lst = pmap.setdefault(pan, [[], [], []])
-        lst[0].append(fs); lst[1].append(ss); lst[2].append(inten)
-    for fs, ss, pan in refls:
-        lst = rmap.setdefault(pan, [[], []])
-        lst[0].append(fs); lst[1].append(ss)
-    if not pmap or not rmap:
-        return None, 0, 0, "too_few_peaks_or_refl"
+    d = _nn_dists_peaks_to_refl(p_fs, p_ss, r_fs, r_ss)   # length = #peaks
+    within = (d <= float(match_radius))
+    n_matches = int(within.sum())
+    if n_matches == 0:
+        return None, 0, 0, np.empty((0,), float), np.empty((0,), float)
 
-    n_matches = 0
-    md_all, w_all = [], []
-    for pan, (pfs_list, pss_list, pint_list) in pmap.items():
-        r = rmap.get(pan)
-        if r is None:
-            continue
-        rfs_list, rss_list = r
-        if not pfs_list or not rfs_list:
-            continue
-        pfs = np.asarray(pfs_list, dtype=np.float32)
-        pss = np.asarray(pss_list, dtype=np.float32)
-        pint= np.asarray(pint_list, dtype=np.float32)
-        rfs = np.asarray(rfs_list, dtype=np.float32)
-        rss = np.asarray(rss_list, dtype=np.float32)
-        d = _nn_dists_numpy(pfs, pss, rfs, rss)
-        within = (d <= float(match_radius))
-        cnt = int(within.sum())
-        if cnt > 0:
-            n_matches += cnt
-            md_all.append(d[within])
-            w_all.append(pint[within])
-    if not md_all:
-        return None, n_matches, 0, "no_matches"
-    md = np.concatenate(md_all)
-    w  = np.concatenate(w_all)
-    keep = _sigma_mask(md, float(outlier_sigma))
+    d_in = d[within]
+    w_in = p_int[within]
+
+    keep = _sigma_mask_upper(d_in, float(outlier_sigma))
     n_kept = int(keep.sum())
     if n_kept == 0:
-        return None, n_matches, 0, "all_clipped"
-    kept = md[keep]; kw = w[keep]
+        return None, n_matches, 0, np.empty((0,), float), np.empty((0,), float)
+
+    kd = d_in[keep]
+    kw = w_in[keep]
     wsum = float(kw.sum())
     if wsum <= 0.0:
-        return None, n_matches, n_kept, "zero_weight"
-    wr = math.sqrt(float((kw * (kept ** 2)).sum()) / wsum)
-    if math.isnan(wr) or math.isinf(wr):
-        return None, n_matches, n_kept, "nan_inf"
-    return float(wr), n_matches, n_kept, None
+        return None, n_matches, n_kept, kd, kw
 
-# Helper for multiprocessing: simple wrapper for compute_wrmsd_details
-def _compute_wrmsd_worker(args):
-    peaks, refls, match_radius, outlier_sigma = args
-    return compute_wrmsd_details(peaks, refls, match_radius, outlier_sigma)
+    wr = float(np.sqrt((kw * (kd ** 2)).sum() / wsum))
+    return wr, n_matches, n_kept, kd, kw
 
+# def _sigma_clip(res, sg=3.0):
+#     res = np.asarray(res, dtype=float)
+#     if res.size == 0:
+#         return res
+#     mu = np.median(res)
+#     mad = np.median(np.abs(res - mu)) + 1e-9
+#     z = (res - mu) / (1.4826 * mad)
+#     return res[np.abs(z) <= sg]
 
-def parse_stream(stream_path: str) -> Iterable[Chunk]:
-    # cid = 0
-    ch: Optional[Chunk] = None
-    in_chunk = False
+# def _wrmsd_one_panel(peaks_xy, refl_xy, match_radius, outlier_sigma):
+#     if peaks_xy.size == 0 or refl_xy.size == 0:
+#         return None, 0, 0, np.empty((0,), float)
+#     D = np.sum((refl_xy[:,None,:] - peaks_xy[None,:,:])**2, axis=2)
+#     nn = np.argmin(D, axis=1)
+#     dists = np.sqrt(D[np.arange(refl_xy.shape[0]), nn])
+#     m = dists <= match_radius
+#     if not np.any(m):
+#         return None, int(refl_xy.shape[0]), 0, np.empty((0,), float)
+#     kept = _sigma_clip(dists[m], sg=outlier_sigma)
+#     if kept.size == 0:
+#         return None, int(np.sum(m)), 0, np.empty((0,), float)
+#     wr = float(np.sqrt(np.mean(kept**2)))
+#     return wr, int(refl_xy.shape[0]), int(kept.size), kept
+
+# ---------------- Per-chunk parser (panel-aware) ----------------
+
+def _bytes_to_lines(b: bytes):
+    return b.decode("utf-8", "ignore").splitlines()
+
+def parse_chunk_text(b: bytes, mr: float, sg: float) -> ChunkRow:
+    L = _bytes_to_lines(b)
+
+    # image path
+    img = ""
+    for ln in L[:100]:
+        m = RE_IMG_FN.match(ln) or RE_IMG_FILE.match(ln)
+        if m:
+            img = m.group(1).strip()
+            break
+
+    # event id
+    ev = ""
+    for ln in L[:150]:
+        m = RE_EVENT.match(ln)
+        if m:
+            ev = m.group(1).strip()
+            break
+
+    # detector shift
+    dx = dy = None
+    for ln in L[:200]:
+        if dx is None:
+            mdx = RE_DET_DX.match(ln)
+            if mdx: dx = float(mdx.group(1))
+        if dy is None:
+            mdy = RE_DET_DY.match(ln)
+            if mdy: dy = float(mdy.group(1))
+        if dx is not None and dy is not None:
+            break
+
+    # peaks: dict panel -> [(fs, ss)]
+    peaks_by_panel = {}
     in_peaks = False
-    in_crystal = False
+    for ln in L:
+        if not in_peaks and RE_BEGIN_PEAKS.search(ln):
+            in_peaks = True
+            continue
+        if in_peaks:
+            if RE_END_PEAKS.search(ln) or ln.startswith("---") or ln.startswith("Begin chunk") or ln.startswith("End chunk"):
+                in_peaks = False
+                continue
+            mp = RE_PEAK_LINE.match(ln)
+            if mp:
+                fs = float(mp.group(1)); ss = float(mp.group(2)); inten = float(mp.group(3))
+                pan = mp.group(4)
+                peaks_by_panel.setdefault(pan, []).append((fs, ss, inten))
+
+
+    # reflections: dict panel -> [(fs, ss)]
+    refl_by_panel = {}
     in_refl = False
-
-    def flush():
-        nonlocal ch
-        if ch is not None:
-            out = ch
-            ch = None
-            return out
-        return None
-
-    with open(stream_path, "r", encoding="utf-8", errors="ignore") as f:
-        for raw in f:
-            line = raw.rstrip("\r\n")
-            if RE_BEGIN_CHUNK.search(line):
-                # cid += 1
-                in_chunk = True
-                in_peaks = in_crystal = in_refl = False
-                # ch = Chunk(cid, None, None, False, [], [], None, None)
-                ch = Chunk(None, None, False, [], [], None, None)
+    for ln in L:
+        if not in_refl and RE_BEGIN_REFL.search(ln):
+            in_refl = True
+            continue
+        if in_refl:
+            if RE_END_REFL.search(ln) or ln.startswith("---") or ln.startswith("Begin chunk") or ln.startswith("End chunk"):
+                in_refl = False
                 continue
-            if not in_chunk:
-                continue
-            if RE_END_CHUNK.search(line):
-                cc = flush()
-                if cc is not None:
-                    yield cc
-                in_chunk = in_peaks = in_crystal = in_refl = False
-                continue
-            if ch is None:
-                continue
-            if ch.image is None:
-                m = RE_IMG_FN.match(line)
-                if m:
-                    ch.image = m.group(1).strip(); continue
-            if ch.event is None:
-                m = RE_EVENT.match(line) or RE_IMG_SERIAL.match(line)
-                if m:
-                    ch.event = m.group(1).strip(); continue
-            if ch.det_dx_mm is None:
-                m = RE_DET_DX.match(line)
-                if m:
-                    ch.det_dx_mm = float(m.group(1)); continue
-            if ch.det_dy_mm is None:
-                m = RE_DET_DY.match(line)
-                if m:
-                    ch.det_dy_mm = float(m.group(1)); continue
-            if RE_BEGIN_PEAKS.search(line):
-                in_peaks = True;  continue
-            if in_peaks:
-                if RE_END_PEAKS.search(line):
-                    in_peaks = False; continue
-                mpk = RE_PEAK_LINE.match(line)
-                if mpk:
-                    fs = float(mpk.group(1)); ss = float(mpk.group(2))
-                    inten = float(mpk.group(3)); panel = mpk.group(4)
-                    ch.peaks.append((fs, ss, inten, panel))
-                continue
-            if RE_BEGIN_CRYSTAL.search(line):
-                in_crystal = True; continue
-            if in_crystal and RE_END_CRYSTAL.search(line):
-                in_crystal = False; in_refl = False; continue
-            if in_crystal and RE_BEGIN_REFL.search(line):
-                in_refl = True; ch.indexed = True; continue
-            if in_refl:
-                if RE_END_REFL.search(line):
-                    in_refl = False; continue
-                mrf = RE_REFL_LINE.match(line)
-                if mrf:
-                    fs = float(mrf.group(1)); ss = float(mrf.group(2)); pan = mrf.group(3)
-                    ch.refls.append((fs, ss, pan))
-                continue
-    cc = flush()
-    if cc is not None:
-        yield cc
+            mrline = RE_REFL_LINE.match(ln)
+            if mrline:
+                fs = float(mrline.group(1)); ss = float(mrline.group(2))
+                pan = mrline.group(3)
+                refl_by_panel.setdefault(pan, []).append((fs, ss))
 
-def write_csv(path: str, rows: List[Dict[str, object]], header: List[str]) -> None:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=header)
-        w.writeheader()
-        for r in rows:
-            w.writerow(r)
+    # any reflections?
+    any_indexed = any(len(v) for v in refl_by_panel.values())
+    if not any_indexed:
+        return ChunkRow(img, ev, dx, dy, 0, None, 0, 0, "unindexed")
 
-def main(argv: List[str]) -> int:
-    ap = argparse.ArgumentParser(description="Parse stream_<run>.stream and compute per-chunk wRMSD (robust).")
-    ap.add_argument("--run-root", help='Root folder that contains runs/run_<run>')
-    ap.add_argument("--run", help='Run identifier (e.g., "0", "3", "12", "003"); will be zero-padded to width 3')
-    ap.add_argument("--match-radius", type=float, default=DEFAULT_MATCH_RADIUS)
-    ap.add_argument("--sigma", type=float, default=DEFAULT_OUTLIER_SIGMA)
-    ap.add_argument("--workers", type=int, default=os.cpu_count(),
-                help="Worker processes for wRMSD compute (default: CPU count; use 1 to disable parallelism)")
-    args = ap.parse_args(argv)
+    # panel-wise matching, then aggregate
+    total_matches = 0
+    total_kept = 0
+    kept_all = []
 
-    # Resolve parameters (defaults if not provided)
-    run_root = args.run_root if args.run_root else DEFAULT_ROOT
-    run_str  = _normalize_run(args.run if args.run else DEFAULT_RUN)
-    mr = float(args.match_radius)
-    sg = float(args.sigma)
-
-    # Construct paths from resolved values
-    run_dir = os.path.join(run_root, "runs", f"run_{run_str}")
-    run_dir = os.path.abspath(os.path.expanduser(run_dir))
-    stream_path = os.path.join(run_dir, f"stream_{run_str}.stream")
-    print(f"Run root : {os.path.abspath(os.path.expanduser(run_root))}")
-    print(f"Run      : {run_str}")
-    print(f"Run dir  : {run_dir}")
-
-    if not os.path.isfile(stream_path):
-        print(f"ERROR: not found: {stream_path}", file=sys.stderr)
-        return 2
-
-    
-    rows: List[Dict[str, object]] = []
-    wr_vals: List[float] = []
-    n_chunks = n_any_peaks = n_found_refl_hdr = n_any_refls = n_indexed = 0
-
-    indexed_payload = []   # (peaks, refls, mr, sg)
-    indexed_meta = []      # (row_index, image, event, det_dx_mm, det_dy_mm)
-
-    # 1) Parse and stage
-    for ch in parse_stream(stream_path):
-        n_chunks += 1
-        if ch.peaks: n_any_peaks += 1
-        if ch.indexed: n_found_refl_hdr += 1
-        if ch.refls: n_any_refls += 1
-        if ch.indexed: n_indexed += 1
-
-        if not ch.indexed:
-            rows.append({
-                "image": ch.image or "", "event": ch.event or "",
-                "det_shift_x_mm": (f"{ch.det_dx_mm:.6f}" if ch.det_dx_mm is not None else ""),
-                "det_shift_y_mm": (f"{ch.det_dy_mm:.6f}" if ch.det_dy_mm is not None else ""),
-                "indexed": 0, "wrmsd": "", "n_matches": 0, "n_kept": 0, "reason": "unindexed"
-            })
+    for pan, rlist in refl_by_panel.items():
+        plist = peaks_by_panel.get(pan, [])
+        if plist:
+            p_arr = np.asarray(plist, dtype=float)  # columns: fs, ss, inten
+            p_fs, p_ss, p_int = p_arr[:,0], p_arr[:,1], p_arr[:,2]
         else:
-            rows.append(None)  # placeholder to be filled after compute
-            idx_row = len(rows) - 1
-            indexed_meta.append((idx_row, ch.image, ch.event, ch.det_dx_mm, ch.det_dy_mm))
-            indexed_payload.append((ch.peaks, ch.refls, mr, sg))
+            p_fs = p_ss = p_int = np.empty((0,), float)
 
-    # 2) Compute wRMSD (serial or parallel)
+        r_arr = np.asarray(rlist, dtype=float) if rlist else np.empty((0,2), float)
+        r_fs = r_arr[:,0] if r_arr.size else np.empty((0,), float)
+        r_ss = r_arr[:,1] if r_arr.size else np.empty((0,), float)
+
+        wr_p, n_matches_p, n_kept_p, kd, kw = _wrmsd_one_panel_peak_primary(
+            p_fs, p_ss, p_int, r_fs, r_ss, mr, sg
+        )
+        total_matches += n_matches_p
+        total_kept += n_kept_p
+        if kd.size:
+            kept_all.append((kd, kw))
+
+
+    if total_kept == 0:
+        return ChunkRow(img, ev, dx, dy, 1, None, total_matches, 0, "no_within_radius_or_all_outliers")
+
+    # concatenate distances and weights from all panels
+    kd_all = np.concatenate([kd for (kd, kw) in kept_all])
+    kw_all = np.concatenate([kw for (kd, kw) in kept_all])
+    wsum = float(kw_all.sum())
+    if wsum <= 0.0:
+        return ChunkRow(img, ev, dx, dy, 1, None, total_matches, total_kept, "zero_weight")
+
+    wr_all = float(np.sqrt((kw_all * (kd_all ** 2)).sum() / wsum))
+    return ChunkRow(img, ev, dx, dy, 1, wr_all, total_matches, total_kept, "")
+
+# ---------------- Chunk discovery via mmap ----------------
+
+def get_chunks(path: str):
+    with open(path, "rb") as f:
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+
+    begins = [m.start() for m in RE_BEGIN_CHUNK_B.finditer(mm)]
+    ends   = [m.end()   for m in RE_END_CHUNK_B.finditer(mm)]
+
+    # Pair each begin with the first end after it
+    bounds = []
+    j = 0
+    for a in begins:
+        while j < len(ends) and ends[j] <= a:
+            j += 1
+        if j < len(ends):
+            b = ends[j]
+            if a < b:
+                bounds.append((a, b))
+            j += 1
+    return mm, bounds
+
+# ---------------- Main ----------------
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Fast, panel-aware evaluator for CrystFEL .stream files.")
+    # ap.add_argument("--run-root", required=True, help="Experiment root containing 'runs/'")
+    # ap.add_argument("--run", required=True, help="Run number, e.g. 000")
+    ap.add_argument("--run-root", default=DEFAULT_ROOT, help="Experiment root containing 'runs/'")
+    ap.add_argument("--run", default=DEFAULT_RUN, help="Run number, e.g. 000")
+    ap.add_argument("--mr", type=float, default=4.0, help="Match radius for peak↔refl (pixels)")
+    ap.add_argument("--sg", type=float, default=2.0, help="Sigma for outlier clipping")
+    ap.add_argument("--workers", type=int, default=os.cpu_count(), help="Processes (default: cpu_count)")
+    args = ap.parse_args(argv if argv is not None else sys.argv[1:])
+
+    run_root = os.path.abspath(os.path.expanduser(args.run_root))
+    run_dir  = os.path.join(run_root, "runs", f"run_{int(args.run):03d}")
+    stream_path = os.path.join(run_dir, f"stream_{int(args.run):03d}.stream")
+
+    print("Run root :", run_root)
+    print("Run      :", f"{int(args.run):03d}")
+    print("Run dir  :", run_dir)
+
+    mm, bounds = get_chunks(stream_path)
+    print(f"[scan] found {len(bounds)} chunks in stream")
+
     workers = max(1, int(args.workers))
-    if workers == 1 or len(indexed_payload) == 0:
-        # serial path
-        for (irow, img, ev, dxmm, dymm), payload in zip(indexed_meta, indexed_payload):
-            wr, nm, nk, reason = _compute_wrmsd_worker(payload)
-            if wr is not None: wr_vals.append(wr)
-            rows[irow] = {
-                "image": img or "", "event": ev or "",
-                "det_shift_x_mm": (f"{dxmm:.6f}" if dxmm is not None else ""),
-                "det_shift_y_mm": (f"{dymm:.6f}" if dymm is not None else ""),
-                "indexed": 1, "wrmsd": (f"{wr:.6f}" if wr is not None else ""),
-                "n_matches": nm, "n_kept": nk, "reason": (reason or "")
-            }
+    n_tasks = len(bounds)
+    workers = min(workers, n_tasks) if n_tasks > 0 else workers
+    if workers > 1 and n_tasks > 0:
+        print(f"[mp] Using {workers} workers for {n_tasks} chunk(s)")
+
+    rows = []
+    if workers == 1:
+        for (a, b) in bounds:
+            rows.append(parse_chunk_text(mm[a:b], args.mr, args.sg))
     else:
+        # Batch to limit outstanding futures
+        BATCH = 4000
         with ProcessPoolExecutor(max_workers=workers) as ex:
-            futs = [ex.submit(_compute_wrmsd_worker, payload) for payload in indexed_payload]
-            for (irow, img, ev, dxmm, dymm), fut in zip(indexed_meta, futs):
-                wr, nm, nk, reason = fut.result()
-                if wr is not None: wr_vals.append(wr)
-                rows[irow] = {
-                    "image": img or "", "event": ev or "",
-                    "det_shift_x_mm": (f"{dxmm:.6f}" if dxmm is not None else ""),
-                    "det_shift_y_mm": (f"{dymm:.6f}" if dymm is not None else ""),
-                    "indexed": 1, "wrmsd": (f"{wr:.6f}" if wr is not None else ""),
-                    "n_matches": nm, "n_kept": nk, "reason": (reason or "")
-                }
-    csv_path = os.path.join(run_dir, f"chunk_metrics_{run_str}.csv")
-    write_csv(csv_path, rows, header=[
-            "image","event","det_shift_x_mm","det_shift_y_mm",
-            "indexed","wrmsd","n_matches","n_kept","reason"
-        ])
-    sum_path = os.path.join(run_dir, f"summary_{run_str}.txt")
+            for i in range(0, len(bounds), BATCH):
+                futs = [ex.submit(parse_chunk_text, mm[a:b], args.mr, args.sg) for (a, b) in bounds[i:i+BATCH]]
+                for fut in futs:
+                    try:
+                        rows.append(fut.result())
+                    except Exception as e:
+                        rows.append(ChunkRow("", "", None, None, 0, None, 0, 0, f"worker_error:{e}"))
+
+    # Write outputs
+    import csv
+    csv_path = os.path.join(run_dir, f"chunk_metrics_{int(args.run):03d}.csv")
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["image","event","det_shift_x_mm","det_shift_y_mm","indexed","wrmsd","n_matches","n_kept","reason"])
+        for r in rows:
+            w.writerow([r.image, r.event, f"{r.det_dx_mm:.6f}" if r.det_dx_mm is not None else "",
+                        f"{r.det_dy_mm:.6f}" if r.det_dy_mm is not None else "",
+                        r.indexed, f"{r.wrmsd:.6f}" if r.wrmsd is not None else "", r.n_matches, r.n_kept, r.reason])
+    print(f"Wrote: {csv_path}")
+
+    # Summary
+    n_chunks = len(rows)
+    n_indexed = sum(r.indexed for r in rows)
+    finite_wr = [r.wrmsd for r in rows if (r.wrmsd is not None and np.isfinite(r.wrmsd))]
+    wr_best = (min(finite_wr) if finite_wr else None)
+    wr_med  = (float(np.median(finite_wr)) if finite_wr else None)
+
+    sum_path = os.path.join(run_dir, f"summary_{int(args.run):03d}.txt")
     with open(sum_path, "w", encoding="utf-8") as f:
-        def _summ(vs: List[float]) -> str:
-                if not vs: return "n=0"
-                a = np.asarray(vs, dtype=np.float64)
-                return f"n={a.size} min={a.min():.3f} q25={np.quantile(a,0.25):.3f} med={np.median(a):.3f} q75={np.quantile(a,0.75):.3f} mean={a.mean():.3f} max={a.max():.3f}"
-        f.write("=== Step 3 Summary ===\n")
-        f.write(f"Run dir: {run_dir}\n")
-        f.write(f"Total chunks: {n_chunks}\n")
-        f.write(f"Indexed (by header): {n_found_refl_hdr}\n")
-        f.write(f"Chunks with refl lines: {n_any_refls}\n")
-        f.write(f"Chunks with peak lines: {n_any_peaks}\n")
-        f.write(f"Index rate: {(100.0*n_found_refl_hdr/n_chunks if n_chunks>0 else 0.0):.2f}%\n")
-        f.write(f"WRMSD: {_summ(wr_vals)}\n")
-        dbg_path = os.path.join(run_dir, f"parse_debug_{run_str}.txt")
-        with open(dbg_path, "w", encoding="utf-8") as f:
-            f.write("Debug counters:\n")
-            f.write(f"  Total chunks parsed:         {n_chunks}\n")
-            f.write(f"  Chunks with 'Reflections...' header: {n_found_refl_hdr}\n")
-            f.write(f"  Chunks with refl lines:      {n_any_refls}\n")
-            f.write(f"  Chunks with peak lines:      {n_any_peaks}\n")
-            f.write(f"  Indexed counted:             {n_indexed}\n")
-        print(f"Wrote: {csv_path}")
-        print(f"Wrote: {sum_path}")
-        print(f"Wrote: {dbg_path}")
-        return 0
+        f.write(f"chunks={n_chunks}\nindexed={n_indexed}\n")
+        f.write(f"wrmsd_best={wr_best if wr_best is not None else ''}\n")
+        f.write(f"wrmsd_median={wr_med if wr_med is not None else ''}\n")
+    print(f"Wrote: {sum_path}")
+
+    dbg_path = os.path.join(run_dir, f"parse_debug_{int(args.run):03d}.txt")
+    with open(dbg_path, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(f"{r.image},{r.event},{r.det_dx_mm},{r.det_dy_mm},{r.indexed},{r.wrmsd},{r.n_matches},{r.n_kept},{r.reason}\n")
+    print(f"Wrote: {dbg_path}")
+
+    return 0
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    raise SystemExit(main())

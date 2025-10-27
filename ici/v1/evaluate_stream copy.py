@@ -7,15 +7,22 @@ Now includes det_shift_x_mm / det_shift_y_mm in the CSV.
 from __future__ import annotations
 import argparse, os, sys, csv, re, math
 from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-DEFAULT_RUN = "004"  # will be zero-padded to width 3 at runtime
-DEFAULT_MATCH_RADIUS = 4.0
-DEFAULT_OUTLIER_SIGMA = 2.0
+# Avoid BLAS/OMP oversubscription when using multiprocessing
+import os as _os_env_patch
+_os_env_patch.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+_os_env_patch.environ.setdefault("MKL_NUM_THREADS", "1")
+_os_env_patch.environ.setdefault("OMP_NUM_THREADS", "1")
+_os_env_patch.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
+
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_RUN = "000"  # will be zero-padded to width 3 at runtime
 
 FLOAT_RE = r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?"
 RE_BEGIN_CHUNK   = re.compile(r"-{3,}\s*Begin\s+chunk\s*-{3,}", re.IGNORECASE)
@@ -123,6 +130,12 @@ def compute_wrmsd_details(
         return None, n_matches, n_kept, "nan_inf"
     return float(wr), n_matches, n_kept, None
 
+# Helper for multiprocessing: simple wrapper for compute_wrmsd_details
+def _compute_wrmsd_worker(args):
+    peaks, refls, match_radius, outlier_sigma = args
+    return compute_wrmsd_details(peaks, refls, match_radius, outlier_sigma)
+
+
 def parse_stream(stream_path: str) -> Iterable[Chunk]:
     # cid = 0
     ch: Optional[Chunk] = None
@@ -214,18 +227,21 @@ def write_csv(path: str, rows: List[Dict[str, object]], header: List[str]) -> No
 
 def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description="Parse stream_<run>.stream and compute per-chunk wRMSD (robust).")
-    ap.add_argument("--run-root", help='Root folder that contains runs/run_<run>')
-    ap.add_argument("--run", help='Run identifier (e.g., "0", "3", "12", "003"); will be zero-padded to width 3')
-    ap.add_argument("--match-radius", type=float, default=DEFAULT_MATCH_RADIUS)
-    ap.add_argument("--sigma", type=float, default=DEFAULT_OUTLIER_SIGMA)
-
+    ap.add_argument("--run-root", default=DEFAULT_ROOT, help='Root folder that contains runs/run_<run>')
+    ap.add_argument("--run", default=DEFAULT_RUN, help='Run identifier (e.g., "0", "3", "12", "003"); will be zero-padded to width 3')
+    ap.add_argument("--mr", type=float, default=4.0, help="Match radius for peak↔refl (pixels)")
+    ap.add_argument("--sg", type=float, default=2.0, help="Sigma for outlier clipping")
+    ap.add_argument("--workers", type=int, default=os.cpu_count(),
+                help="Worker processes for wRMSD compute (default: CPU count; use 1 to disable parallelism)")
     args = ap.parse_args(argv)
 
     # Resolve parameters (defaults if not provided)
     run_root = args.run_root if args.run_root else DEFAULT_ROOT
     run_str  = _normalize_run(args.run if args.run else DEFAULT_RUN)
-    mr = float(args.match_radius)
-    sg = float(args.sigma)
+    # mr = float(args.match_radius)
+    # sg = float(args.sigma)
+    mr = float(args.mr)
+    sg = float(args.sg)
 
     # Construct paths from resolved values
     run_dir = os.path.join(run_root, "runs", f"run_{run_str}")
@@ -239,10 +255,15 @@ def main(argv: List[str]) -> int:
         print(f"ERROR: not found: {stream_path}", file=sys.stderr)
         return 2
 
+    
     rows: List[Dict[str, object]] = []
     wr_vals: List[float] = []
     n_chunks = n_any_peaks = n_found_refl_hdr = n_any_refls = n_indexed = 0
 
+    indexed_payload = []   # (peaks, refls, mr, sg)
+    indexed_meta = []      # (row_index, image, event, det_dx_mm, det_dy_mm)
+
+    # 1) Parse and stage
     for ch in parse_stream(stream_path):
         n_chunks += 1
         if ch.peaks: n_any_peaks += 1
@@ -257,27 +278,56 @@ def main(argv: List[str]) -> int:
                 "det_shift_y_mm": (f"{ch.det_dy_mm:.6f}" if ch.det_dy_mm is not None else ""),
                 "indexed": 0, "wrmsd": "", "n_matches": 0, "n_kept": 0, "reason": "unindexed"
             })
-            continue
-        wr, nm, nk, reason = compute_wrmsd_details(ch.peaks, ch.refls, mr, sg)
-        if wr is not None: wr_vals.append(wr)
-        rows.append({
-            "image": ch.image or "", "event": ch.event or "",
-            "det_shift_x_mm": (f"{ch.det_dx_mm:.6f}" if ch.det_dx_mm is not None else ""),
-            "det_shift_y_mm": (f"{ch.det_dy_mm:.6f}" if ch.det_dy_mm is not None else ""),
-            "indexed": 1, "wrmsd": (f"{wr:.6f}" if wr is not None else ""),
-            "n_matches": nm, "n_kept": nk, "reason": (reason or "")
-        })
+        else:
+            rows.append(None)  # placeholder to be filled after compute
+            idx_row = len(rows) - 1
+            indexed_meta.append((idx_row, ch.image, ch.event, ch.det_dx_mm, ch.det_dy_mm))
+            indexed_payload.append((ch.peaks, ch.refls, mr, sg))
+
+    # 2) Compute wRMSD (serial or parallel)
+    workers = max(1, int(args.workers))
+    if workers == 1 or len(indexed_payload) == 0:
+        # serial path
+        for (irow, img, ev, dxmm, dymm), payload in zip(indexed_meta, indexed_payload):
+            wr, nm, nk, reason = _compute_wrmsd_worker(payload)
+            if wr is not None: wr_vals.append(wr)
+            rows[irow] = {
+                "image": img or "", "event": ev or "",
+                "det_shift_x_mm": (f"{dxmm:.6f}" if dxmm is not None else ""),
+                "det_shift_y_mm": (f"{dymm:.6f}" if dymm is not None else ""),
+                "indexed": 1, "wrmsd": (f"{wr:.6f}" if wr is not None else ""),
+                "n_matches": nm, "n_kept": nk, "reason": (reason or "")
+            }
+    else:
+            
+    # Clamp workers to number of tasks and show a helpful log
+        n_tasks = len(indexed_payload)
+        workers = min(workers, n_tasks) if n_tasks > 0 else workers
+        if workers > 1 and n_tasks > 0:
+            print(f"[mp] Using {workers} workers for {n_tasks} indexed chunk(s)")
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+                    futs = [ex.submit(_compute_wrmsd_worker, payload) for payload in indexed_payload]
+                    for (irow, img, ev, dxmm, dymm), fut in zip(indexed_meta, futs):
+                        wr, nm, nk, reason = fut.result()
+                        if wr is not None: wr_vals.append(wr)
+                        rows[irow] = {
+                            "image": img or "", "event": ev or "",
+                            "det_shift_x_mm": (f"{dxmm:.6f}" if dxmm is not None else ""),
+                            "det_shift_y_mm": (f"{dymm:.6f}" if dymm is not None else ""),
+                            "indexed": 1, "wrmsd": (f"{wr:.6f}" if wr is not None else ""),
+                            "n_matches": nm, "n_kept": nk, "reason": (reason or "")
+                    }
     csv_path = os.path.join(run_dir, f"chunk_metrics_{run_str}.csv")
     write_csv(csv_path, rows, header=[
-        "image","event","det_shift_x_mm","det_shift_y_mm",
-        "indexed","wrmsd","n_matches","n_kept","reason"
-    ])
+            "image","event","det_shift_x_mm","det_shift_y_mm",
+            "indexed","wrmsd","n_matches","n_kept","reason"
+        ])
     sum_path = os.path.join(run_dir, f"summary_{run_str}.txt")
     with open(sum_path, "w", encoding="utf-8") as f:
         def _summ(vs: List[float]) -> str:
-            if not vs: return "n=0"
-            a = np.asarray(vs, dtype=np.float64)
-            return f"n={a.size} min={a.min():.3f} q25={np.quantile(a,0.25):.3f} med={np.median(a):.3f} q75={np.quantile(a,0.75):.3f} mean={a.mean():.3f} max={a.max():.3f}"
+                if not vs: return "n=0"
+                a = np.asarray(vs, dtype=np.float64)
+                return f"n={a.size} min={a.min():.3f} q25={np.quantile(a,0.25):.3f} med={np.median(a):.3f} q75={np.quantile(a,0.75):.3f} mean={a.mean():.3f} max={a.max():.3f}"
         f.write("=== Step 3 Summary ===\n")
         f.write(f"Run dir: {run_dir}\n")
         f.write(f"Total chunks: {n_chunks}\n")
@@ -286,18 +336,18 @@ def main(argv: List[str]) -> int:
         f.write(f"Chunks with peak lines: {n_any_peaks}\n")
         f.write(f"Index rate: {(100.0*n_found_refl_hdr/n_chunks if n_chunks>0 else 0.0):.2f}%\n")
         f.write(f"WRMSD: {_summ(wr_vals)}\n")
-    dbg_path = os.path.join(run_dir, f"parse_debug_{run_str}.txt")
-    with open(dbg_path, "w", encoding="utf-8") as f:
-        f.write("Debug counters:\n")
-        f.write(f"  Total chunks parsed:         {n_chunks}\n")
-        f.write(f"  Chunks with 'Reflections...' header: {n_found_refl_hdr}\n")
-        f.write(f"  Chunks with refl lines:      {n_any_refls}\n")
-        f.write(f"  Chunks with peak lines:      {n_any_peaks}\n")
-        f.write(f"  Indexed counted:             {n_indexed}\n")
-    print(f"Wrote: {csv_path}")
-    print(f"Wrote: {sum_path}")
-    print(f"Wrote: {dbg_path}")
-    return 0
+        dbg_path = os.path.join(run_dir, f"parse_debug_{run_str}.txt")
+        with open(dbg_path, "w", encoding="utf-8") as f:
+            f.write("Debug counters:\n")
+            f.write(f"  Total chunks parsed:         {n_chunks}\n")
+            f.write(f"  Chunks with 'Reflections...' header: {n_found_refl_hdr}\n")
+            f.write(f"  Chunks with refl lines:      {n_any_refls}\n")
+            f.write(f"  Chunks with peak lines:      {n_any_peaks}\n")
+            f.write(f"  Indexed counted:             {n_indexed}\n")
+        print(f"Wrote: {csv_path}")
+        print(f"Wrote: {sum_path}")
+        print(f"Wrote: {dbg_path}")
+        return 0
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

@@ -22,38 +22,38 @@ import argparse, os, re, subprocess, sys
 from typing import List, Tuple
 
 # -------- Default config MacOS (applies ONLY when run with NO CLI args) --------
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-DEFAULT_H5   = DEFAULT_ROOT + "/sim.h5"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+# DEFAULT_H5   = DEFAULT_ROOT + "/sim.h5"
 
 # -------- Default config WSL(applies ONLY when run with NO CLI args) --------
-# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
-# DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
+DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
 
 # Propose Next Shifts defaults
 # Expanding ring search parameters
-R_MAX_DEFAULT = 0.02
-R_STEP_DEFAULT = 0.01
+R_MAX_DEFAULT = 0.06
+R_STEP_DEFAULT = 0.02
 K_BASE_DEFAULT = 20.0
 # Nelder Mead parameters:
-DELTA_LOCAL_DEFAULT = 0.01
+DELTA_LOCAL_DEFAULT = 0.005
 LOCAL_PATIENCE_DEFAULT = 3
 SEED_DEFAULT = 1337
 CONVERGE_TOL_DEFAULT = 1e-4
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    # "--peaks=cxi",
-    "--peaks=peakfinder9",
-    "--min-snr-biggest-pix=1",
-    "--min-snr-peak-pix=6",
-    "--min-snr=1",
-    "--min-sig=11",
-    "--min-peak-over-neighbour=-inf",
-    "--local-bg-radius=3",
+    "--peaks=cxi",
+    # "--peaks=peakfinder9",
+    # "--min-snr-biggest-pix=1",
+    # "--min-snr-peak-pix=6",
+    # "--min-snr=1",
+    # "--min-sig=11",
+    # "--min-peak-over-neighbour=-inf",
+    # "--local-bg-radius=3",
     # Other
     "-j", "24",
     "--min-peaks=15",
@@ -64,7 +64,6 @@ DEFAULT_FLAGS = [
     "--int-radius=4,5,9",
     "--no-half-pixel-shift",
     "--no-non-hits-in-stream",
-    "--no-retry",
     "--fix-profile-radius=70000000",
     "--indexing=xgandalf",
     "--integration=rings",
@@ -160,7 +159,8 @@ def do_init_sequence(run_root: str):
     run_py("build_early_break_from_log.py", ["--run-root", os.path.join(run_root, "runs")])
     print("[done] Initialization cycle complete. Proceeding to loop...")
 
-def iterate_until_done(run_root: str, max_iters: int, skip_fix_stream: bool):
+# def iterate_until_done(run_root: str, max_iters: int, skip_fix_stream: bool):
+def iterate_until_done(run_root: str, max_iters: int):
     rd = runs_dir(run_root)
     it = 0
     while it < max_iters:
@@ -177,10 +177,23 @@ def iterate_until_done(run_root: str, max_iters: int, skip_fix_stream: bool):
             print("[warn] No rows detected in image_run_log.csv; stopping.")
             break
 
-        # 2) if all next_* for latest are 'done' -> break
+        # # 2) if all next_* for latest are 'done' -> break
+        # if all_next_done_for_latest(log_path, latest_in_log):
+        #     print(f"[stop] All next_* entries for run_{latest_in_log:03d} are 'done'.")
+        #     break
+        # Modified 2024-06-06: rename early_break.stream → done.stream if exists, then break
         if all_next_done_for_latest(log_path, latest_in_log):
             print(f"[stop] All next_* entries for run_{latest_in_log:03d} are 'done'.")
+
+            # rename early_break.stream → done.stream if it exists
+            early_stream = os.path.join(rd, "early_break.stream")
+            done_stream = os.path.join(rd, "done.stream")
+            if os.path.exists(early_stream):
+                os.rename(early_stream, done_stream)
+                print(f"[rename] {early_stream} → {done_stream}")
+
             break
+
 
         # 3) else build overlays & list for next iteration
         run_py("build_overlays_and_list.py", ["--run-root", run_root])
@@ -200,8 +213,7 @@ def iterate_until_done(run_root: str, max_iters: int, skip_fix_stream: bool):
         run_py("run_sh.py", ["--run-root", run_root, "--run", run_str], check=False)
 
         # fix_stream_paths.py on latest (inplace)
-        if not skip_fix_stream:
-            _ = run_py("fix_stream_paths.py", ["--run-dir", latest_dir, "--run", run_str, "--inplace"], check=False)
+        _ = run_py("fix_stream_paths.py", ["--run-dir", latest_dir, "--run", run_str, "--inplace"], check=False)
 
         # evaluate_stream.py on latest
         run_py("evaluate_stream.py", ["--run-root", run_root, "--run", run_str], check=False)
@@ -220,7 +232,6 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Orchestrate SerialED iterative runs using provided helper scripts.")
     ap.add_argument("--run-root", default=DEFAULT_ROOT, help="Experiment root that contains 'runs/'.")
     ap.add_argument("--max-iters", type=int, default=100, help="Safety cap on loop iterations.")
-    ap.add_argument("--skip-fix-stream", action="store_true", default=False, help="Skip fix_stream_paths.py step.")
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
     run_root = os.path.abspath(os.path.expanduser(args.run_root))
@@ -231,7 +242,7 @@ def main(argv=None):
         do_init_sequence(run_root)
 
     # Iterate until all next_* == done
-    iterate_until_done(run_root, args.max_iters, args.skip_fix_stream)
+    iterate_until_done(run_root, args.max_iters)
 
 if __name__ == "__main__":
     sys.exit(main())
