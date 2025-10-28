@@ -49,12 +49,10 @@ DEFAULT_RUN_ROOT = "/home/bubl3932/files/ici_trials/runs"
 DEFAULT_LOG_NAME = "image_run_log.csv"
 DEFAULT_OUT_NAME = "early_break.stream"
 
-
 # ----------------------------- Helpers -----------------------------
 
 def _abs(s: str) -> str:
     return os.path.abspath(os.path.expanduser(s.strip()))
-
 
 def _flt(s: str) -> Optional[float]:
     try:
@@ -63,10 +61,8 @@ def _flt(s: str) -> Optional[float]:
     except Exception:
         return None
 
-
 def run_stream_path(run_root: str, run_n: int) -> str:
     return os.path.join(run_root, f"run_{run_n:03d}", f"stream_{run_n:03d}.stream")
-
 
 # ------------------------- Log Parsing ----------------------------
 

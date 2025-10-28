@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-build_overlays_and_list.py (adjusted)
+build_overlays_and_list.py 
 
 From image_run_log.csv (latest run only), create per-source overlay HDF5 files
 (named with the next run number) and a lst_XXX.lst that lists lines like:

@@ -70,13 +70,14 @@ def _find_latest_run_dir(runs_dir: str) -> Tuple[int, str]:
     return last_n, last_dir
 
 def _parse_log_into_sections(lines: List[str]) -> Tuple[str, "OD[Tuple[str,int], List[str]]"]:
-    # \"\"\"
-    # Parse existing log lines into:
-    #   - top_header: the CSV header line (or CSV_HEADER if missing)
-    #   - sections: OrderedDict mapping (abs_path, event) -> list of lines
-    #     (includes the section header line as the first element).
-    # Any non-section lines appearing before the first section (besides header) are preserved after header.
-    # \"\"\"
+    """
+    Parse existing log lines into:
+      - top_header: the CSV header line (or CSV_HEADER if missing)
+      - sections: OrderedDict mapping (abs_path, event) -> list of lines
+        (includes the section header line as the first element).
+    Any non-section lines appearing before the first section (besides header) are preserved after header.
+    """
+    
     sections: "OD[Tuple[str,int], List[str]]" = OD()
     i = 0
     top_header = CSV_HEADER

@@ -4,7 +4,8 @@
 """
 run_sh.py
 
-Step 2: run the command script (sh_<run>.sh) for the selected run and return.
+Usage:
+  python run_sh.py [--run-root <path>] [--run <run>]
 
 Defaults (no args):
   RUN ROOT = "/home/bubl3932/files/ici_trials"
@@ -16,7 +17,6 @@ Defaults (no args):
 import argparse, os, sys, subprocess
 from pathlib import Path
 
-# DEFAULTS (kept exactly as provided)
 DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 # DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
 DEFAULT_RUN = "001"
@@ -87,7 +87,6 @@ def main(argv):
 
     rc = run_script(run_dir, run)
     return rc
-
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

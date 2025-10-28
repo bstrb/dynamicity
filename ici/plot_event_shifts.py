@@ -88,64 +88,6 @@ def pick_groups(groups, event: int, image_substr: Optional[str]) -> List[Tuple[s
         keys.append((path, ev))
     return keys
 
-# def plot_group(path: str, event: int, rows: List[Row], outdir: str, dpi: int = 150, annotate: bool = True) -> str:
-#     xs = [r[1] for r in rows]
-#     ys = [r[2] for r in rows]
-#     runs = [r[0] for r in rows]
-#     wrs = [r[4] for r in rows]
-#     idx = [r[3] for r in rows]
-
-#     # Prepare color mapping for wRMSD: only pass finite values; others will be plotted separately
-#     finite_mask = [ (w is not None) for w in wrs ]
-#     xs_f = [x for x, m in zip(xs, finite_mask) if m]
-#     ys_f = [y for y, m in zip(ys, finite_mask) if m]
-#     wrs_f = [w for w in wrs if w is not None]
-
-#     xs_nf = [x for x, m in zip(xs, finite_mask) if not m]
-#     ys_nf = [y for y, m in zip(ys, finite_mask) if not m]
-
-#     plt.figure(figsize=(6,6))
-
-#     # Draw tried positions in order
-#     plt.plot(xs, ys, marker="o")  # default style, connects in order
-
-#     # Overlay: color by wRMSD for finite values with a colorbar
-#     sc = None
-#     if wrs_f:
-#         sc = plt.scatter(xs_f, ys_f, c=wrs_f)  # default colormap, default style
-#         cb = plt.colorbar(sc)
-#         cb.set_label("wRMSD")
-
-#         # Highlight best (finite) wRMSD
-#         best_idx = min(range(len(wrs)), key=lambda i: float("inf") if wrs[i] is None else wrs[i])
-#         plt.scatter([xs[best_idx]], [ys[best_idx]], marker="*", s=160)  # larger star
-
-#     # Overlay: non-finite wrmsd (if any)
-#     if xs_nf:
-#         plt.scatter(xs_nf, ys_nf, marker="x")  # default style
-
-#     # Annotate run numbers to see sequence
-#     if annotate:
-#         for x, y, rn in zip(xs, ys, runs):
-#             plt.text(x, y, str(rn), fontsize=8, ha="left", va="bottom")
-
-#     # Axes and aspect
-#     plt.axhline(0, linewidth=0.8)
-#     plt.axvline(0, linewidth=0.8)
-#     plt.gca().set_aspect("equal", adjustable="box")
-#     plt.xlabel("det_shift_x_mm")
-#     plt.ylabel("det_shift_y_mm")
-#     title = f"{os.path.basename(path)} — event {event}"
-#     plt.title(title)
-#     plt.tight_layout()
-
-#     # Save
-#     base = os.path.splitext(os.path.basename(path))[0]
-#     out_png = os.path.join(outdir, f"{base}_event_{event}_shifts.png")
-#     os.makedirs(outdir, exist_ok=True)
-#     plt.savefig(out_png, dpi=dpi)
-#     plt.close()
-#     return out_png
 def plot_group(path: str, event: int, rows: List[Row], outdir: str, dpi: int = 150, annotate: bool = True) -> str:
     # Unpack columns
     xs_abs = [r[1] for r in rows]

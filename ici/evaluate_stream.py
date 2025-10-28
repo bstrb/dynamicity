@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-evaluate_stream_fast.py  — panel-aware, robust & parallel
+evaluate_stream.py 
 
 Fast evaluator that preserves the correctness of your original parser:
 - Memory-maps the .stream and finds chunks via your Begin/End patterns.
@@ -137,30 +137,6 @@ def _wrmsd_one_panel_peak_primary(p_fs, p_ss, p_int, r_fs, r_ss,
 
     wr = float(np.sqrt((kw * (kd ** 2)).sum() / wsum))
     return wr, n_matches, n_kept, kd, kw
-
-# def _sigma_clip(res, sg=3.0):
-#     res = np.asarray(res, dtype=float)
-#     if res.size == 0:
-#         return res
-#     mu = np.median(res)
-#     mad = np.median(np.abs(res - mu)) + 1e-9
-#     z = (res - mu) / (1.4826 * mad)
-#     return res[np.abs(z) <= sg]
-
-# def _wrmsd_one_panel(peaks_xy, refl_xy, match_radius, outlier_sigma):
-#     if peaks_xy.size == 0 or refl_xy.size == 0:
-#         return None, 0, 0, np.empty((0,), float)
-#     D = np.sum((refl_xy[:,None,:] - peaks_xy[None,:,:])**2, axis=2)
-#     nn = np.argmin(D, axis=1)
-#     dists = np.sqrt(D[np.arange(refl_xy.shape[0]), nn])
-#     m = dists <= match_radius
-#     if not np.any(m):
-#         return None, int(refl_xy.shape[0]), 0, np.empty((0,), float)
-#     kept = _sigma_clip(dists[m], sg=outlier_sigma)
-#     if kept.size == 0:
-#         return None, int(np.sum(m)), 0, np.empty((0,), float)
-#     wr = float(np.sqrt(np.mean(kept**2)))
-#     return wr, int(refl_xy.shape[0]), int(kept.size), kept
 
 # ---------------- Per-chunk parser (panel-aware) ----------------
 

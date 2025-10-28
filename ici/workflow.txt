@@ -21,8 +21,6 @@ evaluate_stream.py on latest run in folder
 update_image_run_log.py
 build_early_break_from_log.py
 
-todo:
-multiprocessing for evaluate_stream
 
 SerialED Orchestrator — Workflow Overview
 ==========================================
