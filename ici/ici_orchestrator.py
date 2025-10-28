@@ -29,15 +29,15 @@ from typing import List, Tuple
 # DEFAULT_H5   = DEFAULT_ROOT + "/sim.h5"
 
 # -------- Default config WSL (applies ONLY when run with NO CLI args) --------
-# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
-# DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
+DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
 
-DEFAULT_ROOT = "/home/bubl3932/files/UOX1"
-DEFAULT_GEOM = DEFAULT_ROOT + "/UOX.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/UOX.cell"
-DEFAULT_H5   = DEFAULT_ROOT + "/UOX_His_MUA_450nm_spot4_ON_20240311_0928.h5"
+# DEFAULT_ROOT = "/home/bubl3932/files/UOX1"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/UOX.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/UOX.cell"
+# DEFAULT_H5   = DEFAULT_ROOT + "/UOX_His_MUA_450nm_spot4_ON_20240311_0928.h5"
 
 # Propose Next Shifts defaults
 # Expanding ring search parameters
@@ -87,11 +87,11 @@ DEFAULT_FLAGS = [
     "--xgandalf-sampling-pitch=5",
     "--xgandalf-grad-desc-iterations=1",
     "--xgandalf-tolerance=0.02",
-    "--int-radius=2,5,10",
+    "--int-radius=4,5,9",
     "--no-retry",
     "--no-half-pixel-shift",
     "--no-non-hits-in-stream",
-    "--fix-profile-radius=70000000",
+    # "--fix-profile-radius=70000000",
     "--indexing=xgandalf",
     "--integration=rings",
 ]
@@ -351,7 +351,6 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Orchestrate SerialED iterative runs using provided helper scripts.")
     ap.add_argument("--run-root", default=DEFAULT_ROOT, help="Experiment root that contains 'runs/'.")
     ap.add_argument("--max-iters", type=int, default=MAX_ITERS_DEFAULT, help="Safety cap on loop iterations.")
-
     ap.add_argument(
         "--h5", nargs="+", default=[DEFAULT_H5],
         help="One or more HDF5 sources or globs (e.g., sim_001.h5 sim_002.h5 or sim_*.h5)"
