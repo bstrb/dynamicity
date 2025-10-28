@@ -19,66 +19,8 @@ When runs exist (including after first init), iterate:
 """
 
 import argparse, os, re, subprocess, sys
-from typing import List, Tuple
-
-# --- begin: tiny tee-logger and timer (Change #1) --------------------
 import time, datetime, threading
-
-class _Tee:
-    """Mirror writes to both real stream and a file handle."""
-    def __init__(self, real_stream, fh):
-        self.real = real_stream
-        self.fh = fh
-        self._lock = threading.Lock()
-    def write(self, data):
-        with self._lock:
-            self.real.write(data)
-            self.fh.write(data)
-    def flush(self):
-        with self._lock:
-            self.real.flush()
-            self.fh.flush()
-
-class OrchestratorRunLogger:
-    """
-    Context manager that:
-      - creates runs/<timestamp>_orchestrator.log
-      - tees stdout/stderr to that file
-      - records start/end timestamps and total wall time
-    """
-    def __init__(self, runs_dir: str):
-        os.makedirs(runs_dir, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.log_path = os.path.join(runs_dir, f"{ts}_orchestrator.log")
-        self._fh = None
-        self._t0 = None
-        self._old_out = None
-        self._old_err = None
-
-    def __enter__(self):
-        self._fh = open(self.log_path, "w", encoding="utf-8")
-        self._t0 = time.perf_counter()
-        start_iso = datetime.datetime.now().isoformat(timespec="seconds")
-        self._fh.write(f"[orchestrator] start={start_iso}\n")
-        self._fh.flush()
-        # tee stdout/stderr
-        self._old_out, self._old_err = sys.stdout, sys.stderr
-        sys.stdout = _Tee(sys.stdout, self._fh)
-        sys.stderr = _Tee(sys.stderr, self._fh)
-        print(f"[orchestrator] logging to: {self.log_path}")
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        # restore
-        sys.stdout, sys.stderr = self._old_out, self._old_err
-        elapsed = time.perf_counter() - self._t0
-        end_iso = datetime.datetime.now().isoformat(timespec="seconds")
-        self._fh.write(f"[orchestrator] end={end_iso} elapsed_sec={elapsed:.3f}\n")
-        self._fh.close()
-        if exc:
-            print(f"[orchestrator] ERROR: {exc_type.__name__}: {exc}")
-        print(f"[orchestrator] total elapsed: {elapsed:.3f}s; log: {self.log_path}")
-# --- end: tiny tee-logger and timer ----------------------------------
+from typing import List, Tuple
 
 # -------- Default config MacOS (applies ONLY when run with NO CLI args) --------
 DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
@@ -145,6 +87,64 @@ DEFAULT_FLAGS = [
     "--indexing=xgandalf",
     "--integration=rings",
 ]
+
+# --- begin: tiny tee-logger and timer (Change #1) --------------------
+
+class _Tee:
+    """Mirror writes to both real stream and a file handle."""
+    def __init__(self, real_stream, fh):
+        self.real = real_stream
+        self.fh = fh
+        self._lock = threading.Lock()
+    def write(self, data):
+        with self._lock:
+            self.real.write(data)
+            self.fh.write(data)
+    def flush(self):
+        with self._lock:
+            self.real.flush()
+            self.fh.flush()
+
+class OrchestratorRunLogger:
+    """
+    Context manager that:
+      - creates runs/<timestamp>_orchestrator.log
+      - tees stdout/stderr to that file
+      - records start/end timestamps and total wall time
+    """
+    def __init__(self, runs_dir: str):
+        os.makedirs(runs_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_path = os.path.join(runs_dir, f"{ts}_orchestrator.log")
+        self._fh = None
+        self._t0 = None
+        self._old_out = None
+        self._old_err = None
+
+    def __enter__(self):
+        self._fh = open(self.log_path, "w", encoding="utf-8")
+        self._t0 = time.perf_counter()
+        start_iso = datetime.datetime.now().isoformat(timespec="seconds")
+        self._fh.write(f"[orchestrator] start={start_iso}\n")
+        self._fh.flush()
+        # tee stdout/stderr
+        self._old_out, self._old_err = sys.stdout, sys.stderr
+        sys.stdout = _Tee(sys.stdout, self._fh)
+        sys.stderr = _Tee(sys.stderr, self._fh)
+        print(f"[orchestrator] logging to: {self.log_path}")
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        # restore
+        sys.stdout, sys.stderr = self._old_out, self._old_err
+        elapsed = time.perf_counter() - self._t0
+        end_iso = datetime.datetime.now().isoformat(timespec="seconds")
+        self._fh.write(f"[orchestrator] end={end_iso} elapsed_sec={elapsed:.3f}\n")
+        self._fh.close()
+        if exc:
+            print(f"[orchestrator] ERROR: {exc_type.__name__}: {exc}")
+        print(f"[orchestrator] total elapsed: {elapsed:.3f}s; log: {self.log_path}")
+# --- end: tiny tee-logger and timer ----------------------------------
 
 def runs_dir(run_root: str) -> str:
     return os.path.join(os.path.abspath(os.path.expanduser(run_root)), "runs")
