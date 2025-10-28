@@ -22,16 +22,16 @@ import argparse, os, re, subprocess, sys
 from typing import List, Tuple
 
 # -------- Default config MacOS (applies ONLY when run with NO CLI args) --------
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-DEFAULT_H5   = DEFAULT_ROOT + "/sim.h5"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+# DEFAULT_H5   = DEFAULT_ROOT + "/sim.h5"
 
 # -------- Default config WSL(applies ONLY when run with NO CLI args) --------
-# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
-# DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
+DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
 
 # Propose Next Shifts defaults
 # Expanding ring search parameters
@@ -39,21 +39,21 @@ R_MAX_DEFAULT = 0.06
 R_STEP_DEFAULT = 0.02
 K_BASE_DEFAULT = 20.0
 # Nelder Mead parameters:
-DELTA_LOCAL_DEFAULT = 0.005
-LOCAL_PATIENCE_DEFAULT = 3
+# DELTA_LOCAL_DEFAULT = 0.005
+# LOCAL_PATIENCE_DEFAULT = 3
 SEED_DEFAULT = 1337
 CONVERGE_TOL_DEFAULT = 1e-4
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    # "--peaks=cxi",
-    "--peaks=peakfinder9",
-    "--min-snr-biggest-pix=1",
-    "--min-snr-peak-pix=6",
-    "--min-snr=1",
-    "--min-sig=11",
-    "--min-peak-over-neighbour=-inf",
-    "--local-bg-radius=3",
+    "--peaks=cxi",
+    # "--peaks=peakfinder9",
+    # "--min-snr-biggest-pix=1",
+    # "--min-snr-peak-pix=6",
+    # "--min-snr=1",
+    # "--min-sig=11",
+    # "--min-peak-over-neighbour=-inf",
+    # "--local-bg-radius=3",
     # Other
     "-j", "24",
     "--min-peaks=15",
