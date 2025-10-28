@@ -17,22 +17,27 @@ When runs exist (including after first init), iterate:
        update_image_run_log_grouped.py
        build_early_break_from_log.py
 """
-
+from glob import glob
 import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
 # -------- Default config MacOS (applies ONLY when run with NO CLI args) --------
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-DEFAULT_H5   = DEFAULT_ROOT + "/sim.h5"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+# DEFAULT_H5   = DEFAULT_ROOT + "/sim.h5"
 
 # -------- Default config WSL (applies ONLY when run with NO CLI args) --------
 # DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 # DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
 # DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
 # DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
+
+DEFAULT_ROOT = "/home/bubl3932/files/UOX1"
+DEFAULT_GEOM = DEFAULT_ROOT + "/UOX.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/UOX.cell"
+DEFAULT_H5   = DEFAULT_ROOT + "/UOX_His_MUA_450nm_spot4_ON_20240311_0928.h5"
 
 # Propose Next Shifts defaults
 # Expanding ring search parameters
@@ -63,16 +68,18 @@ BO_MAX_EVALS_LOCAL_DEFAULT = 40     # number of BO evaluations per iteration
 # --bo-ei-eps 1e-3 --converge-tol 1e-4 --bo-candidates 1000 --bo-bounds-frac 1.0 --bo-lengthscale-x 0.02 --bo-lengthscale-y 0.02
 
 # Default indexamajig / xgandalf / integration flags
+
+
 DEFAULT_FLAGS = [
     # Peakfinding
-    # "--peaks=cxi",
-    "--peaks=peakfinder9",
-    "--min-snr-biggest-pix=1",
-    "--min-snr-peak-pix=6",
-    "--min-snr=1",
-    "--min-sig=11",
-    "--min-peak-over-neighbour=-inf",
-    "--local-bg-radius=3",
+    "--peaks=cxi",
+    # "--peaks=peakfinder9",
+    # "--min-snr-biggest-pix=1",
+    # "--min-snr-peak-pix=6",
+    # "--min-snr=1",
+    # "--min-sig=11",
+    # "--min-peak-over-neighbour=-inf",
+    # "--local-bg-radius=3",
     # Other
     "-j", "24",
     "--min-peaks=15",
@@ -80,7 +87,8 @@ DEFAULT_FLAGS = [
     "--xgandalf-sampling-pitch=5",
     "--xgandalf-grad-desc-iterations=1",
     "--xgandalf-tolerance=0.02",
-    "--int-radius=4,5,9",
+    "--int-radius=2,5,10",
+    "--no-retry",
     "--no-half-pixel-shift",
     "--no-non-hits-in-stream",
     "--fix-profile-radius=70000000",
@@ -214,8 +222,37 @@ def all_next_done_for_latest(log_path: str, latest: int) -> bool:
     except FileNotFoundError:
         return False
 
-def do_init_sequence(run_root: str):
+# def do_init_sequence(run_root: str):
+#     print("[phase] No runs detected -> initializing run_000")
+#     run_py(
+#             "no_run_prep_singlelist.py",
+#             [
+#                 "--run-root", run_root,
+#                 "--geom", DEFAULT_GEOM,
+#                 "--cell", DEFAULT_CELL,
+#                 # optional: you can omit this since default is "indexamajig"
+#                 "--indexamajig", "indexamajig",
+#                 # positional sources (one or many)
+#                 DEFAULT_H5,
+#                 # everything after `--` gets forwarded as indexamajig flags
+#                 "--", *DEFAULT_FLAGS,
+#             ],
+#         )
+#     run_py("run_sh.py", ["--run-root", run_root, "--run", "000"], check=False)
+#     run_py("evaluate_stream.py", ["--run-root", run_root, "--run", "000"], check=False)
+#     run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
+#     run_py("build_early_break_from_log.py", ["--run-root", os.path.join(run_root, "runs")])
+#     print("[done] Initialization cycle complete. Proceeding to loop...")
+
+def do_init_sequence(run_root: str, h5_sources: list):
     print("[phase] No runs detected -> initializing run_000")
+    sources = []
+    for s in h5_sources:
+        matches = sorted(glob(s))
+        sources.extend(matches if matches else [s])
+
+    print(f"[init] using {len(sources)} HDF5 source(s):", *sources, sep="\n  ")
+
     run_py(
             "no_run_prep_singlelist.py",
             [
@@ -243,7 +280,11 @@ def iterate_until_done(run_root: str, max_iters: int):
     while it < max_iters:
         it += 1
 
-        print(f"\n[loop] Iteration {it}", flush=True)
+        # print(f"\n[loop] Iteration {it}", flush=True)
+
+        import datetime
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"\n[loop] Iteration {it} started at {ts}", flush=True)
 
         # 1) propose_next_shifts.py
         run_py("propose_next_shifts.py", ["--run-root", run_root, "--r-max", str(R_MAX_DEFAULT), "--r-step", str(R_STEP_DEFAULT), "--k-base", str(K_BASE_DEFAULT), "--seed", str(SEED_DEFAULT), "--converge-tol", str(CONVERGE_TOL_DEFAULT), "--bo-lengthscale-x", str(BO_LENGTHSCALE_X_DEFAULT), "--bo-lengthscale-y", str(BO_LENGTHSCALE_Y_DEFAULT), "--bo-noise", str(BO_NOISE_DEFAULT), "--bo-candidates", str(BO_CANDIDATES_DEFAULT), "--bo-ei-eps", str(BO_EI_EPS_DEFAULT), "--bo-max-evals-local", str(BO_MAX_EVALS_LOCAL_DEFAULT)])
@@ -310,6 +351,13 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Orchestrate SerialED iterative runs using provided helper scripts.")
     ap.add_argument("--run-root", default=DEFAULT_ROOT, help="Experiment root that contains 'runs/'.")
     ap.add_argument("--max-iters", type=int, default=MAX_ITERS_DEFAULT, help="Safety cap on loop iterations.")
+
+    ap.add_argument(
+        "--h5", nargs="+", default=[DEFAULT_H5],
+        help="One or more HDF5 sources or globs (e.g., sim_001.h5 sim_002.h5 or sim_*.h5)"
+    )
+
+
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
     run_root = os.path.abspath(os.path.expanduser(args.run_root))
@@ -319,7 +367,8 @@ def main(argv=None):
     with OrchestratorRunLogger(runs_dir(run_root)):
         # If no runs, initialize run_000 first
         if not list_run_numbers(run_root):
-            do_init_sequence(run_root)
+            # do_init_sequence(run_root)
+            do_init_sequence(run_root, args.h5)
 
         # Iterate until all next_* == done
         iterate_until_done(run_root, args.max_iters)
