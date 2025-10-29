@@ -23,16 +23,16 @@ import time, datetime, threading
 from typing import List, Tuple
 
 # -------- Default config MacOS (applies ONLY when run with NO CLI args) --------
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-# DEFAULT_H5   = DEFAULT_ROOT + "/sim.h5"
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_006"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5"]
 
 # -------- Default config WSL (applies ONLY when run with NO CLI args) --------
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
-DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
+# DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
 
 # DEFAULT_ROOT = "/home/bubl3932/files/UOX1"
 # DEFAULT_GEOM = DEFAULT_ROOT + "/UOX.geom"
@@ -49,37 +49,37 @@ CONVERGE_TOL_DEFAULT = 1e-4         # increase to stop when moves are tiny try 5
 MAX_ITERS_DEFAULT = 100             # safety cap on max iterations
 
 # BO parameters
-BO_LENGTHSCALE_X_DEFAULT = 0.02     # in mm about 0.36 pixels with 17 857 resolution. increase for smoother surrogate,
-BO_LENGTHSCALE_Y_DEFAULT = 0.02     # i.e less exploration. Try 0.03–0.05 if your wRMSD surface is gentle.
+BO_LENGTHSCALE_X_DEFAULT = 0.0001     # in mm about 0.02=0.36 pixels with 17 857 res. increase for smoother surrogate,
+BO_LENGTHSCALE_Y_DEFAULT = 0.0001     # i.e less exploration. Try 0.03–0.05 if your wRMSD surface is gentle.
 
-BO_NOISE_DEFAULT = 1e-4             # in wrmsd^2 units
-BO_CANDIDATES_DEFAULT = 800         # pick greedier steps to converge in fewer iterations i.e 200–400 instead of 800–1000.
-BO_EI_EPS_DEFAULT = 1e-3            # to stop earlier. Try 2e-3 or 5e-3 instead of 1e-3.
+BO_NOISE_DEFAULT = 3e-4 #1e-4       # in wrmsd^2 units
+BO_CANDIDATES_DEFAULT = 200         # pick greedier steps to converge in fewer iterations i.e 200–400 instead of 800–1000.
+BO_EI_EPS_DEFAULT = 2e-3#1e-3       # to stop earlier try 2e-3 or 5e-3 instead of 1e-3.
 BO_MAX_EVALS_LOCAL_DEFAULT = 40     # number of BO evaluations per iteration
 
 # Quick recipes
 # Finish ultra-fast (may miss tiny gains):
-# --bo-ei-eps 5e-3 --converge-tol 1e-3 --bo-candidates 200 --bo-bounds-frac 0.5 --bo-lengthscale-x 0.04 --bo-lengthscale-y 0.04
+# --bo-ei-eps 5e-3 --converge-tol 1e-3 --bo-candidates 200  --bo-lengthscale-x 0.04 --bo-lengthscale-y 0.04
 
 # Balanced:
-# --bo-ei-eps 3e-3 --converge-tol 5e-4 --bo-candidates 400 --bo-bounds-frac 0.75 --bo-lengthscale-x 0.03 --bo-lengthscale-y 0.03
+# --bo-ei-eps 3e-3 --converge-tol 5e-4 --bo-candidates 400  --bo-lengthscale-x 0.03 --bo-lengthscale-y 0.03
 
 # Thorough (slower):
-# --bo-ei-eps 1e-3 --converge-tol 1e-4 --bo-candidates 1000 --bo-bounds-frac 1.0 --bo-lengthscale-x 0.02 --bo-lengthscale-y 0.02
+# --bo-ei-eps 1e-3 --converge-tol 1e-4 --bo-candidates 1000  --bo-lengthscale-x 0.02 --bo-lengthscale-y 0.02
 
 # Default indexamajig / xgandalf / integration flags
 
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    "--peaks=cxi",
-    # "--peaks=peakfinder9",
-    # "--min-snr-biggest-pix=1",
-    # "--min-snr-peak-pix=6",
-    # "--min-snr=1",
-    # "--min-sig=11",
-    # "--min-peak-over-neighbour=-inf",
-    # "--local-bg-radius=3",
+    # "--peaks=cxi",
+    "--peaks=peakfinder9",
+    "--min-snr-biggest-pix=1",
+    "--min-snr-peak-pix=6",
+    "--min-snr=1",
+    "--min-sig=11",
+    "--min-peak-over-neighbour=-inf",
+    "--local-bg-radius=3",
     # Other
     "-j", "24",
     "--min-peaks=15",
@@ -222,28 +222,6 @@ def all_next_done_for_latest(log_path: str, latest: int) -> bool:
     except FileNotFoundError:
         return False
 
-# def do_init_sequence(run_root: str):
-#     print("[phase] No runs detected -> initializing run_000")
-#     run_py(
-#             "no_run_prep_singlelist.py",
-#             [
-#                 "--run-root", run_root,
-#                 "--geom", DEFAULT_GEOM,
-#                 "--cell", DEFAULT_CELL,
-#                 # optional: you can omit this since default is "indexamajig"
-#                 "--indexamajig", "indexamajig",
-#                 # positional sources (one or many)
-#                 DEFAULT_H5,
-#                 # everything after `--` gets forwarded as indexamajig flags
-#                 "--", *DEFAULT_FLAGS,
-#             ],
-#         )
-#     run_py("run_sh.py", ["--run-root", run_root, "--run", "000"], check=False)
-#     run_py("evaluate_stream.py", ["--run-root", run_root, "--run", "000"], check=False)
-#     run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
-#     run_py("build_early_break_from_log.py", ["--run-root", os.path.join(run_root, "runs")])
-#     print("[done] Initialization cycle complete. Proceeding to loop...")
-
 def do_init_sequence(run_root: str, h5_sources: list):
     print("[phase] No runs detected -> initializing run_000")
     sources = []
@@ -262,7 +240,7 @@ def do_init_sequence(run_root: str, h5_sources: list):
                 # optional: you can omit this since default is "indexamajig"
                 "--indexamajig", "indexamajig",
                 # positional sources (one or many)
-                DEFAULT_H5,
+                *sources,
                 # everything after `--` gets forwarded as indexamajig flags
                 "--", *DEFAULT_FLAGS,
             ],
@@ -352,7 +330,7 @@ def main(argv=None):
     ap.add_argument("--run-root", default=DEFAULT_ROOT, help="Experiment root that contains 'runs/'.")
     ap.add_argument("--max-iters", type=int, default=MAX_ITERS_DEFAULT, help="Safety cap on loop iterations.")
     ap.add_argument(
-        "--h5", nargs="+", default=[DEFAULT_H5],
+        "--h5", nargs="+", default=DEFAULT_H5,
         help="One or more HDF5 sources or globs (e.g., sim_001.h5 sim_002.h5 or sim_*.h5)"
     )
 
