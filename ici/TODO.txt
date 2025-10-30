@@ -1,9 +1,5 @@
 TODO:
-several h5 as input
 eta for each index run based on .lst and stderr
-progress feedback using early break stream
-log terminal output including runners output (not indexamajig)
 make gui
-print summary based on log at the end
 remove one of overlay to original(json or tsv(larger))
 remove parse_debug.txt in run folders

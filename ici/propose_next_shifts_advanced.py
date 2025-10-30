@@ -1,58 +1,32 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-propose_next_shifts.py  —  Hybrid Ring + Robust BO (GP+EI)
+propose_next_shifts.py (adjusted)
 
-Purpose
--------
-Drop-in replacement for your proposer that keeps the original grouped CSV I/O
-and "apply to latest run only" behavior, while combining the strongest parts
-from your original ring+local-refine and advanced pure-BO variants:
+Drop-in replacement that preserves the original grouped CSV parsing and
+"apply to latest run only" behavior, but improves local refinement after the
+first successful index using Bayesian Optimization (GP + EI) with:
 
-1) Expanding ring until the first successful, finite wRMSD ("indexed") frame.
-2) Robust Bayesian Optimization (anisotropic RBF GP + Expected Improvement)
-   for local refinement, with:
-   - Mixed local/global candidate sampling around the incumbent.
-   - Adaptive trust region (rho) from median distance of successful points.
-   - Optional annulus constraint when a likely radius is learned.
-   - Guard-rail filtering of EI candidates (bad mean unless variance large).
-   - One-time outward radial push if the first success is too central.
-   - Tiny cross seeding when data are very sparse.
-   - Backtrack to incumbent if a clear regression was just observed.
-   - Data-driven "done" check using a robust good-band threshold.
+- Mixed local/global EI candidate sampling (local_frac).
+- One-shot radial outward "push" when the first success is too central.
+- Optional tiny cross/line seeding around the incumbent when data are sparse.
+- Guard-rail filter for EI candidates with obviously bad predicted mean.
+- Optional annulus constraint once a likely radius is learned.
+- Backtrack on clear regressions (snap back toward the incumbent).
+- Robust "done" criterion based on dataset-derived wRMSD band (median + MAD).
 
-CLI (minimal knobs)
--------------------
-  --r-max, --r-step, --k-base     Ring geometry
-  --bo-...                        GP/BO knobs (lengthscales, noise, candidates, guards)
-  --bo-rho-...                    Trust region half-size bounds
-  --annulus-half                  Half-width of annulus (mm) around median radius of successes
-  --robust-done-*                 Stopping rule sensitivity
-
-CSV Format (unchanged)
-----------------------
-Header line:
-  run_n,det_shift_x_mm,det_shift_y_mm,indexed,wrmsd,next_dx_mm,next_dy_mm
-Section headers:
-  #/abs/path/to/file event <int>
-
-Each data row belongs to the most recent section header.
-
+This file is intended as a complete, self-contained replacement.
 """
 
 from __future__ import annotations
-import argparse
-import hashlib
-import math
-import os
-import sys
-import statistics
+import argparse, hashlib, math, os, sys, statistics
 from typing import Dict, List, Tuple, Optional
 
 import numpy as np
-from math import erf, sqrt
 
 # ----------------- Defaults -----------------
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
 R_MAX_DEFAULT = 0.05
 R_STEP_DEFAULT = 0.01
@@ -60,7 +34,9 @@ K_BASE_DEFAULT = 20.0
 SEED_DEFAULT = 1337
 CONVERGE_TOL_DEFAULT = 5e-4
 
-# ----------------- GP + EI -----------------
+# ----------------- BO2D code -----------------
+
+from math import erf, sqrt
 
 class BO2DConfig:
     def __init__(self,
@@ -86,12 +62,12 @@ class BO2DConfig:
         self.ann_r_med = None
         self.ann_half = None
 
+# --------- Gaussian Process (RBF anisotropic) + EI ---------
 
 def _rbf_aniso(X1: np.ndarray, X2: np.ndarray, lsx: float, lsy: float) -> np.ndarray:
     dx = (X1[:, None, 0] - X2[None, :, 0]) / max(lsx, 1e-12)
     dy = (X1[:, None, 1] - X2[None, :, 1]) / max(lsy, 1e-12)
     return np.exp(-0.5 * (dx * dx + dy * dy))
-
 
 def _gp_fit_predict(X: np.ndarray, y: np.ndarray, Xstar: np.ndarray, lsx: float, lsy: float, noise: float):
     # Center y for stability
@@ -108,17 +84,17 @@ def _gp_fit_predict(X: np.ndarray, y: np.ndarray, Xstar: np.ndarray, lsx: float,
     Ks = _rbf_aniso(X, Xstar, lsx, lsy)
     mu = Ks.T @ alpha + ymean
     v = _np.linalg.solve(L, Ks)
-    var = _np.maximum(0.0, 1.0 - _np.sum(v * v, axis=0))  # amplitude=1.0
+    # Kernel amplitude assumed 1.0
+    var = _np.maximum(0.0, 1.0 - _np.sum(v * v, axis=0))
     return mu, var
 
-
 def _phi(z: np.ndarray) -> np.ndarray:
+    # standard normal PDF
     return (1.0 / math.sqrt(2.0 * math.pi)) * np.exp(-0.5 * (z * z))
 
-
 def _Phi(z: np.ndarray) -> np.ndarray:
+    # standard normal CDF via erf
     return 0.5 * (1.0 + np.vectorize(erf)(z / sqrt(2.0)))
-
 
 def expected_improvement(mu: np.ndarray, var: np.ndarray, y_best: float, xi: float = 0.0) -> np.ndarray:
     # Minimize: improvement = y_best - Y
@@ -127,7 +103,6 @@ def expected_improvement(mu: np.ndarray, var: np.ndarray, y_best: float, xi: flo
     ei = (y_best - mu - xi) * _Phi(z) + std * _phi(z)
     ei[var < 1e-30] = 0.0
     return ei
-
 
 def bo2d_propose(tried_xy: np.ndarray,
                  tried_wrmsd: np.ndarray,
@@ -149,7 +124,7 @@ def bo2d_propose(tried_xy: np.ndarray,
     jbest = int(np.argmin(y))
     bx, by = float(X[jbest,0]), float(X[jbest,1])
 
-    # Candidate sampler: local Gaussian around best + global uniform
+    # --- mixture candidate sampler: local Gaussian around best + global uniform ---
     C = max(10, int(config.candidates))
     Cg = max(1, int((1.0 - config.local_frac) * C))
     Cl = C - Cg
@@ -171,13 +146,16 @@ def bo2d_propose(tried_xy: np.ndarray,
 
     Xc = np.vstack(parts) if parts else np.empty((0,2), float)
 
-    # Optional annulus restriction relative to center
+    # Optional annulus restriction of candidates (relative to center)
     if (config.ann_center is not None) and (config.ann_r_med is not None) and (config.ann_half is not None) and (Xc.size > 0):
         cx, cy = config.ann_center
         r = np.sqrt((Xc[:,0]-cx)**2 + (Xc[:,1]-cy)**2)
         ann_ok = (r >= (config.ann_r_med - config.ann_half)) & (r <= (config.ann_r_med + config.ann_half))
         if np.any(ann_ok):
             Xc = Xc[ann_ok]
+        else:
+            # if annulus kills all candidates, fall back to all
+            pass
 
     # Drop candidates too close to tried points
     if len(X) > 0 and Xc.shape[0] > 0:
@@ -191,7 +169,8 @@ def bo2d_propose(tried_xy: np.ndarray,
     mu, var = _gp_fit_predict(X, y, Xc, config.lsx, config.lsy, config.noise)
     ei = expected_improvement(mu, var, y_best, xi=0.0)
 
-    # Guard-rail pruning: keep if mean not far above best OR uncertainty large
+    # ---- Guard rail: mask candidates with clearly too-high predicted mean
+    # Keep if (predicted mean not far above best) OR (uncertainty large).
     if Xc.shape[0] > 0:
         keep = (mu <= (y_best + config.mu_guard)) | (var >= config.var_guard)
         if np.any(keep):
@@ -205,11 +184,9 @@ def bo2d_propose(tried_xy: np.ndarray,
     next_xy = (float(Xc[j, 0]), float(Xc[j, 1]))
     return next_xy, ei_max
 
-
 # ----------------- Utilities -----------------
 def n_angles_for_radius(r: float, r_max: float, k_base: float) -> int:
     return max(1, math.ceil(k_base * (r / max(r_max, 1e-9))))
-
 
 def _hash_angle(seed: int, key: Tuple[str, int]) -> float:
     h = hashlib.sha256()
@@ -218,10 +195,8 @@ def _hash_angle(seed: int, key: Tuple[str, int]) -> float:
     frac = (val & ((1<<53)-1)) / float(1<<53)
     return 2.0 * math.pi * frac
 
-
 def _fmt6(x: float) -> str:
     return f"{x:.6f}"
-
 
 def _float_or_blank(s: str) -> Optional[float]:
     s = (s or "").strip()
@@ -234,15 +209,6 @@ def _float_or_blank(s: str) -> Optional[float]:
         return None
     except Exception:
         return None
-
-
-def _mad(xs: List[float]) -> float:
-    if not xs:
-        return 0.0
-    med = statistics.median(xs)
-    dev = [abs(x - med) for x in xs]
-    return statistics.median(dev)
-
 
 # ------------- CSV parsing/writing -------------
 def parse_log(log_path: str):
@@ -274,7 +240,6 @@ def parse_log(log_path: str):
             entries.append((None, (run_s, dx_s, dy_s, idx_s, wr_s, ndx_s, ndy_s)))
     return entries, latest_run
 
-
 def write_log(log_path: str, entries) -> None:
     tmp_path = log_path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
@@ -288,8 +253,7 @@ def write_log(log_path: str, entries) -> None:
                 f.write(",".join(row) + "\n")
     os.replace(tmp_path, log_path)
 
-
-# ------------- Ring proposer -------------
+# ------------- Ring proposer (same behavior) -------------
 def pick_ring_probe(state, r_step: float, r_max: float, k_base: float):
     r = (state['ring_step'] + 1) * r_step
     if r > r_max + 1e-12:
@@ -305,6 +269,13 @@ def pick_ring_probe(state, r_step: float, r_max: float, k_base: float):
         state['ring_angle_idx'] = -1
     return ndx, ndy
 
+# ------------- Robust stats helpers -------------
+def _mad(xs: List[float]) -> float:
+    if not xs:
+        return 0.0
+    med = statistics.median(xs)
+    dev = [abs(x-med) for x in xs]
+    return statistics.median(dev)
 
 # ------------- Main per-event proposal -------------
 def propose_for_latest(entries, latest_run: int,
@@ -369,7 +340,7 @@ def propose_for_latest(entries, latest_run: int,
             if prev is None or wr < prev:
                 per_event_best_wr[current_key] = wr
 
-    # Identify events that are currently "done" (for robust band stats)
+    # Identify events that are currently "done"
     done_event_bests = []
     for key, idx_list in latest_rows_by_key.items():
         if not idx_list:
@@ -406,7 +377,7 @@ def propose_for_latest(entries, latest_run: int,
             'ring_cy': trials_sorted[0][2] if trials_sorted else 0.0,
             'ring_step': 0,
             'ring_angle_idx': -1,
-            'ring_angle_base': _hash_angle(seed, key),  # deterministic per (image,event)
+            'ring_angle_base': _hash_angle(seed, key),  # keep random
             'give_up': False,
         }
 
@@ -489,7 +460,7 @@ def propose_for_latest(entries, latest_run: int,
         vx, vy = (bx - cx_center), (by - cy_center)
         r_best = math.hypot(vx, vy)
 
-        # One-time radial outward push when first success very central / data sparse
+        # One-time radial outward push
         need_radial_push = (len(tried_xy) <= 2) or (r_best < radial_push_r_thresh)
         if need_radial_push:
             if r_best < 1e-12:
@@ -520,6 +491,8 @@ def propose_for_latest(entries, latest_run: int,
                 if kf not in tried_points:
                     proposals[key] = (cx_, cy_)
                     break
+            else:
+                pass
             if key in proposals:
                 continue
 
@@ -535,11 +508,11 @@ def propose_for_latest(entries, latest_run: int,
 
         # Annulus
         radii = np.sqrt((tried_xy[:,0]-cx_center)**2 + (tried_xy[:,1]-cy_center)**2)
-        r_med = float(np.median(radii)) if len(radii) > 0 else float("nan")
+        r_med = float(np.median(radii))
         if len(tried_xy) >= 3 and math.isfinite(r_med):
             bo_cfg.ann_center = (cx_center, cy_center)
             bo_cfg.ann_r_med = r_med
-            bo_cfg.ann_half = float(annulus_half)
+            bo_cfg.ann_half = float(annulus_half) if 'args' in globals() else 0.015
         else:
             bo_cfg.ann_center = bo_cfg.ann_r_med = bo_cfg.ann_half = None
 
@@ -592,9 +565,8 @@ def propose_for_latest(entries, latest_run: int,
     print(f"[propose] {n_new} new proposals, {n_done} marked done")
     return entries
 
-
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Propose next center shifts using ring (until first success) then robust BO around the incumbent.")
+    ap = argparse.ArgumentParser(description="Propose next center shifts using ring for unindexed and BO for indexed frames (robust).")
     ap.add_argument("--run-root", default=None, help="Path to run root that contains 'runs/'. Defaults to DEFAULT_ROOT if omitted.")
     ap.add_argument("--r-max", type=float, default=R_MAX_DEFAULT)
     ap.add_argument("--r-step", type=float, default=R_STEP_DEFAULT)
@@ -609,6 +581,7 @@ def main(argv=None) -> int:
     ap.add_argument("--bo-noise", type=float, default=3e-4, help="GP nugget noise in wrmsd^2 units")
     ap.add_argument("--bo-candidates", type=int, default=700, help="Number of EI candidates")
     ap.add_argument("--bo-ei-eps", type=float, default=2e-3, help="EI threshold to mark done")
+    ap.add_argument("--bo-max-evals-local", type=int, default=40, help="(Reserved) Max BO evals after first success")
 
     # Candidate sampling mix
     ap.add_argument("--bo-local-frac", type=float, default=0.85, help="Fraction of EI candidates sampled near current best (0..1).")
@@ -691,21 +664,25 @@ def main(argv=None) -> int:
         with open(args.sidecar, "w", encoding="utf-8") as f:
             f.write("real_h5_path,event,run_n,next_dx_mm,next_dy_mm\n")
             current_key = None
-            for (key,row) in updated_entries:
+            for (key,row) in entries:
                 if key is not None:
-                    current_key = key; continue
-                if row is None or row[0] == "RAW": continue
+                    current_key = key
+                    continue
+                if row is None or row[0] == "RAW":
+                    continue
                 run_n = int(row[0])
-                if run_n != latest_run: continue
+                if run_n != latest_run:
+                    continue
                 next_dx, next_dy = row[5], row[6]
-                if next_dx == "" and next_dy == "": continue
+                if next_dx == "" and next_dy == "":
+                    continue
                 f.write(f"{current_key[0]},{current_key[1]},{run_n},{next_dx},{next_dy}\n")
         print(f"[propose] Wrote proposals to {args.sidecar}")
     else:
         write_log(log_path, updated_entries)
         print(f"[propose] Updated {log_path} with next_* for run_{latest_run:03d}")
-    return 0
 
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())

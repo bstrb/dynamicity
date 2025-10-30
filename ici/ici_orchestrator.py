@@ -22,53 +22,13 @@ import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
-# -------- Default config MacOS (applies ONLY when run with NO CLI args) --------
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_006"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5"]
-
-# -------- Default config WSL (applies ONLY when run with NO CLI args) --------
-# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
-# DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
-
-# DEFAULT_ROOT = "/home/bubl3932/files/UOX1"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/UOX.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/UOX.cell"
-# DEFAULT_H5   = DEFAULT_ROOT + "/UOX_His_MUA_450nm_spot4_ON_20240311_0928.h5"
-
-# Propose Next Shifts defaults
-# Expanding ring search parameters
-R_MAX_DEFAULT = 0.06                # in mm 1,07 pixels with 17 857 resolution
-R_STEP_DEFAULT = 0.02               # in mm about 0,36 pixels with 17 857 resolution
-K_BASE_DEFAULT = 20.0               # controls initial number of evals per radius, decrease for sparser sampling
-SEED_DEFAULT = 1337                 # for reproducibility
-CONVERGE_TOL_DEFAULT = 1e-4         # increase to stop when moves are tiny try 5e-4 or 1e-3 (in mm).
-MAX_ITERS_DEFAULT = 100             # safety cap on max iterations
-
-# BO parameters
-BO_LENGTHSCALE_X_DEFAULT = 0.0001     # in mm about 0.02=0.36 pixels with 17 857 res. increase for smoother surrogate,
-BO_LENGTHSCALE_Y_DEFAULT = 0.0001     # i.e less exploration. Try 0.03–0.05 if your wRMSD surface is gentle.
-
-BO_NOISE_DEFAULT = 3e-4 #1e-4       # in wrmsd^2 units
-BO_CANDIDATES_DEFAULT = 200         # pick greedier steps to converge in fewer iterations i.e 200–400 instead of 800–1000.
-BO_EI_EPS_DEFAULT = 2e-3#1e-3       # to stop earlier try 2e-3 or 5e-3 instead of 1e-3.
-BO_MAX_EVALS_LOCAL_DEFAULT = 40     # number of BO evaluations per iteration
-
-# Quick recipes
-# Finish ultra-fast (may miss tiny gains):
-# --bo-ei-eps 5e-3 --converge-tol 1e-3 --bo-candidates 200  --bo-lengthscale-x 0.04 --bo-lengthscale-y 0.04
-
-# Balanced:
-# --bo-ei-eps 3e-3 --converge-tol 5e-4 --bo-candidates 400  --bo-lengthscale-x 0.03 --bo-lengthscale-y 0.03
-
-# Thorough (slower):
-# --bo-ei-eps 1e-3 --converge-tol 1e-4 --bo-candidates 1000  --bo-lengthscale-x 0.02 --bo-lengthscale-y 0.02
+# Default paths
+DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"
+DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
+DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
 
 # Default indexamajig / xgandalf / integration flags
-
 
 DEFAULT_FLAGS = [
     # Peakfinding
@@ -88,7 +48,7 @@ DEFAULT_FLAGS = [
     "--xgandalf-grad-desc-iterations=1",
     "--xgandalf-tolerance=0.02",
     "--int-radius=4,5,9",
-    "--no-retry",
+    # "--no-retry",
     "--no-half-pixel-shift",
     "--no-non-hits-in-stream",
     # "--fix-profile-radius=70000000",
@@ -176,9 +136,27 @@ def latest_run(run_root: str) -> Tuple[int, str]:
     return (nums[-1], os.path.join(runs_dir(run_root), f"run_{nums[-1]:03d}")) if nums else (-1, "")
 
 def run_py(script: str, args: List[str], check: bool = True) -> int:
+    import subprocess, sys
     cmd = ["python3", script, *args]
     print(f"[RUN] {' '.join(cmd)}", flush=True)
-    rc = subprocess.call(cmd)
+
+    # Capture child stdout/stderr, reprint to our stdout
+    # so it flows through the Tee into both console + log.
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
+    )
+    try:
+        for line in proc.stdout:
+            # forward exactly as the child wrote it
+            print(line, end="")  # our _Tee will duplicate to file + console
+    finally:
+        proc.stdout.close()
+    rc = proc.wait()
+
     if check and rc != 0:
         raise SystemExit(f"[ERR] {script} exited with {rc}")
     return rc
@@ -222,7 +200,7 @@ def all_next_done_for_latest(log_path: str, latest: int) -> bool:
     except FileNotFoundError:
         return False
 
-def do_init_sequence(run_root: str, h5_sources: list):
+def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list):
     print("[phase] No runs detected -> initializing run_000")
     sources = []
     for s in h5_sources:
@@ -235,8 +213,8 @@ def do_init_sequence(run_root: str, h5_sources: list):
             "no_run_prep_singlelist.py",
             [
                 "--run-root", run_root,
-                "--geom", DEFAULT_GEOM,
-                "--cell", DEFAULT_CELL,
+                "--geom", geom,
+                "--cell", cell,
                 # optional: you can omit this since default is "indexamajig"
                 "--indexamajig", "indexamajig",
                 # positional sources (one or many)
@@ -248,11 +226,11 @@ def do_init_sequence(run_root: str, h5_sources: list):
     run_py("run_sh.py", ["--run-root", run_root, "--run", "000"], check=False)
     run_py("evaluate_stream.py", ["--run-root", run_root, "--run", "000"], check=False)
     run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
+    run_py("summarize_image_run_log.py", ["--run-root", run_root,])
     run_py("build_early_break_from_log.py", ["--run-root", os.path.join(run_root, "runs")])
     print("[done] Initialization cycle complete. Proceeding to loop...")
 
-# def iterate_until_done(run_root: str, max_iters: int, skip_fix_stream: bool):
-def iterate_until_done(run_root: str, max_iters: int):
+def iterate_until_done(run_root, max_iters=100):
     rd = runs_dir(run_root)
     it = 0
     while it < max_iters:
@@ -265,7 +243,7 @@ def iterate_until_done(run_root: str, max_iters: int):
         print(f"\n[loop] Iteration {it} started at {ts}", flush=True)
 
         # 1) propose_next_shifts.py
-        run_py("propose_next_shifts.py", ["--run-root", run_root, "--r-max", str(R_MAX_DEFAULT), "--r-step", str(R_STEP_DEFAULT), "--k-base", str(K_BASE_DEFAULT), "--seed", str(SEED_DEFAULT), "--converge-tol", str(CONVERGE_TOL_DEFAULT), "--bo-lengthscale-x", str(BO_LENGTHSCALE_X_DEFAULT), "--bo-lengthscale-y", str(BO_LENGTHSCALE_Y_DEFAULT), "--bo-noise", str(BO_NOISE_DEFAULT), "--bo-candidates", str(BO_CANDIDATES_DEFAULT), "--bo-ei-eps", str(BO_EI_EPS_DEFAULT), "--bo-max-evals-local", str(BO_MAX_EVALS_LOCAL_DEFAULT)])
+        run_py("propose_next_shifts.py", ["--run-root", run_root])
 
         # evaluate stop condition based on latest run in the *log*
         log_path = os.path.join(rd, "image_run_log.csv")
@@ -275,10 +253,6 @@ def iterate_until_done(run_root: str, max_iters: int):
             break
 
         # # 2) if all next_* for latest are 'done' -> break
-        # if all_next_done_for_latest(log_path, latest_in_log):
-        #     print(f"[stop] All next_* entries for run_{latest_in_log:03d} are 'done'.")
-        #     break
-        # Modified 2024-06-06: rename early_break.stream → done.stream if exists, then break
         if all_next_done_for_latest(log_path, latest_in_log):
             print(f"[stop] All next_* entries for run_{latest_in_log:03d} are 'done'.")
 
@@ -288,9 +262,7 @@ def iterate_until_done(run_root: str, max_iters: int):
             if os.path.exists(early_stream):
                 os.rename(early_stream, done_stream)
                 print(f"[rename] {early_stream} → {done_stream}")
-
             break
-
 
         # 3) else build overlays & list for next iteration
         run_py("build_overlays_and_list.py", ["--run-root", run_root])
@@ -303,22 +275,12 @@ def iterate_until_done(run_root: str, max_iters: int):
 
         run_str = f"{latest_num:03d}"
 
-        # copy_next_run_sh.py on latest
         run_py("copy_next_run_sh.py", ["--run-root", run_root, "--run", run_str], check=False)
-
-        # run_sh.py on latest
         run_py("run_sh.py", ["--run-root", run_root, "--run", run_str], check=False)
-
-        # fix_stream_paths.py on latest (inplace)
         _ = run_py("fix_stream_paths.py", ["--run-dir", latest_dir, "--run", run_str, "--inplace"], check=False)
-
-        # evaluate_stream.py on latest
         run_py("evaluate_stream.py", ["--run-root", run_root, "--run", run_str], check=False)
-
-        # update_image_run_log_grouped.py (this is the file we have)
         run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
-
-        # build_early_break_from_log.py
+        run_py("summarize_image_run_log.py", ["--run-root", run_root,])
         run_py("build_early_break_from_log.py", ["--run-root", os.path.join(run_root, "runs")])
 
     else:
@@ -328,27 +290,27 @@ def iterate_until_done(run_root: str, max_iters: int):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Orchestrate SerialED iterative runs using provided helper scripts.")
     ap.add_argument("--run-root", default=DEFAULT_ROOT, help="Experiment root that contains 'runs/'.")
-    ap.add_argument("--max-iters", type=int, default=MAX_ITERS_DEFAULT, help="Safety cap on loop iterations.")
-    ap.add_argument(
-        "--h5", nargs="+", default=DEFAULT_H5,
-        help="One or more HDF5 sources or globs (e.g., sim_001.h5 sim_002.h5 or sim_*.h5)"
-    )
-
+    ap.add_argument("--geom", default=DEFAULT_GEOM, help="Geometry file for initialization.")
+    ap.add_argument("--cell", default=DEFAULT_CELL, help="Cell file for initialization.")
+    ap.add_argument("--h5", nargs="+", default=DEFAULT_H5, help="One or more HDF5 sources or globs (e.g., sim_001.h5 sim_002.h5 or sim_*.h5)")
+    ap.add_argument("--flags", nargs="*", default=DEFAULT_FLAGS, help="Additional indexamajig / xgandalf / integration flags for initialization.")
 
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
     run_root = os.path.abspath(os.path.expanduser(args.run_root))
     os.makedirs(runs_dir(run_root), exist_ok=True)
 
+
     # --- begin: wrap whole orchestration with logger (Change #2) ---
     with OrchestratorRunLogger(runs_dir(run_root)):
         # If no runs, initialize run_000 first
         if not list_run_numbers(run_root):
             # do_init_sequence(run_root)
-            do_init_sequence(run_root, args.h5)
+            do_init_sequence(run_root, args.geom, args.cell, args.h5)
 
         # Iterate until all next_* == done
-        iterate_until_done(run_root, args.max_iters)
+        iterate_until_done(run_root)
+
     # --- end: wrap whole orchestration with logger ------------------
 
 if __name__ == "__main__":

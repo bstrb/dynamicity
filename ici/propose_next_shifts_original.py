@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-propose_next_shifts_bo.py
+propose_next_shifts.py
 
 Drop-in replacement for propose_next_shifts that preserves the original
 grouped CSV parsing and "apply to latest run only" behavior, but replaces
@@ -23,8 +23,6 @@ from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 
-from bo2d_optimizer import bo2d_propose, BO2DConfig
-
 # ----------------- Defaults -----------------
 # DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
@@ -33,6 +31,137 @@ R_STEP_DEFAULT = 0.01
 K_BASE_DEFAULT = 20.0
 SEED_DEFAULT = 1337
 CONVERGE_TOL_DEFAULT = 1e-4
+
+
+# ----------------- BO2D code adapted from ici/bo2d_optimizer.py -----------------
+
+from math import erf, sqrt
+
+class BO2DConfig:
+    def __init__(self, lsx=0.02, lsy=0.02, noise=1e-4, candidates=800, ei_eps=1e-3, rng_seed=1337):
+        self.lsx = float(lsx)
+        self.lsy = float(lsy)
+        self.noise = float(noise)
+        self.candidates = int(candidates)
+        self.ei_eps = float(ei_eps)
+        self.rng = np.random.default_rng(int(rng_seed))
+
+# --------- Gaussian Process (RBF anisotropic) + EI ---------
+
+def _rbf_aniso(X1: np.ndarray, X2: np.ndarray, lsx: float, lsy: float) -> np.ndarray:
+    dx = (X1[:, None, 0] - X2[None, :, 0]) / max(lsx, 1e-12)
+    dy = (X1[:, None, 1] - X2[None, :, 1]) / max(lsy, 1e-12)
+    return np.exp(-0.5 * (dx * dx + dy * dy))
+
+def _gp_fit_predict(X: np.ndarray, y: np.ndarray, Xstar: np.ndarray, lsx: float, lsy: float, noise: float):
+    # Center y for stability
+    import numpy as _np
+    ymean = float(_np.mean(y))
+    yc = y - ymean
+    K = _rbf_aniso(X, X, lsx, lsy) + (noise * _np.eye(len(X)))
+    # Cholesky with tiny jitter fallback
+    jitter = 1e-12
+    try:
+        L = _np.linalg.cholesky(K)
+    except _np.linalg.LinAlgError:
+        L = _np.linalg.cholesky(K + jitter * _np.eye(len(X)))
+    alpha = _np.linalg.solve(L.T, _np.linalg.solve(L, yc))
+    Ks = _rbf_aniso(X, Xstar, lsx, lsy)
+    mu = Ks.T @ alpha + ymean
+    v = _np.linalg.solve(L, Ks)
+    # Kernel amplitude assumed 1.0
+    var = _np.maximum(0.0, 1.0 - _np.sum(v * v, axis=0))
+    return mu, var
+
+def _phi(z: np.ndarray) -> np.ndarray:
+    # standard normal PDF
+    return (1.0 / math.sqrt(2.0 * math.pi)) * np.exp(-0.5 * (z * z))
+
+def _Phi(z: np.ndarray) -> np.ndarray:
+    # use math.erf element-wise (NumPy lacks np.erf on some builds)
+    return 0.5 * (1.0 + np.vectorize(erf)(z / sqrt(2.0)))
+
+def expected_improvement(mu: np.ndarray, var: np.ndarray, y_best: float, xi: float = 0.0) -> np.ndarray:
+    # Minimize: improvement = y_best - Y
+    std = np.sqrt(np.maximum(var, 1e-16))
+    z = (y_best - mu - xi) / std
+    ei = (y_best - mu - xi) * _Phi(z) + std * _phi(z)
+    ei[var < 1e-30] = 0.0
+    return ei
+
+def bo2d_propose(tried_xy: np.ndarray,
+                 tried_wrmsd: np.ndarray,
+                 bounds: tuple,
+                 config: BO2DConfig,
+                 tried_tol: float = 1e-6):
+    """
+    Args:
+        tried_xy: (n,2) past (dx,dy) in mm (finite wrmsd only).
+        tried_wrmsd: (n,) past wrmsd values (lower is better).
+        bounds: ((xmin,xmax),(ymin,ymax))
+        config: BO2DConfig
+        tried_tol: distance threshold to consider a point already tried.
+
+    Returns:
+        (next_xy, ei_max): tuple, or (None, 0.0) if no improvement expected.
+    """
+    assert tried_xy.ndim == 2 and tried_xy.shape[1] == 2, "tried_xy must be (n,2)"
+    assert tried_wrmsd.ndim == 1 and tried_wrmsd.shape[0] == tried_xy.shape[0], "shape mismatch"
+
+    (xmin, xmax), (ymin, ymax) = bounds
+    X = tried_xy.astype(float)
+    y = tried_wrmsd.astype(float)
+
+    # Fit GP on tried points
+    y_best = float(np.min(y))
+
+    # Sample random candidates
+    # --- mixture candidate sampler: local around best + global uniform ---
+    C = max(10, int(config.candidates))
+    Cg = max(1, int((1.0 - getattr(config, "local_frac", 0.7)) * C))
+    Cl = C - Cg
+
+    # Need best point for local sampling
+    jbest = int(np.argmin(y))
+    bx, by = float(X[jbest,0]), float(X[jbest,1])
+
+    parts = []
+    if Cl > 0 and len(X) > 0:
+        sx = getattr(config, "local_sigma_scale", 1.0) * max(config.lsx, 1e-9)
+        sy = getattr(config, "local_sigma_scale", 1.0) * max(config.lsy, 1e-9)
+        xs_loc = config.rng.normal(bx, sx, Cl)
+        ys_loc = config.rng.normal(by, sy, Cl)
+        xs_loc = np.clip(xs_loc, xmin, xmax)
+        ys_loc = np.clip(ys_loc, ymin, ymax)
+        parts.append(np.column_stack([xs_loc, ys_loc]))
+
+    if Cg > 0:
+        xs_glb = config.rng.uniform(xmin, xmax, Cg)
+        ys_glb = config.rng.uniform(ymin, ymax, Cg)
+        parts.append(np.column_stack([xs_glb, ys_glb]))
+
+    Xc = np.vstack(parts) if parts else np.empty((0,2), float)
+
+
+    # Drop candidates too close to tried points
+    if len(X) > 0:
+        d2 = np.sum((Xc[:, None, :] - X[None, :, :]) ** 2, axis=2)
+        mind = np.sqrt(np.min(d2, axis=1))
+        mask = mind > tried_tol
+        Xc = Xc[mask]
+        if Xc.shape[0] == 0:
+            return None, 0.0
+
+    mu, var = _gp_fit_predict(X, y, Xc, config.lsx, config.lsy, config.noise)
+    ei = expected_improvement(mu, var, y_best, xi=0.0)
+
+    if ei.size == 0:
+        return None, 0.0
+
+    j = int(np.argmax(ei))
+    ei_max = float(ei[j])
+    next_xy = (float(Xc[j, 0]), float(Xc[j, 1]))
+    return next_xy, ei_max
 
 # ----------------- Utilities from original behavior -----------------
 def n_angles_for_radius(r: float, r_max: float, k_base: float) -> int:
@@ -123,7 +252,8 @@ def pick_ring_probe(state, r_step: float, r_max: float, k_base: float):
 def propose_for_latest(entries, latest_run: int,
                        r_max, r_step, k_base,
                        seed, converge_tol,
-                       bo_cfg):
+                       bo_cfg, bo_max_step_mm=None, bo_rho_init=0.02, bo_rho_min=0.006, bo_rho_max=0.05):
+    
     history: Dict[Tuple[str,int], List[Tuple[int,float,float,int,Optional[float]]]] = {}
     latest_rows_by_key: Dict[Tuple[str,int], List[int]] = {}
     current_key: Optional[Tuple[str,int]] = None
@@ -219,32 +349,109 @@ def propose_for_latest(entries, latest_run: int,
                 proposals[key] = ("done", "done")
             continue
 
-        # BO phase (local refinement)
+        # --- BO phase (local refinement) ---
+
         tried_xy = np.array([[dx,dy] for (dx,dy,wr) in good], float)
         tried_wr = np.array([wr for (dx,dy,wr) in good], float)
 
-        # Bounds centered at ring center; can be adjusted to mechanical limits
-        xmin, xmax = state['ring_cx'] - r_max, state['ring_cx'] + r_max
-        ymin, ymax = state['ring_cy'] - r_max, state['ring_cy'] + r_max
-        next_xy, ei_max = bo2d_propose(tried_xy, tried_wr, ((xmin, xmax), (ymin, ymax)), bo_cfg)
+        # Best so far
+        jbest = int(np.argmin(tried_wr))
+        best_xy = (float(tried_xy[jbest,0]), float(tried_xy[jbest,1]))
 
+        # place this right after you compute best_xy (inside BO phase), before trust-region/BO call
+        cx, cy = float(state['ring_cx']), float(state['ring_cy'])
+        bx, by = best_xy
+        vx, vy = bx - cx, by - cy
+        r = math.hypot(vx, vy)
+        if r < 1e-12:
+            vx, vy, r = -1.0, -1.0, math.sqrt(2.0)
+        ux, uy = vx/r, vy/r
+
+        # small radial bracket around current best
+        delta = max(0.006, 0.5*(bo_cfg.lsx + bo_cfg.lsy))   # ~6–15 µm
+        cand_in  = (cx + (max(r - delta, 0.0))*ux, cy + (max(r - delta, 0.0))*uy)
+        cand_out = (cx + (min(r + delta, float(r_max)))*ux, cy + (min(r + delta, float(r_max)))*uy)
+
+        for cand in (cand_in, cand_out):
+            kf = (_fmt6(cand[0]), _fmt6(cand[1]))
+            if kf not in tried_points:
+                proposals[key] = cand
+                continue  # evaluate it now; BO resumes next iter
+
+
+        # ---- NEW: one deterministic radial outward push before BO ----
+        # ring center (same as where the ring search started)
+        cx, cy = float(state['ring_cx']), float(state['ring_cy'])
+        bx, by = best_xy
+        vx, vy = (bx - cx), (by - cy)
+        r_best = math.hypot(vx, vy)
+
+        # If direction undefined (best at center), aim toward (-,-) deterministically:
+        if r_best < 1e-9:
+            vx, vy = -1.0, -1.0
+            r_best = math.sqrt(2.0)
+
+        # Unit direction from center toward best
+        ux, uy = (vx / r_best, vy / r_best)
+
+        # Choose how far to push outward this one time
+        # - at least r_step
+        # - ~ lengthscale (or your bo_max_step_mm) but not crazy
+        ls_mean = 0.5 * (bo_cfg.lsx + bo_cfg.lsy)
+        push = max(r_step, min(getattr(bo_cfg, "max_step_mm", ls_mean), 0.02))
+        # If we are still central (< 0.03 mm), push a bit more
+        if r_best < 0.03:
+            push = max(push, 0.012)
+
+        # Radial candidate from the center
+        cand_r = min(r_best + push, float(r_max))
+        cand_xy = (cx + cand_r * ux, cy + cand_r * uy)
+
+        # Avoid repeats and keep novelty
+        keyfmt_cand = (_fmt6(cand_xy[0]), _fmt6(cand_xy[1]))
+        if (len(good) <= 2 or r_best < 0.03) and (keyfmt_cand not in tried_points):
+            proposals[key] = (cand_xy[0], cand_xy[1])
+            # Skip BO this iteration; evaluate this radial point first
+            continue
+        # ---- END NEW radial outward step ----
+
+        # --- Then proceed with the normal trust-region BO bounds around best ---
+        # derive rho from history
+        dists = np.sqrt(np.sum((tried_xy - np.array(best_xy))**2, axis=1))
+        if len(dists) >= 3:
+            rho = float(np.clip(2.0 * np.median(dists), bo_rho_min, bo_rho_max))
+        else:
+            rho = float(np.clip(bo_rho_init, bo_rho_min, bo_rho_max))
+
+        xmin, xmax = best_xy[0] - rho, best_xy[0] + rho
+        ymin, ymax = best_xy[1] - rho, best_xy[1] + rho
+
+        # --- propose with BO inside the local bounds ---
+        next_xy, ei_max = bo2d_propose(tried_xy, tried_wr, ((xmin, xmax), (ymin, ymax)), bo_cfg)
         if (next_xy is None) or (ei_max < bo_cfg.ei_eps):
             proposals[key] = ("done", "done")
             continue
 
-        # Also stop if step from best is tiny
-        jbest = int(np.argmin(tried_wr))
-        best_xy = (float(tried_xy[jbest,0]), float(tried_xy[jbest,1]))
+        # --- optional hard cap on per-step distance FROM best (apply before tol check) ---
+        if (bo_max_step_mm is not None):
+            dx, dy = next_xy[0] - best_xy[0], next_xy[1] - best_xy[1]
+            r = math.hypot(dx, dy)
+            if r > bo_max_step_mm and r > 0.0:
+                s = bo_max_step_mm / r
+                next_xy = (best_xy[0] + s * dx, best_xy[1] + s * dy)
+
+        # --- stop if the (possibly capped) step is tiny ---
         if math.hypot(next_xy[0]-best_xy[0], next_xy[1]-best_xy[1]) < converge_tol:
             proposals[key] = ("done", "done")
             continue
 
-        # Avoid repeats
+        # Avoid repeats (use 6-decimal grid you already employ)
         if (_fmt6(next_xy[0]), _fmt6(next_xy[1])) in tried_points:
             proposals[key] = ("done", "done")
             continue
 
         proposals[key] = (next_xy[0], next_xy[1])
+
 
     # Apply proposals to latest-run rows
     n_new, n_done = 0, 0
@@ -288,6 +495,14 @@ def main(argv=None) -> int:
     ap.add_argument("--bo-ei-eps", type=float, default=1e-3, help="EI threshold to mark done")
     ap.add_argument("--bo-max-evals-local", type=int, default=40, help="(Reserved) Max BO evals after first success")
 
+    ap.add_argument("--bo-local-frac", type=float, default=0.9, help="Fraction of EI candidates sampled near current best (0..1).")
+    ap.add_argument("--bo-local-sigma-scale", type=float, default=1.0, help="Local Gaussian sigma = scale * lengthscale per axis.")
+    ap.add_argument("--bo-max-step-mm", type=float, default=None, help="Hard cap on |step| from current best (mm) in BO phase.")
+    ap.add_argument("--bo-rho-init", type=float, default=0.02, help="Initial half-size (mm) for local BO bounds around current best.")
+    ap.add_argument("--bo-rho-min", type=float, default=0.006, help="Minimum BO local half-size (mm).")
+    ap.add_argument("--bo-rho-max", type=float, default=0.05, help="Maximum BO local half-size (mm).")
+
+
     args = ap.parse_args(argv)
 
     run_root = os.path.abspath(os.path.expanduser(args.run_root or DEFAULT_ROOT))
@@ -308,6 +523,9 @@ def main(argv=None) -> int:
                         candidates=args.bo_candidates,
                         ei_eps=args.bo_ei_eps,
                         rng_seed=args.seed)
+    
+    bo_cfg.local_frac = args.bo_local_frac
+    bo_cfg.local_sigma_scale = args.bo_local_sigma_scale
 
     updated_entries = propose_for_latest(
         entries=entries,
@@ -318,6 +536,10 @@ def main(argv=None) -> int:
         seed=int(args.seed),
         converge_tol=float(args.converge_tol),
         bo_cfg=bo_cfg,
+        bo_max_step_mm=args.bo_max_step_mm,
+        bo_rho_init=args.bo_rho_init,
+        bo_rho_min=args.bo_rho_min,
+        bo_rho_max=args.bo_rho_max,
     )
 
     if args.sidecar:

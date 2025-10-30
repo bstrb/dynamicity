@@ -1,32 +1,35 @@
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 plot_event_shifts.py
 
 Parse an image_run_log.csv (with interleaved "#<abs_h5_path> event <N>" headers)
-and plot all tried (dx,dy) shifts for a selected (image,event). If wRMSD values
-are present, color points by wRMSD and highlight the best (finite) wRMSD.
+and plot tried (dx,dy) shifts per (image,event). If wRMSD values are present,
+color points by wRMSD and highlight the best (finite) wRMSD.
 
-Example usage:
-  python plot_event_shifts.py --log /path/to/image_run_log.csv --event 67 --image-substr sim.h5 --outdir ./plots
-  python plot_event_shifts.py --log image_run_log.csv --event 67 --list-keys
+Examples:
+  # single event
+  python plot_event_shifts.py --log image_run_log.csv --event 67 --outdir ./plots
 
-Notes:
-- The CSV body rows are expected to be:
-    run_n,det_shift_x_mm,det_shift_y_mm,indexed,wrmsd,next_dx_mm,next_dy_mm
-- The script groups history by (real_h5_path, event). Use --list-keys to see what exists.
-- If multiple (path,event) groups match the given --event and optional --image-substr,
-  all of them will be plotted (one PNG per group) unless --first-only is provided.
+  # list keys
+  python plot_event_shifts.py --log image_run_log.csv --list-keys
+
+  # all events (optionally filter by filename substring) + mark true center
+  python plot_event_shifts.py --log image_run_log.csv --all-events --image-substr sim1.h5 --true-center -0.028 -0.028 --outdir ./plots
 """
-
 import argparse
 import math
 import os
 import re
 from typing import Dict, List, Tuple, Optional
 
+# import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")  # must be set before importing pyplot
 import matplotlib.pyplot as plt
+
+import numpy as np
+from matplotlib.tri import Triangulation
 
 Row = Tuple[int, float, float, int, Optional[float], Optional[float], Optional[float]]  # run, dx, dy, indexed, wrmsd, next_dx, next_dy
 
@@ -64,8 +67,7 @@ def parse_image_run_log(log_path: str) -> Dict[Tuple[str, int], List[Row]]:
             if len(parts) < 7:
                 continue
             run_n = int(parts[0]) if parts[0].isdigit() else int(re.sub(r"\D+","", parts[0]) or 0)
-            dx = _flt(parts[1])
-            dy = _flt(parts[2])
+            dx = _flt(parts[1]); dy = _flt(parts[2])
             indexed = int(parts[3]) if parts[3].isdigit() else (1 if parts[3] == "1" else 0)
             wrmsd = _flt(parts[4])
             ndx = None if parts[5] in ("", "done") else _flt(parts[5])
@@ -73,35 +75,40 @@ def parse_image_run_log(log_path: str) -> Dict[Tuple[str, int], List[Row]]:
             if dx is None or dy is None:
                 continue
             groups[cur].append((run_n, dx, dy, indexed, wrmsd, ndx, ndy))
-    # sort rows by run_n within each group
+    # sort by run within each group
     for k in list(groups.keys()):
         groups[k].sort(key=lambda r: r[0])
     return groups
 
-def pick_groups(groups, event: int, image_substr: Optional[str]) -> List[Tuple[str,int]]:
+def iter_groups_for_args(groups, event: Optional[int], image_substr: Optional[str], all_events: bool):
     keys = []
-    for (path, ev) in groups.keys():
-        if ev != event:
-            continue
-        if image_substr and (image_substr.lower() not in path.lower()):
-            continue
-        keys.append((path, ev))
+    if all_events:
+        for (path, ev) in groups.keys():
+            if image_substr and (image_substr.lower() not in path.lower()):
+                continue
+            keys.append((path, ev))
+    else:
+        for (path, ev) in groups.keys():
+            if (event is not None) and (ev != event):
+                continue
+            if image_substr and (image_substr.lower() not in path.lower()):
+                continue
+            keys.append((path, ev))
+    keys.sort(key=lambda k: (k[1], k[0]))
     return keys
 
-def plot_group(path: str, event: int, rows: List[Row], outdir: str, dpi: int = 150, annotate: bool = True) -> str:
-    # Unpack columns
+def plot_group(path: str, event: int, rows: List[Row], outdir: str, dpi: int = 150, annotate: bool = True, true_center: Optional[Tuple[float,float]] = None) -> str:
     xs_abs = [r[1] for r in rows]
     ys_abs = [r[2] for r in rows]
     runs   = [r[0] for r in rows]
     wrs    = [r[4] for r in rows]
     idx    = [r[3] for r in rows]
 
-    # 1) Recenter at the FIRST run point instead of (0,0)
+    # center at first run
     x0, y0 = xs_abs[0], ys_abs[0]
     xs = [x - x0 for x in xs_abs]
     ys = [y - y0 for y in ys_abs]
 
-    # Masks and splits
     finite_mask = [(w is not None) for w in wrs]
     xs_f = [x for x, m in zip(xs, finite_mask) if m]
     ys_f = [y for y, m in zip(ys, finite_mask) if m]
@@ -110,61 +117,64 @@ def plot_group(path: str, event: int, rows: List[Row], outdir: str, dpi: int = 1
     xs_nf = [x for x, m in zip(xs, finite_mask) if not m]
     ys_nf = [y for y, m in zip(ys, finite_mask) if not m]
 
-    # Successfully indexed + finite-wRMSD for the heatmap
-    ok_mask = [(i == 1 and (w is not None)) for i, w in zip(idx, wrs)]
+    ok_mask = [(ii == 1 and (w is not None)) for ii, w in zip(idx, wrs)]
     xs_ok = [x for x, m in zip(xs, ok_mask) if m]
     ys_ok = [y for y, m in zip(ys, ok_mask) if m]
     wrs_ok = [w for w, m in zip(wrs, ok_mask) if m]
 
-    import matplotlib.pyplot as plt
-    from matplotlib.tri import Triangulation
-
     plt.figure(figsize=(6, 6))
-
-    # 2) Plot the progression (always), centered at first run
-    #    Connect in order so the search path is clear
+    # path
     plt.plot(xs, ys, marker="o", linewidth=1.0)
-
-    # Mark the first run point explicitly at (0,0)
     plt.scatter([0.0], [0.0], marker="s", s=60, facecolors="none", edgecolors="black", zorder=5)
     plt.text(0.0, 0.0, " start", fontsize=8, ha="left", va="bottom")
 
     # 3) Heatmap (tricontourf) of wRMSD for successfully indexed points
-    #    (transparent overlay so the path and points remain visible)
-    if len(wrs_ok) >= 3:
-        tri = Triangulation(xs_ok, ys_ok)
-        # Use multiple levels; alpha so it doesn't overpower the path
-        cs = plt.tricontourf(tri, wrs_ok, levels=12, alpha=0.35)
-        cb_hm = plt.colorbar(cs)
-        cb_hm.set_label("wRMSD (indexed only)")
+    def _has_area(xs, ys, eps=1e-6):
+        if len(xs) < 3:
+            return False
+        X = np.column_stack([xs, ys]) - np.mean([xs, ys], axis=1)
+        # rank-2 in 2D means non-collinear
+        s = np.linalg.svd(X, compute_uv=False)
+        return (len(s) >= 2) and (s[1] > eps)
 
-    # 4) Scatter color for all finite wRMSD points (keeps your original coloring)
-    sc = None
+    if len(wrs_ok) >= 3 and _has_area(xs_ok, ys_ok, eps=1e-6):
+        try:
+            tri = Triangulation(xs_ok, ys_ok)
+            cs = plt.tricontourf(tri, wrs_ok, levels=12, alpha=0.35)
+            cb_hm = plt.colorbar(cs)
+            cb_hm.set_label("wRMSD (indexed only)")
+        except Exception:
+            # Degenerate geometry or qhull still unhappy — skip heatmap.
+            pass
+    # else: not enough area → skip heatmap gracefully
+
+
+    # colored points by wRMSD
     if wrs_f:
         sc = plt.scatter(xs_f, ys_f, c=wrs_f, zorder=6)
-        # Only add a second colorbar if we didn't already add the heatmap one
         if len(wrs_ok) < 3:
             cb = plt.colorbar(sc)
             cb.set_label("wRMSD")
+        # highlight best (prefer indexed)
+        best_cand = [i for i,(w,ii) in enumerate(zip(wrs, idx)) if (w is not None and ii == 1)]
+        if not best_cand:
+            best_cand = [i for i,w in enumerate(wrs) if w is not None]
+        bi = min(best_cand, key=lambda i: wrs[i])
+        plt.scatter([xs[bi]], [ys[bi]], marker="*", s=160, zorder=7)
 
-        # Highlight best finite wRMSD, preferring indexed points
-        best_candidates = [i for i, (w, ii) in enumerate(zip(wrs, idx)) if (w is not None and ii == 1)]
-        if not best_candidates:
-            best_candidates = [i for i, w in enumerate(wrs) if w is not None]
-        best_idx = min(best_candidates, key=lambda i: wrs[i])
-        plt.scatter([xs[best_idx]], [ys[best_idx]], marker="*", s=160, zorder=7)
-
-    # 5) Non-finite wRMSD, if any
     if xs_nf:
         plt.scatter(xs_nf, ys_nf, marker="x", zorder=6)
 
-    # 6) Annotate run numbers (optional)
     if annotate:
         for x, y, rn in zip(xs, ys, runs):
             plt.text(x, y, str(rn), fontsize=8, ha="left", va="bottom")
 
-    # Axes / aspect
-    # Crosshairs now show the *first-run-centered* axes
+    # optional true center marker (convert absolute to centered coords)
+    if true_center is not None:
+        tcx, tcy = true_center
+        plt.scatter([tcx - x0], [tcy - y0], marker="+", s=100, linewidths=1.5, zorder=7)
+        plt.text(tcx - x0, tcy - y0, " true", fontsize=8, ha="left", va="bottom")
+
     plt.axhline(0, linewidth=0.8)
     plt.axvline(0, linewidth=0.8)
     plt.gca().set_aspect("equal", adjustable="box")
@@ -174,10 +184,9 @@ def plot_group(path: str, event: int, rows: List[Row], outdir: str, dpi: int = 1
     plt.title(title)
     plt.tight_layout()
 
-    # Save
     base = os.path.splitext(os.path.basename(path))[0]
-    out_png = os.path.join(outdir, f"{base}_event_{event}_shifts_centered.png")
     os.makedirs(outdir, exist_ok=True)
+    out_png = os.path.join(outdir, f"{base}_event_{event}_shifts_centered.png")
     plt.savefig(out_png, dpi=dpi)
     plt.close()
     return out_png
@@ -185,17 +194,26 @@ def plot_group(path: str, event: int, rows: List[Row], outdir: str, dpi: int = 1
 def main():
     ap = argparse.ArgumentParser(description="Plot dx,dy shifts per (image,event) from image_run_log.csv, with optional wRMSD coloring and best highlight.")
     ap.add_argument("--log", required=True, help="Path to image_run_log.csv")
-    ap.add_argument("--event", type=int, required=True, help="Event number to plot")
+    ap.add_argument("--event", type=int, default=None, help="Event number to plot. If omitted with --all-events, plots all.")
+    ap.add_argument("--all-events", action="store_true", help="Plot ALL events in the log (optionally filtered by --image-substr).")
     ap.add_argument("--image-substr", type=str, default=None, help="Substring filter for the image path (case-insensitive)")
-    ap.add_argument("--outdir", type=str, default=".", help="Directory to save PNG(s)")
+    ap.add_argument("--outdir", type=str, default=None, help="Directory to save PNG(s). Default: '<log_dir>/plots_event_shifts'")
     ap.add_argument("--dpi", type=int, default=150, help="Figure DPI")
     ap.add_argument("--first_only", action="store_true", help="If multiple (image,event) groups match, only plot the first")
     ap.add_argument("--list_keys", action="store_true", help="List available (image,event) keys and exit")
     ap.add_argument("--no_annotate", action="store_true", help="Do not annotate run numbers next to points")
+    ap.add_argument("--true-center", type=float, nargs=2, metavar=("CX","CY"),
+                    help="Optional marker (mm) for known true center (e.g. --true-center -0.028 -0.028)")
     args = ap.parse_args()
 
-    log_path = _abs(args.log)
-    groups = parse_image_run_log(log_path)
+    groups = parse_image_run_log(_abs(args.log))
+    
+    # Derive default outdir if not provided
+    if args.outdir is None:
+        log_dir = os.path.dirname(os.path.abspath(args.log))
+        args.outdir = os.path.join(log_dir, "plots_event_shifts")
+    os.makedirs(args.outdir, exist_ok=True)
+
 
     if args.list_keys:
         print("# Available (image,event) keys:")
@@ -203,15 +221,20 @@ def main():
             print(f"{ev}\t{path}")
         return 0
 
-    keys = pick_groups(groups, args.event, args.image_substr)
+    keys = iter_groups_for_args(groups, args.event, args.image_substr, args.all_events)
     if not keys:
-        print("No matching (image,event) groups. Use --list-keys to inspect available entries.")
+        if args.all_events:
+            print("No events matched filters (try removing --image-substr).")
+        else:
+            print("No matching (image,event) groups. Use --list-keys to inspect available entries, or add --all-events.")
         return 2
 
     plotted = []
-    for k in keys:
-        rows = groups[k]
-        out_png = plot_group(k[0], k[1], rows, args.outdir, dpi=args.dpi, annotate=(not args.no_annotate))
+    for (p, ev) in keys:
+        rows = groups[(p, ev)]
+        out_png = plot_group(p, ev, rows, args.outdir, dpi=args.dpi,
+                             annotate=(not args.no_annotate),
+                             true_center=(tuple(args.true_center) if args.true_center else None))
         print(f"Wrote: {out_png}")
         plotted.append(out_png)
         if args.first_only:
