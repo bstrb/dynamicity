@@ -1,296 +1,227 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-propose_next_shifts_purebo.py
+propose_next_shifts.py  —  Hybrid Ring + Robust BO (GP+EI)
 
-Pure Bayesian Optimization (no expanding ring). Uses both indexed and
-unindexed outcomes from prior runs for each (image,event):
+Purpose
+-------
+Drop-in replacement for your proposer that keeps the original grouped CSV I/O
+and "apply to latest run only" behavior, while combining the strongest parts
+from your original ring+local-refine and advanced pure-BO variants:
 
-- Indexed rows with finite wRMSD -> true observations (y = wRMSD).
-- Unindexed rows -> weak negatives via pseudo-observation
-  y = (global_median_good or fallback) + penalty_offset.
+1) Expanding ring until the first successful, finite wRMSD ("indexed") frame.
+2) Robust Bayesian Optimization (anisotropic RBF GP + Expected Improvement)
+   for local refinement, with:
+   - Mixed local/global candidate sampling around the incumbent.
+   - Adaptive trust region (rho) from median distance of successful points.
+   - Optional annulus constraint when a likely radius is learned.
+   - Guard-rail filtering of EI candidates (bad mean unless variance large).
+   - One-time outward radial push if the first success is too central.
+   - Tiny cross seeding when data are very sparse.
+   - Backtrack to incumbent if a clear regression was just observed.
+   - Data-driven "done" check using a robust good-band threshold.
 
-Behavior highlights (few knobs, robust defaults):
-- Small isotropic GP (RBF) with nugget.
-- Candidate sampler: 90% local around incumbent best (sigma = lengthscale), 10% global within a trust box.
-- Trust box (+/- bo-rho) around the incumbent (or around initial center if no incumbent yet).
-- Per-step cap (--bo-max-step-mm) from the incumbent.
-- Guard rails: drop EI candidates with predicted mean >> current best unless variance is large.
-- Data-driven 'done': if best sits in robust "good band" (median + 2*MAD over DONE events' bests;
-  fallback to all current bests if none DONE) and recent improvement < 0.01, stop.
-- Minimal seeding: optional 3x3 grid around the initial center if we have < 3 observations.
+CLI (minimal knobs)
+-------------------
+  --r-max, --r-step, --k-base     Ring geometry
+  --bo-...                        GP/BO knobs (lengthscales, noise, candidates, guards)
+  --bo-rho-...                    Trust region half-size bounds
+  --annulus-half                  Half-width of annulus (mm) around median radius of successes
+  --robust-done-*                 Stopping rule sensitivity
 
-CLI (minimal knobs):
-  --bo-lengthscale   Isotropic lengthscale [mm]
-  --bo-noise         GP nugget in wRMSD^2
-  --bo-candidates    EI candidates per propose
-  --bo-ei-eps        EI threshold to stop refining
-  --bo-rho           Trust-region half-size [mm]
-  --bo-max-step-mm   Hard cap on step from incumbent [mm] (optional)
-  --penalty-offset   Additive penalty for unindexed pseudo-y (default 0.30)
-  --seed-grid        If set, seed a 3x3 grid around start center when obs < 3
-  --seed-delta       Half-spacing for seeding grid [mm] (default 0.006)
+CSV Format (unchanged)
+----------------------
+Header line:
+  run_n,det_shift_x_mm,det_shift_y_mm,indexed,wrmsd,next_dx_mm,next_dy_mm
+Section headers:
+  #/abs/path/to/file event <int>
 
-CSV I/O: compatible with image_run_log.csv format used in your pipeline.
+Each data row belongs to the most recent section header.
+
 """
+
 from __future__ import annotations
-import argparse, math, os, sys, statistics
+import argparse
+import hashlib
+import math
+import os
+import sys
+import statistics
 from typing import Dict, List, Tuple, Optional
+
 import numpy as np
 from math import erf, sqrt
 
 # ----------------- Defaults -----------------
 DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+R_MAX_DEFAULT = 0.05
+R_STEP_DEFAULT = 0.01
+K_BASE_DEFAULT = 20.0
 SEED_DEFAULT = 1337
-CONVERGE_TOL_DEFAULT = 5e-4  # stop if tiny move from best
+CONVERGE_TOL_DEFAULT = 5e-4
 
 # ----------------- GP + EI -----------------
+
 class BO2DConfig:
-    def __init__(self, lengthscale=0.02, noise=3e-4, candidates=400, ei_eps=2e-3,
-                 rng_seed=1337, rho=0.04, max_step_mm: Optional[float]=0.010):
-        self.lengthscale = float(lengthscale)
+    def __init__(self,
+                 lsx=0.02, lsy=0.02, noise=3e-4,
+                 candidates=700, ei_eps=2e-3, rng_seed=1337,
+                 local_frac=0.85, local_sigma_scale=1.2,
+                 max_step_mm=None,
+                 mu_guard=0.10, var_guard=0.08):
+        self.lsx = float(lsx)
+        self.lsy = float(lsy)
         self.noise = float(noise)
         self.candidates = int(candidates)
         self.ei_eps = float(ei_eps)
-        self.rho = float(rho)
-        self.max_step_mm = float(max_step_mm) if max_step_mm is not None else None
         self.rng = np.random.default_rng(int(rng_seed))
-        # fixed heuristics
-        self.local_frac = 0.90
-        self.mu_guard = 0.08
-        self.var_guard = 0.05
+        self.local_frac = float(local_frac)
+        self.local_sigma_scale = float(local_sigma_scale)
+        self.max_step_mm = None if max_step_mm is None else float(max_step_mm)
+        # guard rails for candidate pruning
+        self.mu_guard = float(mu_guard)
+        self.var_guard = float(var_guard)
+        # optional annulus constraint (center, r_med, half_width)
+        self.ann_center = None   # (cx, cy)
+        self.ann_r_med = None
+        self.ann_half = None
 
-class SPSA2DConfig:
-    def __init__(self,
-                 a=0.006, A=10.0, alpha=0.602,     # step-size schedule a_k = a/(k+A)^alpha
-                 c=0.010, gamma=0.101,             # perturb schedule  c_k = c/(k+1)^gamma
-                 rho=0.05,                         # trust-region half-size [mm]
-                 max_step_mm=0.012,                # hard cap on |step| from incumbent [mm]
-                 retries=1,                        # retries per arm when forcing baseline refresh
-                 rng_seed=1337):
-        self.a=float(a); self.A=float(A); self.alpha=float(alpha)
-        self.c=float(c); self.gamma=float(gamma)
-        self.rho=float(rho); self.max_step_mm=float(max_step_mm) if max_step_mm is not None else None
-        self.retries=int(retries)
-        self.rng = np.random.default_rng(int(rng_seed))
 
-def _rbf_iso(X1: np.ndarray, X2: np.ndarray, ls: float) -> np.ndarray:
-    d2 = np.sum(((X1[:, None, :] - X2[None, :, :]) / max(ls,1e-12))**2, axis=2)
-    return np.exp(-0.5 * d2)
+def _rbf_aniso(X1: np.ndarray, X2: np.ndarray, lsx: float, lsy: float) -> np.ndarray:
+    dx = (X1[:, None, 0] - X2[None, :, 0]) / max(lsx, 1e-12)
+    dy = (X1[:, None, 1] - X2[None, :, 1]) / max(lsy, 1e-12)
+    return np.exp(-0.5 * (dx * dx + dy * dy))
 
-def _gp_fit_predict(X: np.ndarray, y: np.ndarray, Xstar: np.ndarray, ls: float, noise: float):
+
+def _gp_fit_predict(X: np.ndarray, y: np.ndarray, Xstar: np.ndarray, lsx: float, lsy: float, noise: float):
+    # Center y for stability
     import numpy as _np
     ymean = float(_np.mean(y))
     yc = y - ymean
-    K = _rbf_iso(X, X, ls) + (noise * _np.eye(len(X)))
+    K = _rbf_aniso(X, X, lsx, lsy) + (noise * _np.eye(len(X)))
     jitter = 1e-12
     try:
         L = _np.linalg.cholesky(K)
     except _np.linalg.LinAlgError:
         L = _np.linalg.cholesky(K + jitter * _np.eye(len(X)))
     alpha = _np.linalg.solve(L.T, _np.linalg.solve(L, yc))
-    Ks = _rbf_iso(X, Xstar, ls)
+    Ks = _rbf_aniso(X, Xstar, lsx, lsy)
     mu = Ks.T @ alpha + ymean
     v = _np.linalg.solve(L, Ks)
-    var = _np.maximum(0.0, 1.0 - _np.sum(v * v, axis=0))
+    var = _np.maximum(0.0, 1.0 - _np.sum(v * v, axis=0))  # amplitude=1.0
     return mu, var
+
 
 def _phi(z: np.ndarray) -> np.ndarray:
     return (1.0 / math.sqrt(2.0 * math.pi)) * np.exp(-0.5 * (z * z))
 
+
 def _Phi(z: np.ndarray) -> np.ndarray:
     return 0.5 * (1.0 + np.vectorize(erf)(z / sqrt(2.0)))
 
+
 def expected_improvement(mu: np.ndarray, var: np.ndarray, y_best: float, xi: float = 0.0) -> np.ndarray:
+    # Minimize: improvement = y_best - Y
     std = np.sqrt(np.maximum(var, 1e-16))
     z = (y_best - mu - xi) / std
     ei = (y_best - mu - xi) * _Phi(z) + std * _phi(z)
     ei[var < 1e-30] = 0.0
     return ei
 
-def bo2d_propose(tried_xy: np.ndarray, tried_y: np.ndarray, box: Tuple[Tuple[float,float],Tuple[float,float]],
-                 cfg: BO2DConfig, tried_tol: float = 1e-6):
-    (xmin, xmax), (ymin, ymax) = box
+
+def bo2d_propose(tried_xy: np.ndarray,
+                 tried_wrmsd: np.ndarray,
+                 bounds: tuple,
+                 config: BO2DConfig,
+                 tried_tol: float = 1e-6):
+    """
+    Returns:
+        (next_xy, ei_max): tuple, or (None, 0.0) if no improvement expected.
+    """
+    assert tried_xy.ndim == 2 and tried_xy.shape[1] == 2, "tried_xy must be (n,2)"
+    assert tried_wrmsd.ndim == 1 and tried_wrmsd.shape[0] == tried_xy.shape[0], "shape mismatch"
+
+    (xmin, xmax), (ymin, ymax) = bounds
     X = tried_xy.astype(float)
-    y = tried_y.astype(float)
+    y = tried_wrmsd.astype(float)
+
     y_best = float(np.min(y))
     jbest = int(np.argmin(y))
     bx, by = float(X[jbest,0]), float(X[jbest,1])
 
-    # Candidates: 90% local Gaussian, 10% global in box
-    C = max(10, int(cfg.candidates))
-    Cg = max(1, int((1.0 - cfg.local_frac) * C))
+    # Candidate sampler: local Gaussian around best + global uniform
+    C = max(10, int(config.candidates))
+    Cg = max(1, int((1.0 - config.local_frac) * C))
     Cl = C - Cg
+
     parts = []
-    if Cl > 0:
-        xs = cfg.rng.normal(bx, cfg.lengthscale, Cl)
-        ys = cfg.rng.normal(by, cfg.lengthscale, Cl)
-        parts.append(np.column_stack([np.clip(xs, xmin, xmax), np.clip(ys, ymin, ymax)]))
+    if Cl > 0 and len(X) > 0:
+        sx = config.local_sigma_scale * max(config.lsx, 1e-9)
+        sy = config.local_sigma_scale * max(config.lsy, 1e-9)
+        xs_loc = config.rng.normal(bx, sx, Cl)
+        ys_loc = config.rng.normal(by, sy, Cl)
+        xs_loc = np.clip(xs_loc, xmin, xmax)
+        ys_loc = np.clip(ys_loc, ymin, ymax)
+        parts.append(np.column_stack([xs_loc, ys_loc]))
+
     if Cg > 0:
-        xs = cfg.rng.uniform(xmin, xmax, Cg)
-        ys = cfg.rng.uniform(ymin, ymax, Cg)
-        parts.append(np.column_stack([xs, ys]))
+        xs_glb = config.rng.uniform(xmin, xmax, Cg)
+        ys_glb = config.rng.uniform(ymin, ymax, Cg)
+        parts.append(np.column_stack([xs_glb, ys_glb]))
+
     Xc = np.vstack(parts) if parts else np.empty((0,2), float)
 
+    # Optional annulus restriction relative to center
+    if (config.ann_center is not None) and (config.ann_r_med is not None) and (config.ann_half is not None) and (Xc.size > 0):
+        cx, cy = config.ann_center
+        r = np.sqrt((Xc[:,0]-cx)**2 + (Xc[:,1]-cy)**2)
+        ann_ok = (r >= (config.ann_r_med - config.ann_half)) & (r <= (config.ann_r_med + config.ann_half))
+        if np.any(ann_ok):
+            Xc = Xc[ann_ok]
+
+    # Drop candidates too close to tried points
     if len(X) > 0 and Xc.shape[0] > 0:
         d2 = np.sum((Xc[:, None, :] - X[None, :, :]) ** 2, axis=2)
         mind = np.sqrt(np.min(d2, axis=1))
-        Xc = Xc[mind > tried_tol]
+        mask = mind > tried_tol
+        Xc = Xc[mask]
         if Xc.shape[0] == 0:
             return None, 0.0
 
-    mu, var = _gp_fit_predict(X, y, Xc, cfg.lengthscale, cfg.noise)
+    mu, var = _gp_fit_predict(X, y, Xc, config.lsx, config.lsy, config.noise)
     ei = expected_improvement(mu, var, y_best, xi=0.0)
 
-    # Guard rails: drop very-bad-mean unless uncertainty large
-    keep = (mu <= (y_best + cfg.mu_guard)) | (var >= cfg.var_guard)
-    if np.any(keep):
-        Xc, mu, var, ei = Xc[keep], mu[keep], var[keep], ei[keep]
+    # Guard-rail pruning: keep if mean not far above best OR uncertainty large
+    if Xc.shape[0] > 0:
+        keep = (mu <= (y_best + config.mu_guard)) | (var >= config.var_guard)
+        if np.any(keep):
+            Xc, mu, var, ei = Xc[keep], mu[keep], var[keep], ei[keep]
+
     if ei.size == 0:
         return None, 0.0
 
     j = int(np.argmax(ei))
-    next_xy = (float(Xc[j,0]), float(Xc[j,1]))
-    return next_xy, float(ei[j])
-def _incumbent_from_history(trials_sorted):
-    # Return (best_xy, best_y) over indexed rows with finite wr
-    best_xy, best_y = None, float("inf")
-    for (_, dx, dy, ind, wr) in trials_sorted:
-        if ind and wr is not None and math.isfinite(wr):
-            if wr < best_y:
-                best_y = float(wr); best_xy = (float(dx), float(dy))
-    return best_xy, best_y
+    ei_max = float(ei[j])
+    next_xy = (float(Xc[j, 0]), float(Xc[j, 1]))
+    return next_xy, ei_max
 
-def _success_rate_recent(trials_sorted, window=10):
-    zs = []
-    for (_,_,_,ind,wr) in trials_sorted[-window:]:
-        zs.append(1 if (ind and wr is not None and math.isfinite(wr)) else 0)
-    return (sum(zs)/len(zs)) if zs else 0.0
 
-def spsa_propose_for_event(trials_sorted,
-                           cfg: SPSA2DConfig,
-                           st: Optional[dict],
-                           tried_points_set,
-                           k_global: int):
-    """
-    Returns (proposal_xy, updated_state_dict, mark_done_bool).
-    We use one-sided SPSA around incumbent with baseline replicate caching.
-    """
-    # 1) Find incumbent and (optional) baseline y0 at that point
-    best_xy, best_y = _incumbent_from_history(trials_sorted)
-    if best_xy is None:
-        # No successes yet: propose small step toward local mean of all tried points to raise success prob
-        mx = np.mean([dx for (_,dx,_,_,_) in trials_sorted]) if trials_sorted else 0.0
-        my = np.mean([dy for (_,_,dy,_,_) in trials_sorted]) if trials_sorted else 0.0
-        return (mx, my), st or {}, False
+# ----------------- Utilities -----------------
+def n_angles_for_radius(r: float, r_max: float, k_base: float) -> int:
+    return max(1, math.ceil(k_base * (r / max(r_max, 1e-9))))
 
-    bx, by = best_xy
-    y0 = best_y
 
-    # 2) Pull/initialize state
-    st = dict(st or {})
-    if "k" not in st:
-        st["k"] = 0
-        st["seed"] = k_global
-        st["x0"], st["y0"] = y0, y0  # store last baseline value
-        st["bx"], st["by"] = bx, by
+def _hash_angle(seed: int, key: Tuple[str, int]) -> float:
+    h = hashlib.sha256()
+    h.update(f"{seed}|{key[0]}|{key[1]}".encode("utf-8"))
+    val = int.from_bytes(h.digest()[:8], "big")
+    frac = (val & ((1<<53)-1)) / float(1<<53)
+    return 2.0 * math.pi * frac
 
-    # 3) Schedules
-    k = int(st["k"])
-    a_k = cfg.a / ((k + cfg.A) ** cfg.alpha)
-    c_k = cfg.c / ((k + 1) ** cfg.gamma)
-
-    # 4) Trust box around incumbent
-    xmin, xmax = bx - cfg.rho, bx + cfg.rho
-    ymin, ymax = by - cfg.rho, by + cfg.rho
-
-    # 5) Generate a fresh Δ and candidate (+ arm). We’ll rely on one-sided SPSA (baseline at incumbent).
-    rng = cfg.rng
-    Δ = rng.choice(np.array([-1.0, 1.0]), size=(2,), replace=True)
-    x_plus = (np.clip(bx + c_k * Δ[0], xmin, xmax),
-              np.clip(by + c_k * Δ[1], ymin, ymax))
-
-    # Avoid duplicates
-    if (_fmt6(x_plus[0]), _fmt6(x_plus[1])) in tried_points_set:
-        # jitter once; if still duplicate, mark done
-        for _ in range(5):
-            Δ = rng.choice(np.array([-1.0, 1.0]), size=(2,), replace=True)
-            x_plus = (np.clip(bx + c_k * Δ[0], xmin, xmax),
-                      np.clip(by + c_k * Δ[1], ymin, ymax))
-            if (_fmt6(x_plus[0]), _fmt6(x_plus[1])) not in tried_points_set:
-                break
-        else:
-            return ("done","done"), st, True
-
-    # 6) Optional staged policy: if recent success rate is low, shrink region
-    p_recent = _success_rate_recent(trials_sorted, window=10)
-    if p_recent < 0.2:
-        shrink = 0.6
-        x_plus = (bx + shrink*(x_plus[0]-bx), by + shrink*(x_plus[1]-by))
-
-    # 7) Cap absolute move from incumbent
-    if cfg.max_step_mm is not None:
-        dxs, dys = x_plus[0]-bx, x_plus[1]-by
-        r = math.hypot(dxs, dys); cap = float(cfg.max_step_mm)
-        if r > cap and r > 0.0:
-            s = cap / r
-            x_plus = (bx + s*dxs, by + s*dys)
-
-    # Update state for next round (we’ll recompute gradient once we see y_plus in the next call)
-    st["k"] = k + 1
-    st["bx"], st["by"] = bx, by
-    # Note: If you later want to *move* the center using one-sided gradient (y_plus - y0)/(c_k*Δ),
-    # you can compute that in propose_for_latest by detecting the last proposed x_plus and its outcome.
-
-    return x_plus, st, False
-
-# ----------------- Utils & CSV -----------------
-# ---- Lightweight per-event state persisted in RAW #STATE lines ----
-def _state_tag(key):  # key = (abs_path, event_int)
-    return f"#STATE {key[0]} :: event {key[1]} :: "
-
-def read_states(entries):
-    """Return dict[key] = state_dict parsed from #STATE lines."""
-    states = {}
-    for key, row in entries:
-        if key is None and row is not None and len(row)>=2 and row[0]=="RAW":
-            ln = row[1]
-            if ln.startswith("#STATE "):
-                try:
-                    header, payload = ln.split("::", 2)[-1], ln.split("::", 2)[-0]  # just to not crash if format changes
-                except Exception:
-                    payload = ln
-                try:
-                    # Expected format: "#STATE <path> :: event <ev> :: k=<int> x0=<float> y0=<float> bx=<float> by=<float> seed=<int>"
-                    parts = ln.split("::")
-                    # parts[0] = "#STATE <path> ", parts[1] = " event <ev> ", parts[2] = " k=... ..."
-                    ev = int(parts[1].strip().split()[-1])
-                    # We need to recover <path> to form the key; since entries keep sections, we'll assign on next section change in propose()
-                except Exception:
-                    pass
-    return states  # we will re-fill properly inside proposer
-
-def parse_state_line(line):
-    # returns dict of parsed fields; resilient to missing keys
-    out = {}
-    toks = line.split("::")[-1].strip().split()
-    for t in toks:
-        if "=" in t:
-            k,v = t.split("=",1)
-            try:
-                out[k]=float(v) if "." in v or "e" in v.lower() else int(v)
-            except Exception:
-                out[k]=v
-    return out
-
-def format_state_line(key, st):
-    # st: dict with k, x0, y0, bx, by, seed
-    return (_state_tag(key) +
-            f"k={st.get('k',0)} x0={st.get('x0',0.0):.6f} y0={st.get('y0',float('nan')):.6f} "
-            f"bx={st.get('bx',0.0):.6f} by={st.get('by',0.0):.6f} seed={int(st.get('seed',0))}\n")
 
 def _fmt6(x: float) -> str:
     return f"{x:.6f}"
+
 
 def _float_or_blank(s: str) -> Optional[float]:
     s = (s or "").strip()
@@ -304,6 +235,7 @@ def _float_or_blank(s: str) -> Optional[float]:
     except Exception:
         return None
 
+
 def _mad(xs: List[float]) -> float:
     if not xs:
         return 0.0
@@ -311,6 +243,8 @@ def _mad(xs: List[float]) -> float:
     dev = [abs(x - med) for x in xs]
     return statistics.median(dev)
 
+
+# ------------- CSV parsing/writing -------------
 def parse_log(log_path: str):
     entries = []
     latest_run = -1
@@ -340,6 +274,7 @@ def parse_log(log_path: str):
             entries.append((None, (run_s, dx_s, dy_s, idx_s, wr_s, ndx_s, ndy_s)))
     return entries, latest_run
 
+
 def write_log(log_path: str, entries) -> None:
     tmp_path = log_path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
@@ -353,105 +288,60 @@ def write_log(log_path: str, entries) -> None:
                 f.write(",".join(row) + "\n")
     os.replace(tmp_path, log_path)
 
-# ----------------- Main per-event proposal -----------------
+
+# ------------- Ring proposer -------------
+def pick_ring_probe(state, r_step: float, r_max: float, k_base: float):
+    r = (state['ring_step'] + 1) * r_step
+    if r > r_max + 1e-12:
+        state['give_up'] = True
+        return state['ring_cx'], state['ring_cy']
+    n = n_angles_for_radius(r, r_max, k_base)
+    state['ring_angle_idx'] = (state['ring_angle_idx'] + 1) % n
+    theta = (state['ring_angle_base'] or 0.0) + 2.0 * math.pi * state['ring_angle_idx'] / n
+    ndx = state['ring_cx'] + r * math.cos(theta)
+    ndy = state['ring_cy'] + r * math.sin(theta)
+    if state['ring_angle_idx'] == n - 1:
+        state['ring_step'] += 1
+        state['ring_angle_idx'] = -1
+    return ndx, ndy
+
+
+# ------------- Main per-event proposal -------------
 def propose_for_latest(entries, latest_run: int,
-                       seed: int,
+                       r_max, r_step, k_base,
+                       seed, converge_tol,
                        bo_cfg: BO2DConfig,
-                       penalty_offset: float,
-                       seed_grid: bool,
-                       seed_delta: float,
-                       algo: str = "bo",
-                       spsa_params: Optional[dict] = None):
+                       bo_max_step_mm=None,
+                       bo_rho_init=0.04, bo_rho_min=0.001, bo_rho_max=0.06,
+                       radial_push_r_thresh=0.03,
+                       radial_push_min=0.012,
+                       small_cross_delta=0.006,
+                       backtrack_delta=0.10,
+                       annulus_half=0.015,
+                       robust_done_window=5,
+                       robust_done_improve=0.01,
+                       robust_done_mad_mult=2.0):
     """
-    Adjusted proposer with two algorithms:
-      - 'bo'   : your existing BO (unchanged behavior)
-      - 'spsa' : failure-aware one-sided SPSA that assumes success probability increases near the minimum
-
-    SPSA state is persisted as RAW lines starting with '#STATE ' so each call can continue schedules.
+    Returns updated entries.
     """
-
-    # ----------------- Local helpers just for SPSA-path -----------------
-
-    def _last_next_for_event(entries, key, latest_run):
-        # Returns (next_dx, next_dy) for this event at latest_run if present, else (None, None)
-        last = None
-        current_key = None
-        for (k, row) in entries:
-            if k is not None:
-                current_key = k
-                continue
-            if current_key != key or row is None or row[0] == "RAW":
-                continue
-            if row[0].isdigit() and int(row[0]) == latest_run:
-                # row format: run_n, dx, dy, indexed, wrmsd, next_dx, next_dy
-                if len(row) >= 7:
-                    ndx = row[5].strip(); ndy = row[6].strip()
-                    last = (float(ndx), float(ndy)) if (ndx and ndy) else (None, None)
-        return last if last is not None else (None, None)
-
-    def _same_point(a, b, tol=1e-6):
-        if a is None or b is None or isinstance(a, str) or isinstance(b, str):
-            return False
-        x1,y1 = a; x2,y2 = b
-        return (abs(x1 - x2) <= tol) and (abs(y1 - y2) <= tol)
-
-    def _fmt_state_line(key, st: dict) -> str:
-        # st keys used: k, x0, y0, bx, by, seed
-        return (f"#STATE {key[0]} :: event {key[1]} :: "
-                f"k={int(st.get('k', 0))} "
-                f"x0={float(st.get('x0', 0.0)):.6f} "
-                f"y0={float(st.get('y0', float('nan'))):.6f} "
-                f"bx={float(st.get('bx', 0.0)):.6f} "
-                f"by={float(st.get('by', 0.0)):.6f} "
-                f"seed={int(st.get('seed', 0))}")
-
-    def _parse_state_line(line: str) -> dict:
-        # robustly parse " :: k=... x0=... y0=... bx=... by=... seed=..."
-        out = {}
-        tail = line.split("::")[-1]
-        for tok in tail.strip().split():
-            if "=" in tok:
-                k, v = tok.split("=", 1)
-                try:
-                    out[k] = float(v) if any(c in v for c in ".eE") else int(v)
-                except Exception:
-                    out[k] = v
-        return out
-
-    def _incumbent_from_history(trials_sorted):
-        # Return best successful (indexed, finite wr) as (xy, y)
-        best_xy, best_y = None, float("inf")
-        for (_, dx, dy, ind, wr) in trials_sorted:
-            if ind and wr is not None and math.isfinite(wr):
-                if wr < best_y:
-                    best_y = float(wr); best_xy = (float(dx), float(dy))
-        return best_xy, best_y
-
-    def _success_rate_recent(trials_sorted, window=10):
-        zs = [(1 if (ind and wr is not None and math.isfinite(wr)) else 0)
-              for (_,_,_,ind,wr) in trials_sorted[-window:]]
-        return (sum(zs)/len(zs)) if zs else 0.0
-
-    # Default SPSA knobs (can be overridden via spsa_params)
-    spsa_defaults = dict(a=0.006, A=10.0, alpha=0.602,
-                         c=0.010, gamma=0.101,
-                         rho=0.05, max_step_mm=0.012,
-                         retries=1, rng_seed=seed)
-    sp = {**spsa_defaults, **(spsa_params or {})}
-    rng = np.random.default_rng(int(sp["rng_seed"]))
-
-    # ----------------- Build history (unchanged) -----------------
+    # ---- Build history and latest-row indices ----
     history: Dict[Tuple[str,int], List[Tuple[int,float,float,int,Optional[float]]]] = {}
     latest_rows_by_key: Dict[Tuple[str,int], List[int]] = {}
     current_key: Optional[Tuple[str,int]] = None
 
+    # Also collect "done" per-event best wrmsd to form a robust threshold
     per_event_best_wr = {}
 
+    # First pass: group data and track per-event best wr
+    key_latest_seen_run: Dict[Tuple[str,int], int] = {}
     for idx, (key, row) in enumerate(entries):
         if key is not None:
             current_key = key
+            key_latest_seen_run[key] = -1
             continue
-        if row is None or len(row) == 0 or row[0] == "RAW":
+        if row is None or len(row) == 0:
+            continue
+        if row[0] == "RAW":
             continue
 
         run_s, dx_s, dy_s, idx_s, wr_s, ndx_s, ndy_s = row[:7]
@@ -469,210 +359,216 @@ def propose_for_latest(entries, latest_run: int,
             continue
 
         history.setdefault(current_key, []).append((run_n, dx, dy, indexed, wr))
+        key_latest_seen_run[current_key] = max(key_latest_seen_run[current_key], run_n)
         if run_n == latest_run:
             latest_rows_by_key.setdefault(current_key, []).append(idx)
 
+        # track best wr so far for this event
         if indexed and (wr is not None) and math.isfinite(wr):
-            prev = per_event_best_wr.get(current_key)
+            prev = per_event_best_wr.get(current_key, None)
             if prev is None or wr < prev:
                 per_event_best_wr[current_key] = wr
 
-    # robust band for 'done'
+    # Identify events that are currently "done" (for robust band stats)
     done_event_bests = []
     for key, idx_list in latest_rows_by_key.items():
-        if not idx_list: continue
+        if not idx_list:
+            continue
         last_row = entries[idx_list[-1]][1]
-        if last_row is None or last_row[0] == "RAW": continue
-        if last_row[5] == "done" and last_row[6] == "done" and key in per_event_best_wr:
-            done_event_bests.append(per_event_best_wr[key])
+        if last_row is None or last_row[0] == "RAW":
+            continue
+        ndx_s, ndy_s = last_row[5], last_row[6]
+        if (ndx_s == "done") and (ndy_s == "done"):
+            if key in per_event_best_wr:
+                done_event_bests.append(per_event_best_wr[key])
+
     pool = done_event_bests if done_event_bests else list(per_event_best_wr.values())
     if pool:
-        band_med = statistics.median(pool); band_mad = _mad(pool)
-        good_band_upper = band_med + 2.0 * band_mad
+        band_med = statistics.median(pool)
+        band_mad = _mad(pool)
+        good_band_upper = band_med + robust_done_mad_mult * band_mad
     else:
         good_band_upper = float("inf")
 
-    # global median of "good" (indexed) to set pseudo-y for BO path (unchanged idea)
-    pseudo_base = statistics.median(pool) if pool else 0.5
-    pseudo_y = 2 * float(pseudo_base)
-
-    # ----------------- Load any existing per-event SPSA state from RAW lines -----------------
-    states_by_key: Dict[Tuple[str,int], dict] = {}
-    current_key = None
-    for key, row in entries:
-        if key is not None:
-            current_key = key; continue
-        if row is None or len(row)==0 or row[0]!="RAW": continue
-        ln = row[1]
-        if current_key and ln.startswith("#STATE "):
-            # Validate that line belongs to this current_key by event id if present
-            try:
-                if f"event {current_key[1]}" in ln:
-                    states_by_key[current_key] = _parse_state_line(ln)
-            except Exception:
-                pass
-
     proposals: Dict[Tuple[str,int], Tuple[object, object]] = {}
-    state_lines_to_append: Dict[Tuple[str,int], str] = {}
 
-    # ----------------- Per-event proposing -----------------
+    # ---- Per-event proposal ----
     for key, trials in history.items():
         if key not in latest_rows_by_key:
             continue
 
-        trials_sorted = sorted(trials, key=lambda t: t[0])
+        trials_sorted = sorted(trials, key=lambda t: t[0])  # by run_n
+
+        # Initialize state
+        state = {
+            'phase': 'ring',
+            'ring_cx': trials_sorted[0][1] if trials_sorted else 0.0,
+            'ring_cy': trials_sorted[0][2] if trials_sorted else 0.0,
+            'ring_step': 0,
+            'ring_angle_idx': -1,
+            'ring_angle_base': _hash_angle(seed, key),  # deterministic per (image,event)
+            'give_up': False,
+        }
+
+        # Count ring attempts before first success
+        k_ring = 0
+        for (_, dx_t, dy_t, indexed_t, wr_t) in trials_sorted:
+            if indexed_t and (wr_t is not None) and math.isfinite(wr_t):
+                break
+            if abs(dx_t - state['ring_cx']) < 1e-12 and abs(dy_t - state['ring_cy']) < 1e-12:
+                continue
+            k_ring += 1
+
+        if k_ring > 0:
+            for _ in range(k_ring):
+                r_tmp = (state['ring_step'] + 1) * r_step
+                if r_tmp > r_max + 1e-12:
+                    state['give_up'] = True
+                    break
+                n_tmp = n_angles_for_radius(r_tmp, r_max, k_base)
+                state['ring_angle_idx'] = (state['ring_angle_idx'] + 1) % n_tmp
+                if state['ring_angle_idx'] == n_tmp - 1:
+                    state['ring_step'] += 1
+                    state['ring_angle_idx'] = -1
+
+        # Build arrays of successful (indexed & finite wrmsd) trials
+        good = [(dx,dy,wr) for (_,dx,dy,ind,wr) in trials_sorted if ind and (wr is not None) and math.isfinite(wr)]
         tried_points = set((_fmt6(dx), _fmt6(dy)) for (_,dx,dy,_,_) in trials_sorted)
 
-        # ---------- SPSA branch ----------
-        if algo.lower() == "spsa":
-            # Incumbent from successful (indexed) measurements
-            best_xy, best_y = _incumbent_from_history(trials_sorted)
-
-            if best_xy is None:
-                # No successes yet → aim toward local mean of tried points (raise success probability)
-                if trials_sorted:
-                    mx = np.mean([dx for (_,dx,_,_,_) in trials_sorted])
-                    my = np.mean([dy for (_,_,dy,_,_) in trials_sorted])
-                    proposals[key] = (float(mx), float(my))
-                else:
-                    # Fallback to (0,0) if truly empty
-                    proposals[key] = (0.0, 0.0)
+        # Ring phase
+        if len(good) == 0:
+            ndx, ndy = pick_ring_probe(state, r_step, r_max, k_base) if not state['give_up'] else (state['ring_cx'], state['ring_cy'])
+            if state['give_up']:
+                proposals[key] = ("done", "done")
                 continue
+            for _ in range(200):
+                keyfmt = (_fmt6(ndx), _fmt6(ndy))
+                if keyfmt not in tried_points:
+                    proposals[key] = (ndx, ndy)
+                    break
+                ndx, ndy = pick_ring_probe(state, r_step, r_max, k_base)
+            else:
+                proposals[key] = ("done", "done")
+            continue
 
-            bx, by = best_xy
-            y0 = best_y
+        # ---------------- BO phase (local refinement) ----------------
+        tried_xy = np.array([[dx,dy] for (dx,dy,wr) in good], float)
+        tried_wr = np.array([wr for (dx,dy,wr) in good], float)
 
-            # Recover/update per-event state
-            st_prev = states_by_key.get(key, {})
-            k = int(st_prev.get("k", 0))
-            # Schedules
-            a_k = sp["a"] / ((k + sp["A"]) ** sp["alpha"])
-            c_k = sp["c"] / ((k + 1) ** sp["gamma"])
+        # Current best so far
+        jbest = int(np.argmin(tried_wr))
+        best_xy = (float(tried_xy[jbest,0]), float(tried_xy[jbest,1]))
+        y_best = float(tried_wr[jbest])
 
-            # Trust box around incumbent
-            xmin, xmax = bx - sp["rho"], bx + sp["rho"]
-            ymin, ymax = by - sp["rho"], by + sp["rho"]
-
-            # Draw a Rademacher perturbation and propose one-sided +arm
-            Δx, Δy = rng.choice(np.array([-1.0, 1.0])), rng.choice(np.array([-1.0, 1.0]))
-            x_plus = (np.clip(bx + c_k * Δx, xmin, xmax),
-                      np.clip(by + c_k * Δy, ymin, ymax))
-
-            # Avoid duplicates (retry a few jitter attempts)
-            tries = 0
-            while (_fmt6(x_plus[0]), _fmt6(x_plus[1])) in tried_points and tries < 5:
-                Δx, Δy = rng.choice(np.array([-1.0, 1.0])), rng.choice(np.array([-1.0, 1.0]))
-                x_plus = (np.clip(bx + c_k * Δx, xmin, xmax),
-                          np.clip(by + c_k * Δy, ymin, ymax))
-                tries += 1
-            if (_fmt6(x_plus[0]), _fmt6(x_plus[1])) in tried_points:
+        # Robust "done" guard
+        if len(tried_wr) >= 3 and y_best <= good_band_upper:
+            recent_bests = np.minimum.accumulate(tried_wr)[-min(robust_done_window, len(tried_wr)):]
+            if (recent_bests[0] - recent_bests[-1]) < robust_done_improve:
                 proposals[key] = ("done", "done")
                 continue
 
-            # If recent success rate is poor, shrink step toward incumbent
-            p_recent = _success_rate_recent(trials_sorted, window=10)
-            if p_recent < 0.4:
-                shrink = 0.6
-                x_plus = (bx + shrink*(x_plus[0]-bx), by + shrink*(x_plus[1]-by))
-
-            # Cap absolute move from incumbent
-            if sp["max_step_mm"] is not None:
-                dxs, dys = x_plus[0]-bx, x_plus[1]-by
-                r = math.hypot(dxs, dys); cap = float(sp["max_step_mm"])
-                if r > cap and r > 0.0:
-                    s = cap / r
-                    x_plus = (bx + s*dxs, by + s*dys)
-
-            proposals[key] = (float(x_plus[0]), float(x_plus[1]))
-
-            # Persist updated state
-            st_new = {
-                "k": k + 1,
-                "x0": y0, "y0": y0,
-                "bx": bx, "by": by,
-                "seed": sp["rng_seed"]
-            }
-            state_lines_to_append[key] = _fmt_state_line(key, st_new)
-            continue  # next key
-
-        # ---------- BO branch (your current behavior) ----------
-        # Build BO dataset (both indexed and unindexed)
-        obs_xy = []
-        obs_y = []
-        for (_, dx, dy, ind, wr) in trials_sorted:
-            if ind and (wr is not None) and math.isfinite(wr):
-                obs_xy.append((dx, dy))
-                obs_y.append(float(wr))
+        # Backtrack rule
+        last_dx, last_dy, last_wr = good[-1]
+        if last_wr > (y_best + backtrack_delta):
+            bx, by = best_xy
+            if (_fmt6(bx), _fmt6(by)) not in tried_points:
+                proposals[key] = (bx, by)
+                continue
+            step = max(small_cross_delta, 0.5*(bo_cfg.lsx + bo_cfg.lsy))
+            for cx_, cy_ in [(bx+step,by), (bx-step,by), (bx,by+step), (bx,by-step)]:
+                if (_fmt6(cx_), _fmt6(cy_)) not in tried_points:
+                    proposals[key] = (cx_, cy_)
+                    break
             else:
-                obs_xy.append((dx, dy))
-                obs_y.append(pseudo_y)
-
-        # If no observations at all (unlikely), seed center from first row
-        if len(obs_xy) == 0:
-            start_cx, start_cy = (trials_sorted[0][1], trials_sorted[0][2]) if trials_sorted else (0.0, 0.0)
-            proposals[key] = (start_cx, start_cy)
+                proposals[key] = ("done", "done")
             continue
 
-        X = np.array(obs_xy, float)
-        y = np.array(obs_y, float)
-
-        # Incumbent best (by y)
-        jbest = int(np.argmin(y))
-        best_xy = (float(X[jbest,0]), float(X[jbest,1]))
-        y_best = float(y[jbest])
-
-        # robust 'done'
-        indexed_wr = [wr for (_,_,_,ind,wr) in trials_sorted if ind and (wr is not None) and math.isfinite(wr)]
-        if indexed_wr:
-            best_seq = []
-            m = float('inf')
-            for (_,_,_,ind,wr) in trials_sorted:
-                if ind and (wr is not None) and math.isfinite(wr):
-                    m = min(m, float(wr)); best_seq.append(m)
-            if len(best_seq) >= 3:
-                recent = best_seq[-min(5, len(best_seq)):]
-                if (recent[0] - recent[-1]) < 0.01 and (y_best <= good_band_upper):
-                    proposals[key] = ("done", "done"); continue
-
-        # Optional tiny seeding if too few points (<3)
-        if seed_grid and (len(obs_xy) < 3):
-            made = False
-            start_cx, start_cy = (trials_sorted[0][1], trials_sorted[0][2]) if trials_sorted else (0.0, 0.0)
-            for sx in (-seed_delta, 0.0, seed_delta):
-                for sy in (-seed_delta, 0.0, seed_delta):
-                    cand = (_fmt6(start_cx+sx), _fmt6(start_cy+sy))
-                    if cand not in tried_points:
-                        proposals[key] = (start_cx+sx, start_cy+sy); made = True
-                        break
-                if made: break
-            if made: continue  # we proposed a seed
-
-        # BO trust box around incumbent (or start if best is still at start)
+        # Ring center -> best vector and radius
+        cx_center, cy_center = float(state['ring_cx']), float(state['ring_cy'])
         bx, by = best_xy
-        xmin, xmax = bx - bo_cfg.rho, bx + bo_cfg.rho
-        ymin, ymax = by - bo_cfg.rho, by + bo_cfg.rho
+        vx, vy = (bx - cx_center), (by - cy_center)
+        r_best = math.hypot(vx, vy)
 
-        next_xy, ei_max = bo2d_propose(X, y, ((xmin, xmax), (ymin, ymax)), bo_cfg)
+        # One-time radial outward push when first success very central / data sparse
+        need_radial_push = (len(tried_xy) <= 2) or (r_best < radial_push_r_thresh)
+        if need_radial_push:
+            if r_best < 1e-12:
+                vx, vy = -1.0, -1.0
+                r_best = math.sqrt(2.0)
+            ux, uy = (vx / r_best, vy / r_best)
+
+            ls_mean = 0.5 * (bo_cfg.lsx + bo_cfg.lsy)
+            hard_cap = 0.02
+            step_cap = float(bo_max_step_mm) if (bo_max_step_mm is not None) else ls_mean
+            push = max(r_step, min(step_cap, hard_cap))
+            if r_best < 0.02:
+                push = max(push, radial_push_min)
+
+            cand_r = min(r_best + push, float(r_max))
+            cand_xy = (cx_center + cand_r * ux, cy_center + cand_r * uy)
+            keyfmt_cand = (_fmt6(cand_xy[0]), _fmt6(cand_xy[1]))
+            if keyfmt_cand not in tried_points:
+                proposals[key] = (cand_xy[0], cand_xy[1])
+                continue
+
+        # Tiny cross when very sparse
+        if len(tried_xy) == 1:
+            delta = max(small_cross_delta, 0.5*(bo_cfg.lsx + bo_cfg.lsy))
+            for cx_, cy_ in [(best_xy[0]+delta, best_xy[1]), (best_xy[0]-delta, best_xy[1]),
+                             (best_xy[0], best_xy[1]+delta), (best_xy[0], best_xy[1]-delta)]:
+                kf = (_fmt6(cx_), _fmt6(cy_))
+                if kf not in tried_points:
+                    proposals[key] = (cx_, cy_)
+                    break
+            if key in proposals:
+                continue
+
+        # Trust-region
+        dists = np.sqrt(np.sum((tried_xy - np.array(best_xy))**2, axis=1))
+        if len(dists) >= 3:
+            rho = float(np.clip(2.0 * np.median(dists), bo_rho_min, bo_rho_max))
+        else:
+            rho = float(np.clip(bo_rho_init, bo_rho_min, bo_rho_max))
+
+        xmin, xmax = best_xy[0] - rho, best_xy[0] + rho
+        ymin, ymax = best_xy[1] - rho, best_xy[1] + rho
+
+        # Annulus
+        radii = np.sqrt((tried_xy[:,0]-cx_center)**2 + (tried_xy[:,1]-cy_center)**2)
+        r_med = float(np.median(radii)) if len(radii) > 0 else float("nan")
+        if len(tried_xy) >= 3 and math.isfinite(r_med):
+            bo_cfg.ann_center = (cx_center, cy_center)
+            bo_cfg.ann_r_med = r_med
+            bo_cfg.ann_half = float(annulus_half)
+        else:
+            bo_cfg.ann_center = bo_cfg.ann_r_med = bo_cfg.ann_half = None
+
+        next_xy, ei_max = bo2d_propose(tried_xy, tried_wr, ((xmin, xmax), (ymin, ymax)), bo_cfg)
+
         if (next_xy is None) or (ei_max < bo_cfg.ei_eps):
-            proposals[key] = ("done", "done"); continue
+            proposals[key] = ("done", "done")
+            continue
 
-        if math.hypot(next_xy[0]-bx, next_xy[1]-by) < CONVERGE_TOL_DEFAULT:
-            proposals[key] = ("done", "done"); continue
+        if math.hypot(next_xy[0]-best_xy[0], next_xy[1]-best_xy[1]) < converge_tol:
+            proposals[key] = ("done", "done")
+            continue
 
-        if (bo_cfg.max_step_mm is not None):
+        if (bo_max_step_mm is not None) and (next_xy is not None):
+            bx, by = best_xy
             dxs, dys = next_xy[0] - bx, next_xy[1] - by
             r = math.hypot(dxs, dys)
-            cap = float(bo_cfg.max_step_mm)
+            cap = float(bo_max_step_mm)
             if r > cap and r > 0.0:
                 s = cap / r
-                next_xy = (bx + s*dxs, by + s*dys)
+                next_xy = (bx + s * dxs, by + s * dys)
 
         if (_fmt6(next_xy[0]), _fmt6(next_xy[1])) in tried_points:
-            proposals[key] = ("done", "done"); continue
+            proposals[key] = ("done", "done")
+            continue
 
         proposals[key] = (next_xy[0], next_xy[1])
 
-    # ----------------- Apply proposals to latest-run rows (unchanged style) -----------------
+    # ---- Apply proposals ----
     n_new, n_done = 0, 0
     for key, idx_list in latest_rows_by_key.items():
         if key not in proposals:
@@ -680,55 +576,65 @@ def propose_for_latest(entries, latest_run: int,
         ndx, ndy = proposals[key]
         for row_idx in idx_list:
             row = list(entries[row_idx][1])
-            if len(row) < 7: row += [""] * (7 - len(row))
+            if len(row) < 7:
+                row += [""] * (7 - len(row))
             if row[0].isdigit():
-                if isinstance(ndx, str):  # "done"
-                    row[5] = "done"; row[6] = "done"; n_done += 1
+                if isinstance(ndx, str):  # done
+                    row[5] = "done"
+                    row[6] = "done"
+                    n_done += 1
                 else:
-                    row[5] = _fmt6(float(ndx)); row[6] = _fmt6(float(ndy)); n_new += 1
+                    row[5] = _fmt6(float(ndx))
+                    row[6] = _fmt6(float(ndy))
+                    n_new += 1
                 entries[row_idx] = (None, tuple(row))
-
-    # Append/update SPSA state lines (we just append at EOF; parser preserves RAW lines)
-    if state_lines_to_append:
-        for key, stline in state_lines_to_append.items():
-            entries.append((None, ("RAW", stline)))
 
     print(f"[propose] {n_new} new proposals, {n_done} marked done")
     return entries
 
+
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Propose next detector shifts (BO or failure-aware SPSA).")
+    ap = argparse.ArgumentParser(description="Propose next center shifts using ring (until first success) then robust BO around the incumbent.")
     ap.add_argument("--run-root", default=None, help="Path to run root that contains 'runs/'. Defaults to DEFAULT_ROOT if omitted.")
+    ap.add_argument("--r-max", type=float, default=R_MAX_DEFAULT)
+    ap.add_argument("--r-step", type=float, default=R_STEP_DEFAULT)
+    ap.add_argument("--k-base", type=float, default=K_BASE_DEFAULT)
     ap.add_argument("--seed", type=int, default=SEED_DEFAULT)
+    ap.add_argument("--converge-tol", type=float, default=CONVERGE_TOL_DEFAULT)
     ap.add_argument("--sidecar", help="If provided, write proposals to this CSV instead of rewriting the log.")
 
-    # ---- BO knobs (existing) ----
-    ap.add_argument("--bo-lengthscale", type=float, default=0.02, help="Isotropic RBF lengthscale (mm)." )
-    ap.add_argument("--bo-noise", type=float, default=3e-4, help="GP nugget noise in wrmsd^2 units." )
-    ap.add_argument("--bo-candidates", type=int, default=500, help="Number of EI candidates." )
-    ap.add_argument("--bo-ei-eps", type=float, default=2e-3, help="EI threshold to mark done." )
-    ap.add_argument("--bo-rho", type=float, default=0.05, help="Trust region half-size (mm) around incumbent." )
-    ap.add_argument("--bo-max-step-mm", type=float, default=0.012, help="Hard cap on |step| from incumbent (mm)." )
+    # GP/BO params
+    ap.add_argument("--bo-lengthscale-x", type=float, default=0.02, help="RBF lengthscale in x (mm)")
+    ap.add_argument("--bo-lengthscale-y", type=float, default=0.02, help="RBF lengthscale in y (mm)")
+    ap.add_argument("--bo-noise", type=float, default=3e-4, help="GP nugget noise in wrmsd^2 units")
+    ap.add_argument("--bo-candidates", type=int, default=700, help="Number of EI candidates")
+    ap.add_argument("--bo-ei-eps", type=float, default=2e-3, help="EI threshold to mark done")
 
-    # ---- Pseudo-observation control (existing) ----
-    ap.add_argument("--penalty-offset", type=float, default=1, help="Additive penalty for unindexed pseudo-wRMSD.")
-    ap.add_argument("--seed-grid", action="store_true", help="Seed a 3x3 grid around start when observations < 3.")
-    ap.add_argument("--seed-delta", type=float, default=0.006, help="Half-spacing (mm) for the seeding grid.")
+    # Candidate sampling mix
+    ap.add_argument("--bo-local-frac", type=float, default=0.85, help="Fraction of EI candidates sampled near current best (0..1).")
+    ap.add_argument("--bo-local-sigma-scale", type=float, default=1.2, help="Local Gaussian sigma = scale * lengthscale per axis.")
+    ap.add_argument("--bo-max-step-mm", type=float, default=0.010, help="Hard cap on |step| from current best (mm) in BO phase.")
 
-    # ---- Algorithm choice ----
-    ap.add_argument("--algo", choices=["bo","spsa"], default="spsa",
-                    help="Proposal algorithm: 'bo' (Bayesian Optimization) or 'spsa' (failure-aware SPSA).")
-    print(f"[propose] algo={args.algo}")
+    # Trust region box half-sizes
+    ap.add_argument("--bo-rho-init", type=float, default=0.04, help="Initial half-size (mm) for BO bounds around current best.")
+    ap.add_argument("--bo-rho-min", type=float, default=0.001, help="Minimum BO half-size (mm).")
+    ap.add_argument("--bo-rho-max", type=float, default=0.06, help="Maximum BO half-size (mm).")
 
-    # ---- SPSA knobs ----
-    ap.add_argument("--spsa-a", type=float, default=0.01, help="SPSA step-size scale a.")
-    ap.add_argument("--spsa-A", type=float, default=10.0, help="SPSA stability constant A.")
-    ap.add_argument("--spsa-alpha", type=float, default=0.602, help="SPSA step-size exponent alpha.")
-    ap.add_argument("--spsa-c", type=float, default=0.02, help="SPSA perturbation scale c.")
-    ap.add_argument("--spsa-gamma", type=float, default=0.101, help="SPSA perturbation exponent gamma.")
-    ap.add_argument("--spsa-rho", type=float, default=0.1, help="Trust-region half-size (mm) around incumbent (SPSA).")
-    ap.add_argument("--spsa-max-step-mm", type=float, default=0.012, help="Hard cap on |step| from incumbent (SPSA).")
-    ap.add_argument("--spsa-retries", type=int, default=1, help="(Reserved) Retries per arm when forcing baseline (not used in proposer).")
+    # Guard-rail thresholds
+    ap.add_argument("--bo-mu-guard", type=float, default=0.10, help="Reject EI candidates with predicted mean > y_best + mu_guard unless var large.")
+    ap.add_argument("--bo-var-guard", type=float, default=0.08, help="Allow EI candidates with variance >= var_guard even if mean looks worse.")
+
+    # Radial push / seeding / backtrack
+    ap.add_argument("--radial-push-r-thresh", type=float, default=0.03, help="If best radius < this, perform one outward radial push.")
+    ap.add_argument("--radial-push-min", type=float, default=0.012, help="Minimum outward push when best is very central.")
+    ap.add_argument("--small-cross-delta", type=float, default=0.006, help="Half-step for tiny cross seeding around incumbent (mm).")
+    ap.add_argument("--backtrack-delta", type=float, default=0.10, help="If last_wr > best + delta, snap back toward best / cross.")
+
+    # Annulus and robust-done
+    ap.add_argument("--annulus-half", type=float, default=0.015, help="Half-width of annulus (mm) around median radius of successes.")
+    ap.add_argument("--robust-done-window", type=int, default=5, help="Recent window length for improvement check.")
+    ap.add_argument("--robust-done-improve", type=float, default=0.01, help="Required improvement over recent window to keep going.")
+    ap.add_argument("--robust-done-mad-mult", type=float, default=2.0, help="Good-band upper = median + MAD*mult from DONE events.")
 
     args = ap.parse_args(argv)
 
@@ -736,35 +642,50 @@ def main(argv=None) -> int:
     runs_dir = os.path.join(run_root, "runs")
     log_path = os.path.join(runs_dir, "image_run_log.csv")
     if not os.path.isfile(log_path):
-        print("ERROR: missing runs/image_run_log.csv", file=sys.stderr); return 2
+        print("ERROR: missing runs/image_run_log.csv", file=sys.stderr)
+        return 2
 
     entries, latest_run = parse_log(log_path)
     if latest_run < 0:
-        print("ERROR: no data rows found in image_run_log.csv", file=sys.stderr); return 2
+        print("ERROR: no data rows found in image_run_log.csv", file=sys.stderr)
+        return 2
 
-    bo_cfg = BO2DConfig(lengthscale=args.bo_lengthscale,
-                        noise=args.bo_noise,
-                        candidates=args.bo_candidates,
-                        ei_eps=args.bo_ei_eps,
-                        rng_seed=args.seed,
-                        rho=args.bo_rho,
-                        max_step_mm=args.bo_max_step_mm)
-
-    spsa_params = dict(
-        a=args.spsa_a, A=args.spsa_A, alpha=args.spsa_alpha,
-        c=args.spsa_c, gamma=args.spsa_gamma,
-        rho=args.spsa_rho, max_step_mm=args.spsa_max_step_mm,
-        retries=args.spsa_retries, rng_seed=args.seed
+    bo_cfg = BO2DConfig(
+        lsx=args.bo_lengthscale_x,
+        lsy=args.bo_lengthscale_y,
+        noise=args.bo_noise,
+        candidates=args.bo_candidates,
+        ei_eps=args.bo_ei_eps,
+        rng_seed=args.seed,
+        local_frac=args.bo_local_frac,
+        local_sigma_scale=args.bo_local_sigma_scale,
+        max_step_mm=args.bo_max_step_mm,
+        mu_guard=args.bo_mu_guard,
+        var_guard=args.bo_var_guard,
     )
 
-    updated_entries = propose_for_latest(entries, latest_run,
-                                         seed=int(args.seed),
-                                         bo_cfg=bo_cfg,
-                                         penalty_offset=float(args.penalty_offset),
-                                         seed_grid=bool(args.seed_grid),
-                                         seed_delta=float(args.seed_delta),
-                                         algo=args.algo,
-                                         spsa_params=spsa_params)
+    updated_entries = propose_for_latest(
+        entries=entries,
+        latest_run=latest_run,
+        r_max=float(args.r_max),
+        r_step=float(args.r_step),
+        k_base=float(args.k_base),
+        seed=int(args.seed),
+        converge_tol=float(args.converge_tol),
+        bo_cfg=bo_cfg,
+        bo_max_step_mm=args.bo_max_step_mm,
+        bo_rho_init=args.bo_rho_init,
+        bo_rho_min=args.bo_rho_min,
+        bo_rho_max=args.bo_rho_max,
+        radial_push_r_thresh=args.radial_push_r_thresh,
+        radial_push_min=args.radial_push_min,
+        small_cross_delta=args.small_cross_delta,
+        backtrack_delta=args.backtrack_delta,
+        annulus_half=args.annulus_half,
+        robust_done_window=args.robust_done_window,
+        robust_done_improve=args.robust_done_improve,
+        robust_done_mad_mult=args.robust_done_mad_mult,
+    )
 
     if args.sidecar:
         with open(args.sidecar, "w", encoding="utf-8") as f:

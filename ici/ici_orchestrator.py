@@ -23,9 +23,15 @@ import time, datetime, threading
 from typing import List, Tuple
 
 # Default paths
-DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"
-DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
+# DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
+# DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
+
+# Default paths
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_007"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
 DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
 
 # Default indexamajig / xgandalf / integration flags
@@ -48,7 +54,7 @@ DEFAULT_FLAGS = [
     "--xgandalf-grad-desc-iterations=1",
     "--xgandalf-tolerance=0.02",
     "--int-radius=4,5,9",
-    # "--no-retry",
+    "--no-retry",
     "--no-half-pixel-shift",
     "--no-non-hits-in-stream",
     # "--fix-profile-radius=70000000",
