@@ -152,7 +152,7 @@ def ensure_sh_in_run(run_root: str, n: int) -> str:
             with open(target_sh, "w", encoding="utf-8") as f:
                 f.write(text_new)
             _copy_permissions(donor_sh, target_sh)
-            print(f"[backfill] Created {target_sh} from {donor_sh}")
+            # print(f"[backfill] Created {target_sh} from {donor_sh}")
             return target_sh
 
     raise SystemExit(
@@ -191,8 +191,8 @@ def main(argv=None):
         target_n = autodetect_latest_run(run_root)
         print(f"[start] Auto-detected latest run: {target_n:03d}")
 
-    print(f"Run root : {run_root}")
-    print(f"Target   : {_run_dir(run_root, target_n)}")
+    # print(f"Run root : {run_root}")
+    # print(f"Target   : {_run_dir(run_root, target_n)}")
 
     target_sh = ensure_sh_in_run(run_root, target_n)
     print(f"[done] Ensured .sh present: {target_sh}")

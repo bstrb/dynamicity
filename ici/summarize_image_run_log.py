@@ -274,7 +274,7 @@ def main():
     ))
 
 
-    print("[summary] Proposals: due to unindexed (ring)={}, due to local optimization (BO)={}".format(
+    print("[summary] Proposals: due to unindexed (explore)={}, due to local optimization (TuRBO)={}".format(
         ring_props, bo_props))
 
     print("[summary] Done events: count={}, wRMSD mean={}, median={}".format(

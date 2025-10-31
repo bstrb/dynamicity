@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-propose_next_shifts_hillmap_opt.py — CSV parser + two‑phase proposer (HillMap → Optimized Mapper)
+propose_next_shifts_hillmap.py — CSV parser + two‑phase proposer (HillMap → Gradient Mapper)
 
-Step 1 (HillMap exploration; unchanged logic, few knobs):
-  • Start with a wide, shallow 2D Gaussian HILL at the FIRST tried shift.
-  • Each SUCCESS adds a Gaussian HILL; each FAILURE adds a smaller Gaussian DENT.
-  • Propose next point by sampling proportionally to this field (with exploration floor & min spacing).
-  • Switch to Step 2 after N successes.
+Overview
+--------
+Step 1 (HillMap exploration; few parameters):
+  • Start with a wide, shallow 2D Gaussian HILL centered at the FIRST tried shift of the event.
+    - This encodes the prior belief of higher index probability near that start.
+  • Each SUCCESSFUL index adds another Gaussian HILL (same σ as failures).
+  • Each UNSUCCESSFUL index adds a smaller Gaussian DENT (negative amplitude) at that point.
+  • Next probe is drawn RANDOMLY but PROPORTIONALLY to this landscape
+    (with a small global exploration floor and a minimum spacing to avoid duplicates).
+  • Continue until we have N_success successes → switch to Step 2.
 
-Step 2 (Optimized local mapping):
-  • Robustly fit a quadratic: w(x,y) ≈ a x^2 + b y^2 + c xy + d x + e y + f  (IRLS + Tikhonov).
-  • Ensure a positive‑definite Hessian (project if needed) to get a stable convex basin.
-  • Build a small set of candidates and COMMIT to the best predicted improvement:
-      (1) toward quadratic minimizer (direct if close),
-      (2) toward a softargmin (weighted centroid) of successes,
-      (3) along the negative gradient (rotated fallbacks if spacing violated).
-    Add a slight failure bump to the prediction (reuse Step‑1 σ).
-  • Convergence ("done"): if ||∇w(x*)|| is small and the minimizer is within a tiny step, mark DONE.
-  • If a short streak of unindexed proposals in Step 2 occurs, fall back to Step 1.
+Step 2 (Local wRMSD mapping via quadratic gradient search):
+  • Fit a local quadratic surface w(x,y) ≈ a x^2 + b y^2 + c xy + d x + e y + f to the SUCCESS points.
+  • Move from the current best success along the NEGATIVE GRADIENT of this quadratic
+    by a short step (fraction of radius). This is robust even if successes lie on one side.
+  • If the last few proposals were unindexed, fall back to Step 1 (tunable small integer).
+  • All moves obey a circular bound of radius R (points outside are projected to the disk).
 
 CSV format preserved:
   "#/abs/path event <int>"
@@ -92,23 +93,27 @@ def write_log(log_path: str, entries) -> None:
 # -------------------------- Geometry & kernels --------------------------
 
 def _uniform_points_in_disk(rng: np.random.Generator, n: int, R: float) -> np.ndarray:
+    """Uniform random points in a disk of radius R centered at (0,0)."""
     u = rng.random(n)
     r = R * np.sqrt(u)
     theta = rng.random(n) * 2.0 * np.pi
-    x = r * np.cos(theta); y = r * np.sin(theta)
+    x = r * np.cos(theta)
+    y = r * np.sin(theta)
     return np.stack([x, y], axis=1).astype(float)
 
 def _gauss2(xy: np.ndarray, center: np.ndarray, sigma: float) -> np.ndarray:
+    """2D isotropic Gaussian G(x)=exp(-||x-c||^2 / (2σ^2)); vectorized for xy shape (N,2)."""
     if sigma <= 0:
         return np.zeros((xy.shape[0],), dtype=float)
     d2 = np.sum((xy - center[None, :])**2, axis=1)
     return np.exp(-0.5 * d2 / (sigma * sigma))
 
 def _min_dist(xy: np.ndarray, tried: np.ndarray) -> np.ndarray:
+    """Return min distance from each xy[i] to any point in tried (shape (M,2))."""
     if tried.size == 0:
         return np.full((xy.shape[0],), np.inf, dtype=float)
     diff = xy[:, None, :] - tried[None, :, :]
-    d2 = np.sum(diff * diff, axis=2)
+    d2 = np.sum(diff * diff, axis=2)  # (N, M)
     return np.sqrt(np.min(d2, axis=1))
 
 def _project_to_disk(p: np.ndarray, R: float) -> np.ndarray:
@@ -116,6 +121,44 @@ def _project_to_disk(p: np.ndarray, R: float) -> np.ndarray:
     if n <= R or n == 0.0:
         return p
     return p * (R / n)
+
+# -------------------------- Quadratic fit for Step 2 --------------------------
+
+def _fit_quadratic(X: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, bool]:
+    """
+    Fit w ≈ a x^2 + b y^2 + c x y + d x + e y + f using least squares.
+    Returns coefficients [a, b, c, d, e, f] and a flag indicating if the fit is well-conditioned.
+    """
+    n = X.shape[0]
+    A = np.column_stack([X[:,0]**2, X[:,1]**2, X[:,0]*X[:,1], X[:,0], X[:,1], np.ones(n)])
+    try:
+        beta, residuals, rank, s = np.linalg.lstsq(A, y, rcond=None)
+        ok = (rank == 6)
+        return beta, ok
+    except np.linalg.LinAlgError:
+        return np.zeros(6, float), False
+
+def _quad_gradient(beta: np.ndarray, x: float, y: float) -> np.ndarray:
+    a, b, c, d, e, f = beta
+    gx = 2.0*a*x + c*y + d
+    gy = c*x + 2.0*b*y + e
+    return np.array([gx, gy], float)
+
+def _quad_minimizer(beta: np.ndarray) -> Optional[np.ndarray]:
+    a, b, c, d, e, f = beta
+    H = np.array([[2.0*a, c],[c, 2.0*b]], float)
+    g = np.array([d, e], float)
+    # Solve H [x;y] + g = 0  ->  [x;y] = - H^{-1} g
+    try:
+        sol = -np.linalg.solve(H, g)
+        return sol
+    except np.linalg.LinAlgError:
+        return None
+
+def _is_pd_hessian(beta: np.ndarray) -> bool:
+    a, b, c, d, e, f = beta
+    # Hessian positive definite: a>0, b>0, and 4ab - c^2 > 0
+    return (a > 0.0) and (b > 0.0) and ((4.0*a*b - c*c) > 1e-12)
 
 # -------------------------- Step 1: HillMap sampler --------------------------
 
@@ -135,7 +178,12 @@ def _step1_hillmap(
     min_spacing: float,
     tried: np.ndarray,
 ) -> Tuple[float, float, str]:
+    """
+    Build probability field: F = amp_prior * G0 + sum(amp_success * G_succ) - sum(amp_fail * G_fail)
+    Sample candidate proportional to max(F,0) + explore_floor, with min spacing.
+    """
     C = _uniform_points_in_disk(rng, n_cand, R)
+    # Min spacing
     dmin = _min_dist(C, tried)
     mask = dmin >= (min_spacing - 1e-12)
     if not np.any(mask):
@@ -145,214 +193,33 @@ def _step1_hillmap(
         return 0.0, 0.0, "no_candidates"
 
     F = np.zeros((C.shape[0],), dtype=float)
-    # prior hill at first shift
+    # Prior hill at first shift
     c0 = np.array([first_shift[0], first_shift[1]], float)
     F += amp_prior * _gauss2(C, c0, sigma0)
-    # success hills
+
+    # Success hills
     if successes:
         S = np.array(successes, float)
         for i in range(S.shape[0]):
             F += amp_success * _gauss2(C, S[i, :], sigma)
-    # failure dents
+
+    # Failure dents
     if failures:
         for fx, fy in failures:
             F -= amp_fail * _gauss2(C, np.array([fx, fy], float), sigma)
 
+    # Convert to weights with exploration floor
     w = np.maximum(F, 0.0) + float(explore_floor)
     s = float(np.sum(w))
     if not np.isfinite(s) or s <= 0.0:
         j = int(rng.integers(0, C.shape[0]))
         return float(C[j,0]), float(C[j,1]), "step1_uniform_fallback"
+
     w = w / s
     j = int(rng.choice(C.shape[0], p=w))
     return float(C[j,0]), float(C[j,1]), "step1_hillmap"
 
-# -------------------------- Step 2: Optimized mapper --------------------------
-
-def _design_matrix(X: np.ndarray) -> np.ndarray:
-    return np.column_stack([X[:,0]**2, X[:,1]**2, X[:,0]*X[:,1], X[:,0], X[:,1], np.ones(X.shape[0])])
-
-def _irls_quadratic_fit(X: np.ndarray, y: np.ndarray, lam: float = 1e-10, iters: int = 2) -> Tuple[np.ndarray, float]:
-    """
-    Robust (Huber-like) IRLS + Tikhonov. Returns beta and scale (MAD).
-    """
-    A = _design_matrix(X)
-    # Initial LS
-    AtA = A.T @ A + lam * np.eye(6)
-    Aty = A.T @ y
-    try:
-        beta = np.linalg.solve(AtA, Aty)
-    except np.linalg.LinAlgError:
-        beta = np.linalg.lstsq(AtA, Aty, rcond=None)[0]
-    # IRLS
-    for _ in range(iters):
-        r = y - A @ beta
-        s = np.median(np.abs(r - np.median(r))) * 1.4826 + 1e-12  # MAD scale
-        # Huber weights: w = min(1, k*s/|r|)
-        k = 1.345
-        w = np.ones_like(r)
-        mask = np.abs(r) > (k * s)
-        w[mask] = (k * s) / (np.abs(r[mask]) + 1e-12)
-        W = np.diag(w)
-        AtW = A.T @ W
-        AtWA = AtW @ A + lam * np.eye(6)
-        AtWy = AtW @ y
-        try:
-            beta = np.linalg.solve(AtWA, AtWy)
-        except np.linalg.LinAlgError:
-            beta = np.linalg.lstsq(AtWA, AtWy, rcond=None)[0]
-    return beta, s
-
-def _hessian_from_beta(beta: np.ndarray) -> np.ndarray:
-    a, b, c, d, e, f = beta
-    return np.array([[2.0*a, c], [c, 2.0*b]], float)
-
-def _gradient_from_beta(beta: np.ndarray, x: np.ndarray) -> np.ndarray:
-    a, b, c, d, e, f = beta
-    return np.array([2.0*a*x[0] + c*x[1] + d, c*x[0] + 2.0*b*x[1] + e], float)
-
-def _value_from_beta(beta: np.ndarray, x: np.ndarray) -> float:
-    a, b, c, d, e, f = beta
-    return float(a*x[0]**2 + b*x[1]**2 + c*x[0]*x[1] + d*x[0] + e*x[1] + f)
-
-def _ensure_pd(H: np.ndarray, min_eig: float = 1e-10) -> np.ndarray:
-    # Project to nearest PD by shifting eigenvalues if needed
-    vals, vecs = np.linalg.eigh(H)
-    if vals[0] >= min_eig:
-        return H
-    shift = (min_eig - vals[0]) + 1e-12
-    return H + shift * np.eye(2)
-
-def _softargmin_center(X: np.ndarray, y: np.ndarray) -> np.ndarray:
-    # weights = exp(-(w - w_min)/tau), tau ~ IQR(y) (robust scaling)
-    wmin = float(np.min(y))
-    q75, q25 = np.percentile(y, [75, 25])
-    tau = max(1e-9, 0.5 * (q75 - q25) if q75 > q25 else 1e-3)
-    w = np.exp(-(y - wmin) / tau)
-    wsum = float(np.sum(w)) + 1e-12
-    mu = (X * w[:, None]).sum(axis=0) / wsum
-    return mu
-
-def _predict_with_fail_bumps(beta: np.ndarray, C: np.ndarray, failures: List[Tuple[float,float]], sigma: float, bump_amp: float) -> np.ndarray:
-    # Predict w at C + small bump from nearby failures
-    pred = np.array([_value_from_beta(beta, C[i]) for i in range(C.shape[0])], float)
-    if failures and bump_amp > 0.0 and sigma > 0.0:
-        for fx, fy in failures:
-            pred += bump_amp * _gauss2(C, np.array([fx, fy], float), sigma)
-    return pred
-
-def _step2_optimized_mapper(
-    rng: np.random.Generator,
-    successes_w: List[Tuple[float, float, float]],
-    failures: List[Tuple[float, float]],
-    R: float,
-    sigma: float,
-    step_frac: float,
-    direct_frac: float,
-    fail_bump_frac: float,
-    min_spacing: float,
-    tried: np.ndarray,
-    done_step_mm: float,
-    done_grad: float,
-) -> Tuple[object, object, str]:
-    """
-    Hybrid commit:
-      - Fit robust quadratic; ensure PD Hessian.
-      - Build candidates: toward minimizer (direct if close), toward softargmin, along -grad.
-      - Score by predicted w (with failure bumps) and pick best feasible (spacing, bound).
-      - 'done' if gradient small & minimizer very close.
-    Returns (next_dx| 'done', next_dy | 'done', reason)
-    """
-    X = np.array([[x, y] for (x, y, _) in successes_w], float)
-    y = np.array([w for (_, _, w) in successes_w], float)
-    # Incumbent best
-    jbest = int(np.argmin(y)); xb = X[jbest, :].copy(); wbest = float(y[jbest])
-
-    # Robust quadratic fit
-    beta, s_scale = _irls_quadratic_fit(X, y, lam=1e-10, iters=2)
-    H = _ensure_pd(_hessian_from_beta(beta))
-    g = _gradient_from_beta(beta, xb)
-
-    # Analytical minimizer (for PD Hessian)
-    try:
-        xm = -np.linalg.solve(H, np.array([beta[3], beta[4]]))
-    except np.linalg.LinAlgError:
-        xm = xb.copy()
-
-    # Convergence: small gradient + minimizer near
-    dist_to_min = float(np.linalg.norm(xm - xb))
-    gnorm = float(np.linalg.norm(g))
-    if (dist_to_min <= max(1e-12, done_step_mm)) and (gnorm <= max(1e-12, done_grad)):
-        return "done", "done", "step2_done_converged"
-
-    # Candidate set
-    C = []
-
-    # (1) Toward minimizer (direct if close)
-    xm_clipped = _project_to_disk(xm, R)
-    d = float(np.linalg.norm(xm_clipped - xb))
-    if d <= max(1e-12, direct_frac * R):
-        c1 = xm_clipped
-    else:
-        c1 = xb + (step_frac * R) * ((xm_clipped - xb) / (d + 1e-12))
-        c1 = _project_to_disk(c1, R)
-    C.append(("toward_minimizer", c1))
-
-    # (2) Toward softargmin center
-    mu = _softargmin_center(X, y); mu = _project_to_disk(mu, R)
-    d2 = float(np.linalg.norm(mu - xb))
-    if d2 <= max(1e-12, direct_frac * R):
-        c2 = mu
-    else:
-        c2 = xb + (step_frac * R) * ((mu - xb) / (d2 + 1e-12))
-        c2 = _project_to_disk(c2, R)
-    C.append(("toward_softargmin", c2))
-
-    # (3) Along negative gradient (rotated fallbacks if spacing fails later)
-    if gnorm > 1e-12:
-        dirg = -g / gnorm
-    else:
-        z = rng.standard_normal(2); dirg = z / (np.linalg.norm(z) + 1e-12)
-    c3 = _project_to_disk(xb + (step_frac * R) * dirg, R)
-    C.append(("along_neg_grad", c3))
-
-    # Filter by min-spacing
-    feasible = []
-    for tag, cand in C:
-        if _min_dist(cand[None,:], tried)[0] >= (min_spacing - 1e-12):
-            feasible.append((tag, cand))
-
-    # If none feasible, rotate gradient direction to find a free slot
-    if not feasible:
-        base_angle = math.atan2(dirg[1], dirg[0])
-        for k in range(1, 13):
-            th = base_angle + (k * (math.pi / 12.0))
-            alt_dir = np.array([math.cos(th), math.sin(th)], float)
-            cand = _project_to_disk(xb + (step_frac * R) * alt_dir, R)
-            if _min_dist(cand[None,:], tried)[0] >= (min_spacing - 1e-12):
-                feasible.append(("grad_rotated", cand))
-                break
-        if not feasible:
-            # Last resort: tiny jitter near xb
-            for _ in range(64):
-                jitter = rng.standard_normal(2); jitter /= (np.linalg.norm(jitter) + 1e-12)
-                cand = _project_to_disk(xb + (0.5*step_frac*R) * jitter, R)
-                if _min_dist(cand[None,:], tried)[0] >= (min_spacing - 1e-12):
-                    feasible.append(("jitter", cand)); break
-    if not feasible:
-        return float(xb[0]), float(xb[1]), "step2_no_feasible_found"
-
-    # Score feasible by predicted w + failure bumps
-    med_w = float(np.median(y)) if y.size > 0 else wbest
-    bump_amp = float(fail_bump_frac) * med_w
-    Cand = np.stack([c for _, c in feasible], axis=0)
-    pred = _predict_with_fail_bumps(beta, Cand, failures, sigma, bump_amp)
-    j = int(np.argmin(pred))
-    tag_best, c_best = feasible[j]
-
-    return float(c_best[0]), float(c_best[1]), f"step2_commit:{tag_best}"
-
-# -------------------------- Main per-event proposal --------------------------
+# -------------------------- Step 2: Gradient mapper --------------------------
 
 def _recent_unindexed_streak(trials_sorted: List[Tuple[int,float,float,int,Optional[float]]]) -> int:
     streak = 0
@@ -363,7 +230,89 @@ def _recent_unindexed_streak(trials_sorted: List[Tuple[int,float,float,int,Optio
             break
     return streak
 
-def propose_event_hillmap_opt(
+def _step2_gradient_mapper(
+    rng: np.random.Generator,
+    successes_w: List[Tuple[float, float, float]],
+    R: float,
+    step_frac: float,
+    min_spacing: float,
+    tried: np.ndarray,
+) -> Tuple[float, float, str]:
+    """
+    Fit quadratic to success points; step from incumbent along negative gradient by step_frac * R.
+    If quadratic is well-conditioned and PD, optionally move directly toward its minimizer (clipped).
+    """
+    X = np.array([[x, y] for (x, y, _) in successes_w], float)
+    y = np.array([w for (_, _, w) in successes_w], float)
+
+    # Best incumbent
+    jbest = int(np.argmin(y))
+    xb = X[jbest, :].copy()
+
+    beta, ok = _fit_quadratic(X, y)
+    if not ok:
+        # fallback: small jitter around incumbent
+        for _ in range(64):
+            step = step_frac * R
+            jitter = rng.standard_normal(2)
+            jitter = jitter / (np.linalg.norm(jitter) + 1e-12)
+            cand = xb - step * jitter
+            cand = _project_to_disk(cand, R)
+            if _min_dist(cand[None,:], tried)[0] >= min_spacing:
+                return float(cand[0]), float(cand[1]), "step2_quad_fit_fallback_jitter"
+        return float(xb[0]), float(xb[1]), "step2_quad_fit_fallback_incumbent"
+
+    # Prefer moving toward quadratic minimizer if PD & inside disk
+    reason = "step2_grad_descent"
+    if _is_pd_hessian(beta):
+        xm = _quad_minimizer(beta)
+        if xm is not None and np.isfinite(xm).all():
+            xm = _project_to_disk(xm, R)
+            # Take a step toward xm from xb
+            direction = xm - xb
+            norm = float(np.linalg.norm(direction))
+            if norm > 1e-12:
+                step = step_frac * R
+                move = direction / norm * min(step, norm)
+                cand = xb + move
+                if _min_dist(cand[None,:], tried)[0] >= min_spacing:
+                    return float(cand[0]), float(cand[1]), "step2_toward_quad_min"
+            # If too close or same point, fall through to gradient step
+
+    # Gradient at incumbent, step opposite gradient
+    g = _quad_gradient(beta, xb[0], xb[1])
+    gnorm = float(np.linalg.norm(g))
+    if gnorm < 1e-12:
+        # tiny gradient; nudge in random direction
+        for _ in range(64):
+            step = step_frac * R
+            jitter = rng.standard_normal(2)
+            jitter = jitter / (np.linalg.norm(jitter) + 1e-12)
+            cand = xb - step * jitter
+            cand = _project_to_disk(cand, R)
+            if _min_dist(cand[None,:], tried)[0] >= min_spacing:
+                return float(cand[0]), float(cand[1]), "step2_grad_tiny_random"
+        return float(xb[0]), float(xb[1]), "step2_grad_tiny_incumbent"
+    direction = - g / gnorm
+    cand = xb + (step_frac * R) * direction
+    cand = _project_to_disk(cand, R)
+    if _min_dist(cand[None,:], tried)[0] >= min_spacing:
+        return float(cand[0]), float(cand[1]), reason
+
+    # If spacing violated, try rotating direction a bit to find a free spot
+    angle = np.arctan2(direction[1], direction[0])
+    for k in range(1, 13):
+        th = angle + (k * (np.pi / 12.0))  # +/-15°, 30°, ...
+        alt_dir = np.array([np.cos(th), np.sin(th)], float)
+        cand = xb + (step_frac * R) * alt_dir
+        cand = _project_to_disk(cand, R)
+        if _min_dist(cand[None,:], tried)[0] >= min_spacing:
+            return float(cand[0]), float(cand[1]), "step2_grad_rotated"
+    return float(xb[0]), float(xb[1]), "step2_no_free_dir"
+
+# -------------------------- Main per-event proposal --------------------------
+
+def propose_event_hillmap(
     trials_sorted: List[Tuple[int,float,float,int,Optional[float]]],
     R: float,
     rng: np.random.Generator,
@@ -379,12 +328,9 @@ def propose_event_hillmap_opt(
     min_spacing: float,
     # Step 2 params
     step2_step_frac: float,
-    step2_direct_frac: float,
-    step2_fail_bump_frac: float,
     back_to_step1_streak: int,
-    done_step_mm: float,
-    done_grad: float,
-) -> Tuple[object, object, str]:
+) -> Tuple[float, float, str]:
+    """Return (next_dx, next_dy, reason_str)."""
     tried = np.array([[dx, dy] for (_, dx, dy, _, _) in trials_sorted], float) if len(trials_sorted)>0 else np.zeros((0,2), float)
     successes = []
     successes_w = []
@@ -410,19 +356,13 @@ def propose_event_hillmap_opt(
 
     # Step 2 conditions
     if len(successes_w) >= max(3, N_success_to_step2) and _recent_unindexed_streak(trials_sorted) < back_to_step1_streak:
-        ndx, ndy, r = _step2_optimized_mapper(
+        ndx, ndy, r = _step2_gradient_mapper(
             rng=rng,
             successes_w=successes_w,
-            failures=failures,
             R=R,
-            sigma=sigma,
             step_frac=step2_step_frac,
-            direct_frac=step2_direct_frac,
-            fail_bump_frac=step2_fail_bump_frac,
             min_spacing=min_spacing,
             tried=tried,
-            done_step_mm=done_step_mm,
-            done_grad=done_grad,
         )
         return ndx, ndy, r
 
@@ -449,7 +389,7 @@ def propose_event_hillmap_opt(
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description="Per-event proposer: HillMap (success-hills + failure-dents) + Optimized Quadratic Mapper."
+        description="Per-event proposer: HillMap (success-hills + failure-dents) + Quadratic Gradient Mapper."
     )
     ap.add_argument("--run-root", required=True, help="Path that contains 'runs/image_run_log.csv'.")
     ap.add_argument("--radius-mm", type=float, default=0.05, help="Circular bound radius for |(dx,dy)|.")
@@ -458,36 +398,28 @@ def main(argv=None) -> int:
     # Step 1 (HillMap) — minimal, well-described knobs
     ap.add_argument("--step1-N-success", type=int, default=3,
                     help="Number of successes required to enter Step 2 (>=3). Lower = map sooner.")
-    ap.add_argument("--sigma0-frac", type=float, default=0.70,
-                    help="Initial prior hill width as fraction of radius (e.g., 0.7 → σ0 = 0.7*R). Bigger = cling near first point longer.")
-    ap.add_argument("--sigma-frac", type=float, default=0.22,
+    ap.add_argument("--sigma0-frac", type=float, default=1,
+                    help="Initial prior hill width as fraction of radius (e.g., 0.6 → σ0 = 0.6*R). Bigger = cling near first point longer.")
+    ap.add_argument("--sigma-frac", type=float, default=0.3,
                     help="Shared Gaussian width for success hills and failure dents as fraction of radius. Bigger = broader influence.")
-    ap.add_argument("--prior-amp-frac", type=float, default=0.25,
+    ap.add_argument("--prior-amp-frac", type=float, default=1.50,
                     help="Initial prior hill amplitude as a fraction of success amplitude.")
     ap.add_argument("--success-amp", type=float, default=1.0,
                     help="Amplitude for success hills. Keep at 1.0 and tune others relative to it.")
-    ap.add_argument("--fail-amp-frac", type=float, default=0.55,
+    ap.add_argument("--fail-amp-frac", type=float, default=0.30,
                     help="Failure dent amplitude as a fraction of success amplitude (smaller than 1).")
-    ap.add_argument("--step1-candidates", type=int, default=8192,
+    ap.add_argument("--step1-candidates", type=int, default=4096,
                     help="Number of random candidates in disk before picking one by HillMap weights.")
-    ap.add_argument("--explore-floor", type=float, default=0.12,
+    ap.add_argument("--explore-floor", type=float, default=0.10,
                     help="Minimum probability mass everywhere to avoid getting stuck. Bigger = more global exploration.")
-    ap.add_argument("--min-spacing-mm", type=float, default=0.003,
+    ap.add_argument("--min-spacing-mm", type=float, default=0.01,
                     help="Minimum allowed distance from any previously tried point.")
 
-    # Step 2 (Optimized Mapper) — few knobs
-    ap.add_argument("--step2-step-frac", type=float, default=0.18,
-                    help="Step length as fraction of radius when committing toward minimizer/softargmin/gradient.")
-    ap.add_argument("--step2-direct-frac", type=float, default=0.15,
-                    help="If quadratic minimizer or softargmin lies within this fraction of radius, jump directly to it.")
-    ap.add_argument("--step2-fail-bump-frac", type=float, default=0.10,
-                    help="Failure-bump strength (× median wRMSD) added to predictions to discourage failing zones.")
+    # Step 2 (Gradient Mapper) — minimal knobs
+    ap.add_argument("--step2-step-frac", type=float, default=0.20,
+                    help="Step length as fraction of radius when following negative gradient (e.g., 0.2 → step = 0.2*R).")
     ap.add_argument("--back-to-step1-streak", type=int, default=5,
                     help="Consecutive unindexed proposals in Step 2 that trigger a fallback to Step 1.")
-    ap.add_argument("--done-step-mm", type=float, default=0.005,
-                    help="Mark done if quadratic minimizer is within this distance of the incumbent best.")
-    ap.add_argument("--done-grad", type=float, default=0.005,
-                    help="Mark done if gradient norm at the incumbent best is below this.")
 
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
@@ -525,14 +457,15 @@ def main(argv=None) -> int:
             latest_rows_by_key.setdefault(current_key, []).append(idx)
 
     rng_master = np.random.default_rng(int(args.seed))
-    n_new, n_done = 0, 0
+    n_new = 0
 
     for key, rows in latest_rows_by_key.items():
         trials = sorted(history.get(key, []), key=lambda t: t[0])
+        # Per-event RNG for reproducibility
         key_seed = int(abs(hash((args.seed, key[0], key[1]))) % (2**32 - 1))
         rng = np.random.default_rng(key_seed)
 
-        ndx, ndy, reason = propose_event_hillmap_opt(
+        ndx, ndy, reason = propose_event_hillmap(
             trials_sorted=trials,
             R=float(args.radius_mm),
             rng=rng,
@@ -548,11 +481,7 @@ def main(argv=None) -> int:
             min_spacing=float(args.min_spacing_mm),
             # Step 2
             step2_step_frac=float(args.step2_step_frac),
-            step2_direct_frac=float(args.step2_direct_frac),
-            step2_fail_bump_frac=float(args.step2_fail_bump_frac),
             back_to_step1_streak=int(args.back_to_step1_streak),
-            done_step_mm=float(args.done_step_mm),
-            done_grad=float(args.done_grad),
         )
 
         for row_idx in rows:
@@ -560,15 +489,12 @@ def main(argv=None) -> int:
             if len(row) < 7:
                 row += [""] * (7 - len(row))
             if row[0].isdigit():
-                if isinstance(ndx, str):
-                    row[5] = "done"; row[6] = "done"; n_done += 1
-                else:
-                    row[5] = _fmt6(float(ndx)); row[6] = _fmt6(float(ndy)); n_new += 1
+                row[5] = _fmt6(float(ndx)); row[6] = _fmt6(float(ndy)); n_new += 1
                 entries[row_idx] = (None, tuple(row))
         # print(f"[diag:{os.path.basename(key[0])}|event{key[1]}] reason={reason}")
 
     write_log(log_path, entries)
-    print(f"[propose] {n_new} new proposals, {n_done} marked done")
+    print(f"[propose] {n_new} new proposals")
     print(f"[propose] Updated {log_path} for run_{latest_run:03d}")
     return 0
 

@@ -240,9 +240,9 @@ def main(argv=None) -> int:
     # Persist the overlay→original mapping (JSON + TSV)
     map_json_path = write_overlay_mapping(next_run_dir, overlay_paths)
 
-    print(f"[overlay] Created/updated {len(overlay_paths)} overlay files in {next_run_dir}")
-    print(f"[overlay] Wrote {n_lines} lines to {lst_path}")
-    print(f"[overlay] Wrote overlay→original map to {map_json_path}")
+    # print(f"[overlay] Created/updated {len(overlay_paths)} overlay files in {next_run_dir}")
+    # print(f"[overlay] Wrote {n_lines} lines to {lst_path}")
+    # print(f"[overlay] Wrote overlay→original map to {map_json_path}")
     return 0
 
 if __name__ == "__main__":
