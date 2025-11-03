@@ -22,6 +22,8 @@ import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
+DEFAULT_MAX_ITERS = 120
+
 # Default paths
 # DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"
 # DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
@@ -29,7 +31,7 @@ from typing import List, Tuple
 # DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
 
 # Default paths
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_009"
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_010"
 DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
 DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
 DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
@@ -236,7 +238,7 @@ def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list):
     run_py("build_early_break_from_log.py", ["--run-root", os.path.join(run_root, "runs")])
     print("[done] Initialization cycle complete. Proceeding to loop...")
 
-def iterate_until_done(run_root, max_iters=100):
+def iterate_until_done(run_root, max_iters=DEFAULT_MAX_ITERS):
     rd = runs_dir(run_root)
     it = 0
     while it < max_iters:
