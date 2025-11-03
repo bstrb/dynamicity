@@ -22,19 +22,19 @@ import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
-DEFAULT_MAX_ITERS = 120
+DEFAULT_MAX_ITERS = 50
 
 # Default paths
-# DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
-
-# Default paths
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_010"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"
+DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
 DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
+
+# Default paths
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_010"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+# DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
 
 # Default indexamajig / xgandalf / integration flags
 
@@ -223,14 +223,12 @@ def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list):
                 "--run-root", run_root,
                 "--geom", geom,
                 "--cell", cell,
-                # optional: you can omit this since default is "indexamajig"
-                "--indexamajig", "indexamajig",
-                # positional sources (one or many)
                 *sources,
-                # everything after `--` gets forwarded as indexamajig flags
-                "--", *DEFAULT_FLAGS,
             ],
         )
+    run_py("create_run_sh.py", ["--run-root", run_root, "--geom", geom, "--cell", cell, "--run", "000",
+        "--",  # everything after this is passed directly into indexamajig
+        *DEFAULT_FLAGS,], check=False)
     run_py("run_sh.py", ["--run-root", run_root, "--run", "000"], check=False)
     run_py("evaluate_stream.py", ["--run-root", run_root, "--run", "000"], check=False)
     run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
@@ -283,7 +281,10 @@ def iterate_until_done(run_root, max_iters=DEFAULT_MAX_ITERS):
 
         run_str = f"{latest_num:03d}"
 
-        run_py("copy_next_run_sh.py", ["--run-root", run_root, "--run", run_str], check=False)
+        # run_py("copy_next_run_sh.py", ["--run-root", run_root, "--run", run_str], check=False)
+        run_py("create_run_sh.py", ["--run-root", run_root, "--geom", DEFAULT_GEOM, "--cell", DEFAULT_CELL, "--run", run_str,
+        "--",  # everything after this is passed directly into indexamajig
+        *DEFAULT_FLAGS], check=False)
         run_py("run_sh.py", ["--run-root", run_root, "--run", run_str], check=False)
         _ = run_py("fix_stream_paths.py", ["--run-dir", latest_dir, "--run", run_str, "--inplace"], check=False)
         run_py("evaluate_stream.py", ["--run-root", run_root, "--run", run_str], check=False)

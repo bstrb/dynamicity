@@ -226,8 +226,8 @@ def main(argv=None) -> int:
 
     # Step 1 knobs
     ap.add_argument("--step1-A0", type=float, default=1.0)
-    ap.add_argument("--step1-hill-amp-frac", type=float, default=1.0)
-    ap.add_argument("--step1-drop-amp-frac", type=float, default=0.5)
+    ap.add_argument("--step1-hill-amp-frac", type=float, default=0.4)
+    ap.add_argument("--step1-drop-amp-frac", type=float, default=0.2)
     ap.add_argument("--step1-candidates", type=int, default=8192)
     ap.add_argument("--step1-explore-floor", type=float, default=1e-6)
     ap.add_argument("--step1-allow-spacing-relax", action="store_true")
@@ -236,7 +236,7 @@ def main(argv=None) -> int:
                 choices=["bayes", "meanshift", "none"], help="'bayes','meanshift' or 'none' to disable optimization after Step 1")
 
     # (Legacy) Step-2 knobs mean-shift or Bayes
-    ap.add_argument("--N4-step2", type=int, default=100)
+    ap.add_argument("--N4-step2", type=int, default=50)
     ap.add_argument("--step2-step-frac", type=float, default=0.5, help="(unused by mean-shift)")
     ap.add_argument("--step2-direct-frac", type=float, default=0.1, help="(unused by mean-shift)")
     ap.add_argument("--step2-fail-bump-frac", type=float, default=0.01, help="(unused by mean-shift)")

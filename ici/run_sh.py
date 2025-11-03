@@ -61,7 +61,7 @@ def run_script(run_dir: str, run: str) -> int:
 
     print(f"Running: {sh}")
     with open(out, "w", encoding="utf-8") as fo, open(err, "w", encoding="utf-8") as fe:
-        proc = subprocess.run(["/bin/bash", sh], stdout=fo, stderr=fe)
+        proc = subprocess.run(["/bin/bash", sh], stdout=fo, stderr=fe, cwd=run_dir)
 
     print(f"Return code: {proc.returncode}")
     if proc.returncode != 0:
