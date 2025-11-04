@@ -198,8 +198,8 @@ if __name__ == "__main__":
     ap.add_argument("--radius-mm", type=float, default=0.05)
     ap.add_argument("--min-spacing-mm", type=float, default=0.001)
     ap.add_argument("--A0", type=float, default=1.0)
-    ap.add_argument("--hill-amp-frac", type=float, default=0.4)
-    ap.add_argument("--drop-amp-frac", type=float, default=0.2)
+    ap.add_argument("--hill-amp-frac", type=float, default=0.8)
+    ap.add_argument("--drop-amp-frac", type=float, default=0.5)
     ap.add_argument("--explore-floor", type=float, default=1e-6)
     args = ap.parse_args()
 
