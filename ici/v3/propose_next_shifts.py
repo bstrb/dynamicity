@@ -291,10 +291,10 @@ def propose_event(
                     x, y = res.proposal_xy_mm
                     return float(x), float(y), "step1_after_dxdy_fail"
 
-            print(f"[propose] dxdy refinement for event {event_abs_path}:")
-            print(f"[propose] last tried: ({last_dx:.6f}, {last_dy:.6f})")
-            print(f"[propose] dxdy refined: ({ndx:.6f}, {ndy:.6f})")
-            print(f"[propose] difference: ({last_dx - float(ndx):.6f}, {last_dy - float(ndy):.6f})")
+            # print(f"[propose] dxdy refinement for event {event_abs_path}:")
+            # print(f"[propose] last tried: ({last_dx:.6f}, {last_dy:.6f})")
+            # print(f"[propose] dxdy refined: ({ndx:.6f}, {ndy:.6f})")
+            # print(f"[propose] difference: ({last_dx - float(ndx):.6f}, {last_dy - float(ndy):.6f})")
             # Not yet applied -> propose the one-shot "previous − refined"
             return (last_dx - float(ndx)), (last_dy - float(ndy)), "dxdy_prev_minus_refined"
 

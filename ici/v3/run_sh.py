@@ -274,9 +274,11 @@ def main():
                 failures.append(ev_dir)
             else:
                 if rc_mille == 0:
-                    print(f"[ok]  {name} (index + mille)")
+                    # print(f"[ok]  {name} (index + mille)")
+                    pass
                 elif rc_mille == 3:
-                    print(f"[ok]  {name} (index only; no mille-data.bin)")
+                    # print(f"[ok]  {name} (index only; no mille-data.bin)")
+                    pass
                 else:
                     print(f"[warn] {name} (mille rc={rc_mille}) — see {ev_dir}/mille.stderr", file=sys.stderr)
                     # do not fail the whole run if mille fails; still allow concatenation
