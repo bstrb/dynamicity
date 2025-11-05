@@ -214,32 +214,6 @@ def propose_event(
             )
             return ndx, ndy, reason
 
-        # elif step2algo == "dxdy":
-        #     dxdy_cfg = Step2DxDyConfig(col_dx="dx", col_dy="dy")
-        #     ndx, ndy, reason_dxdy = propose_step2_dxdy(
-        #         successes_w=successes_w,
-        #         failures=failures,
-        #         tried=tried,
-        #         R=R,
-        #         min_spacing_mm=min_spacing,
-        #         event_dir=event_abs_path,
-        #         cfg=dxdy_cfg,
-        #     )
-
-        #     # If CSV missing/invalid, propagate reason and mark done for this event.
-        #     if ndx is None or ndy is None:
-        #         return None, None, reason_dxdy
-
-        #     # Previous (last tried) shift, defaulting to 0 if somehow empty.
-        #     last_dx = trials_sorted[-1][1] if trials_sorted else 0.0
-        #     last_dy = trials_sorted[-1][2] if trials_sorted else 0.0
-
-        #     # Optional: if refined already equals last tried, nothing more to do.
-        #     # if trials_sorted and (abs(last_dx - ndx) < 1e-9) and (abs(last_dy - ndy) < 1e-9):       
-        #     #     return None, None, "done_dxdy_already_applied"
-        #     # Your requested behavior: propose previous minus refined.
-        #     return (last_dx - float(ndx)), (last_dy - float(ndy)), "dxdy_prev_minus_refined"
-
         elif step2algo == "dxdy":
             dxdy_cfg = Step2DxDyConfig(col_dx="dx", col_dy="dy")
             ndx, ndy, reason_dxdy = propose_step2_dxdy(
@@ -274,25 +248,6 @@ def propose_event(
                 x, y = res.proposal_xy_mm
                 return float(x), float(y), "step1_fallback_due_to_dxdy_error"
 
-            # # Pull last and previous tried centers
-            # last_dx  = trials_sorted[-1][1] if trials_sorted else 0.0
-            # last_dy  = trials_sorted[-1][2] if trials_sorted else 0.0
-            # last_idx = trials_sorted[-1][3] if trials_sorted else 0
-            # prev_dx  = trials_sorted[-2][1] if len(trials_sorted) >= 2 else 0.0
-            # prev_dy  = trials_sorted[-2][2] if len(trials_sorted) >= 2 else 0.0
-
-            # # Was the refined one-shot already applied on the last run?
-            # # (In subtract mode, the applied center equals prev − refined)
-            # eps = 1e-9
-            # already_applied = (len(trials_sorted) >= 2 and
-            #                 abs(last_dx - (prev_dx - ndx)) < eps and
-            #                 abs(last_dy - (prev_dy - ndy)) < eps)
-
-            # if already_applied:
-            #     if last_idx == 1:
-            #         # Indexed at refined center (improved or not) => DONE
-            #         return None, None, "done_dxdy_reindexed"
-            #     else:
             # Pull last / previous tried centers (unchanged)
             last_dx  = trials_sorted[-1][1] if trials_sorted else 0.0
             last_dy  = trials_sorted[-1][2] if trials_sorted else 0.0
@@ -385,8 +340,9 @@ def main(argv=None) -> int:
 
     # Step 1 knobs
     ap.add_argument("--step1-A0", type=float, default=1.0)
-    ap.add_argument("--step1-hill-amp-frac", type=float, default=0.8)
-    ap.add_argument("--step1-drop-amp-frac", type=float, default=0.5)
+    ap.add_argument("--step1-hill-amp-frac", type=float, default=0.2)
+    ap.add_argument("--step1-drop-amp-frac", type=float, default=0.1)
+    ap.add_argument("--min-spacing-mm", type=float, default=0.001)
     ap.add_argument("--step1-candidates", type=int, default=8192)
     ap.add_argument("--step1-explore-floor", type=float, default=1e-6)
     ap.add_argument("--step1-allow-spacing-relax", action="store_true")
@@ -408,7 +364,6 @@ def main(argv=None) -> int:
     ap.add_argument("--done-step-mm", type=float, default=0.05, help="(unused by mean-shift)")
     ap.add_argument("--done-grad", type=float, default=0.05, help="(unused by mean-shift)")
 
-    ap.add_argument("--min-spacing-mm", type=float, default=0.001)
 
     # mean-shift config flags
     ap.add_argument("--ms-k-nearest", type=int, default=40)
@@ -476,15 +431,6 @@ def main(argv=None) -> int:
         rng = np.random.default_rng(key_seed)
 
         # Resolve the event directory for dxdy from the latest SUCCESSFUL run of this event
-        # succ_runs = [rn for (rn, _dx, _dy, idx, wr) in trials_sorted if idx == 1 and (wr is not None)]
-        # event_dir_for_dxdy = ""
-        # if succ_runs:
-        #     latest_succ_run = max(succ_runs)
-        #     event_dir_for_dxdy = os.path.join(
-        #         args.run_root,
-        #         f"run_{latest_succ_run:03d}",
-        #         f"event_{int(event_id):06d}"
-        #     )
         succ_runs = [rn for (rn, _dx, _dy, idx, wr) in trials_sorted if idx == 1 and (wr is not None)]
         event_dir_for_dxdy = ""
         if succ_runs:
