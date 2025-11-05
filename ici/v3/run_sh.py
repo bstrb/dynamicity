@@ -5,6 +5,51 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXTRACT_SCRIPT = os.path.join(SCRIPT_DIR, "extract_mille_shifts.py")
 
+def _check_index_success(ev_dir: str) -> tuple[bool, str]:
+    """
+    Determine if indexing truly succeeded for this event.
+    Strategy:
+      1) Parse idx.stderr 'Final: ... X indexable' (preferred & fast).
+      2) Fallback: parse stream_* .stream for 'num_reflections = N' (N>0).
+
+    Returns (ok, reason).
+    """
+    import re, os
+
+    # 1) idx.stderr heuristic
+    err_path = os.path.join(ev_dir, "idx.stderr")
+    try:
+        with open(err_path, "r", encoding="utf-8", errors="replace") as f:
+            s = f.read()
+        m = re.search(r"Final:\s+\d+\s+images processed,.*?\b(\d+)\s+indexable\b", s, re.S)
+        if m:
+            idxable = int(m.group(1))
+            if idxable > 0:
+                return True, f"idx.stderr: indexable={idxable}"
+            else:
+                return False, f"idx.stderr: indexable={idxable}"
+    except FileNotFoundError:
+        pass
+
+    # 2) stream fallback
+    try:
+        parts = [p for p in os.listdir(ev_dir) if p.startswith("stream_") and p.endswith(".stream")]
+        if len(parts) == 1:
+            sp = os.path.join(ev_dir, parts[0])
+            with open(sp, "r", encoding="utf-8", errors="replace") as f:
+                t = f.read()
+            m2 = re.search(r"\bnum_reflections\s*=\s*(\d+)", t)
+            if m2:
+                nref = int(m2.group(1))
+                if nref > 0:
+                    return True, f"stream: num_reflections={nref}"
+                else:
+                    return False, f"stream: num_reflections={nref}"
+    except FileNotFoundError:
+        pass
+
+    return False, "no conclusive success marker"
+
 def run_one_event(ev_dir: str) -> tuple[str, int, int]:
     """
     Run per-event indexing and, if present, mille extraction in the same worker.
@@ -21,13 +66,27 @@ def run_one_event(ev_dir: str) -> tuple[str, int, int]:
     out_path = os.path.join(ev_dir, "idx.stdout")
     err_path = os.path.join(ev_dir, "idx.stderr")
 
-    # run indexing with cwd=ev_dir
-    with open(out_path, "w", encoding="utf-8") as out, open(err_path, "w", encoding="utf-8") as err:
-        rc_sh = subprocess.call(["bash", sh_file], cwd=ev_dir, stdout=out, stderr=err)
+    # # run indexing with cwd=ev_dir
+    # with open(out_path, "w", encoding="utf-8") as out, open(err_path, "w", encoding="utf-8") as err:
+    #     rc_sh = subprocess.call(["bash", sh_file], cwd=ev_dir, stdout=out, stderr=err)
 
-    # if indexing failed, do NOT attempt mille; return early
-    if rc_sh != 0:
-        return ev_dir, rc_sh, 3
+    # # if indexing failed, do NOT attempt mille; return early
+    # if rc_sh != 0:
+    #     return ev_dir, rc_sh, 3
+
+    with open(out_path, "w", encoding="utf-8") as out, open(err_path, "w", encoding="utf-8") as err:
+        rc_sh_raw = subprocess.call(["bash", sh_file], cwd=ev_dir, stdout=out, stderr=err)
+
+    # Robust success check (stderr 'Final: ... indexable' or stream num_reflections)
+    ok, why = _check_index_success(ev_dir)
+    if not ok:
+        # mark as failed indexing regardless of raw returncode
+        # use a distinct rc to distinguish "ran but unindexed"
+        return ev_dir, (rc_sh_raw if rc_sh_raw != 0 else 10), 3
+
+    # from here on we consider indexing successful
+    rc_sh = 0
+
 
     # 2) immediately run mille extractor (same worker, same cwd) if mille-data.bin exists
     bin_path = os.path.join(ev_dir, "mille-data.bin")
@@ -117,7 +176,7 @@ def main():
             ev_dir, rc_sh, rc_mille = fut.result()
             name = os.path.basename(ev_dir)
             if rc_sh != 0:
-                print(f"[err] {name} (index rc={rc_sh}) — see {ev_dir}/idx.stderr", file=sys.stderr)
+                # print(f"[err] {name} (index rc={rc_sh}) — see {ev_dir}/idx.stderr", file=sys.stderr)
                 failures.append(ev_dir)
             else:
                 if rc_mille == 0:
@@ -130,8 +189,8 @@ def main():
                     mille_warn.append(ev_dir)
 
     if failures:
-        print(f"[fail] {len(failures)} event(s) failed indexing; not concatenating.", file=sys.stderr)
-        return 1
+        print(f"[fail] {len(failures)} event(s) failed indexing.", file=sys.stderr)
+        # return 1
 
     # concatenate streams from successfully indexed events (all events attempted already)
     return concat_streams(run_dir, run_str, ev_dirs)
