@@ -104,41 +104,135 @@ def run_one_event(ev_dir: str) -> tuple[str, int, int]:
 
     return ev_dir, rc_sh, rc_mille
 
+# def concat_streams(run_dir: str, run_str: str, ev_dirs: list[str]) -> int:
+#     import re
+#     # collect stream parts (one per event)
+#     items = []
+#     for d in ev_dirs:
+#         parts = [p for p in os.listdir(d) if p.startswith("stream_") and p.endswith(".stream")]
+#         if len(parts) != 1:
+#             continue
+#         m = re.search(r"stream_(\d{6})\.stream$", parts[0])
+#         if not m:
+#             continue
+#         items.append((int(m.group(1)), os.path.join(d, parts[0])))
+
+#     if not items:
+#         print(f"[ERR] no event stream parts found under {run_dir}", file=sys.stderr)
+#         return 2
+
+#     items.sort(key=lambda t: t[0])
+#     out_path = os.path.join(run_dir, f"stream_{run_str}.stream")
+
+#     # keep header only from the first part
+#     with open(out_path, "wb") as wf:
+#         for i, (_, p) in enumerate(items):
+#             with open(p, "rb") as rf:
+#                 data = rf.read()
+#             if not data:
+#                 continue
+#             if i > 0:
+#                 idx = data.find(b"Begin chunk")
+#                 if idx > 0:
+#                     data = data[idx:]
+#             wf.write(data)
+
+#     print(f"[run] wrote {out_path} ({len(items)} parts, single header)")
+#     return 0
 def concat_streams(run_dir: str, run_str: str, ev_dirs: list[str]) -> int:
-    import re
-    # collect stream parts (one per event)
-    items = []
-    for d in ev_dirs:
-        parts = [p for p in os.listdir(d) if p.startswith("stream_") and p.endswith(".stream")]
-        if len(parts) != 1:
-            continue
-        m = re.search(r"stream_(\d{6})\.stream$", parts[0])
-        if not m:
-            continue
-        items.append((int(m.group(1)), os.path.join(d, parts[0])))
+    import os, re, sys, shutil
 
-    if not items:
-        print(f"[ERR] no event stream parts found under {run_dir}", file=sys.stderr)
-        return 2
-
-    items.sort(key=lambda t: t[0])
+    RE_BEGIN_CHUNK = re.compile(r"^-{3,}\s*Begin chunk\s*-{3,}\s*$")
     out_path = os.path.join(run_dir, f"stream_{run_str}.stream")
 
-    # keep header only from the first part
-    with open(out_path, "wb") as wf:
-        for i, (_, p) in enumerate(items):
-            with open(p, "rb") as rf:
-                data = rf.read()
-            if not data:
-                continue
-            if i > 0:
-                idx = data.find(b"Begin chunk")
-                if idx > 0:
-                    data = data[idx:]
-            wf.write(data)
+    # choose one *.stream per event dir (same logic you already use)
+    items = []
+    for d in sorted(ev_dirs):
+        try:
+            parts = [p for p in os.listdir(d) if p.startswith("stream_") and p.endswith(".stream")]
+        except FileNotFoundError:
+            continue
+        if not parts:
+            continue
+        parts.sort()
+        items.append(os.path.join(d, parts[0]))
 
-    print(f"[run] wrote {out_path} ({len(items)} parts, single header)")
+    if not items:
+        print(f"[fail] no per-event streams found in {run_dir}", file=sys.stderr)
+        return 1
+
+    wrote_chunks = 0
+    header_written = False
+    bufsize = 1024 * 256  # 256 KiB buffered copy for speed
+
+    with open(out_path, "w", encoding="utf-8") as out:
+        for i, path in enumerate(items):
+            try:
+                rf = open(path, "r", encoding="utf-8", errors="replace")
+            except FileNotFoundError:
+                continue
+
+            saw_begin = False
+
+            try:
+                # For the FIRST input: write header (everything before the first Begin chunk)
+                if not header_written:
+                    header_lines = []
+                    while True:
+                        line = rf.readline()
+                        if not line:
+                            break
+                        if RE_BEGIN_CHUNK.match(line):
+                            saw_begin = True
+                            # write header once
+                            if header_lines:
+                                out.write("".join(header_lines).rstrip() + "\n\n")
+                            header_written = True
+                            # write the delimiter line that we just matched
+                            out.write(line)
+                            break
+                        else:
+                            header_lines.append(line)
+
+                    # If we never found a chunk in this file, skip it
+                    if not saw_begin:
+                        rf.close()
+                        continue
+
+                else:
+                    # Subsequent files: skip until first Begin chunk, then write from there
+                    while True:
+                        line = rf.readline()
+                        if not line:
+                            break
+                        if RE_BEGIN_CHUNK.match(line):
+                            saw_begin = True
+                            # spacing between parts
+                            if wrote_chunks > 0:
+                                out.write("\n")
+                            out.write(line)
+                            break
+
+                    if not saw_begin:
+                        rf.close()
+                        continue
+
+                # From here on, stream the REST of the file to out (no reformatting)
+                shutil.copyfileobj(rf, out, length=bufsize)
+                wrote_chunks += 1
+
+            finally:
+                rf.close()
+
+    if wrote_chunks == 0:
+        try: os.remove(out_path)
+        except FileNotFoundError: pass
+        print("[fail] no chunks found to concatenate.", file=sys.stderr)
+        return 1
+
+    print(f"[concat] wrote {out_path} from {wrote_chunks} part(s) with a single header")
     return 0
+
 
 def main():
     ap = argparse.ArgumentParser(
@@ -190,7 +284,6 @@ def main():
 
     if failures:
         print(f"[fail] {len(failures)} event(s) failed indexing.", file=sys.stderr)
-        # return 1
 
     # concatenate streams from successfully indexed events (all events attempted already)
     return concat_streams(run_dir, run_str, ev_dirs)
