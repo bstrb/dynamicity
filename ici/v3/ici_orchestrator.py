@@ -22,19 +22,19 @@ import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
-DEFAULT_MAX_ITERS = 50
+DEFAULT_MAX_ITERS = 100
 
 # Default paths
-DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_001"
-DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
-
-# Default paths
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_010"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+# DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_001"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
 # DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
+
+# Default paths
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_010"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
 
 # Default indexamajig / xgandalf / integration flags
 

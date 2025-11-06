@@ -122,12 +122,7 @@ def propose_event(
     step1_explore_floor: float,
     min_spacing: float,
     allow_spacing_relax: bool,
-    step2_step_frac: float,
-    step2_direct_frac: float,
-    step2_fail_bump_frac: float,
     back_to_step1_streak: int,
-    done_step_mm: float,
-    done_grad: float,
     N4step2: int,
     ms_k_nearest: int = 40,
     ms_q_best_seed: int = 12,
@@ -228,7 +223,7 @@ def propose_event(
 
             # If CSV missing/invalid -> fall back to Step-1 exploration
             if ndx is None or ndy is None:
-                first_center = (trials_sorted[0][1], trials_sorted[0][2]) if trials_sorted else (0.0, 0.0)
+                first_center = (trials_sorted[0][1], trials_sorted[0][2]) #if trials_sorted else (0.0, 0.0)
                 s1_trials = [Step1Trial(dx, dy, idx, (float(wr) if _finite(wr) else None)) for _, dx, dy, idx, wr in trials_sorted]
                 s1_params = Step1Params(
                     radius_mm=R,
