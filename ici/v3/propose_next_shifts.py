@@ -260,7 +260,15 @@ def propose_event(
             # If CSV missing/invalid -> fall back to Step-1 exploration
             if ndx is None or ndy is None:
                 first_center = (trials_sorted[0][1], trials_sorted[0][2])
-                s1_trials = [Step1Trial(dx, dy, idx, (float(wr) if _finite(wr) else None)) for _, dx, dy, idx, wr in trials_sorted]
+                s1_trials = [
+                    Step1Trial(
+                        dx - first_center[0],
+                        dy - first_center[1],
+                        idx,
+                        (float(wr) if _finite(wr) else None),
+                    )
+                    for _, dx, dy, idx, wr in trials_sorted
+                ]
                 s1_params = Step1Params(
                     radius_mm=R,
                     rng_seed=int(rng.integers(0, 2**31 - 1)),
@@ -329,8 +337,15 @@ def propose_event(
                     # Refined attempt failed => back to Step-1 exploration
                     first_center = (trials_sorted[0][1], trials_sorted[0][2])
 
-
-                    s1_trials = [Step1Trial(dx, dy, idx, (float(wr) if _finite(wr) else None)) for _, dx, dy, idx, wr in trials_sorted]
+                    s1_trials = [
+                        Step1Trial(
+                            dx - first_center[0],
+                            dy - first_center[1],
+                            idx,
+                            (float(wr) if _finite(wr) else None),
+                        )
+                        for _, dx, dy, idx, wr in trials_sorted
+                    ]
                     s1_params = Step1Params(
                         radius_mm=R,
                         rng_seed=int(rng.integers(0, 2**31 - 1)),
@@ -358,23 +373,6 @@ def propose_event(
             return None, None, "done_step2_disabled"
 
     # --- Step-1 exploration (HillMap) ---
-    # first_center = (trials_sorted[0][1], trials_sorted[0][2])
-    
-
-    # s1_trials = [Step1Trial(dx, dy, idx, (float(wr) if _finite(wr) else None)) for _, dx, dy, idx, wr in trials_sorted]
-    # s1_params = Step1Params(
-    #     radius_mm=R,
-    #     rng_seed=int(rng.integers(0, 2**31 - 1)),
-    #     n_candidates=int(step1_candidates),
-    #     A0=float(step1_A0),
-    #     hill_amp_frac=float(step1_hill_frac),
-    #     drop_amp_frac=float(step1_drop_frac),
-    #     explore_floor=float(step1_explore_floor),
-    #     min_spacing_mm=float(min_spacing),
-    #     first_attempt_center_mm=first_center,
-    #     allow_spacing_relax=bool(allow_spacing_relax),
-    # )
-    # res = propose_step1(s1_trials, s1_params)
     first_center = (trials_sorted[0][1], trials_sorted[0][2])
     # Convert prior trials to the LOCAL frame (relative to first_center)
     s1_trials = [
