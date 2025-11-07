@@ -168,7 +168,7 @@ def propose_event(
     ms_tol_mm: float = 0.003,
     ms_jitter_trials: int = 3,
     ms_jitter_sigma_frac: float = 0.5,
-    λ = 0.35,  # damping factor for dxdy
+    λ = 0.5,  # damping factor for dxdy
     # NEW: must be the *event directory* of the latest successful run when using dxdy
     event_abs_path: str = "",
 ) -> Tuple[Optional[float], Optional[float], str]:
@@ -438,6 +438,7 @@ def main(argv=None) -> int:
     ap.add_argument("--step1-allow-spacing-relax", action="store_true")
 
     ap.add_argument("--N4-step2", type=int, default=1, help="Min successful indexed attempts to enable Step-2.")
+    ap.add_argument("--back-to-step1-streak", type=int, default=1)
 
     ap.add_argument(
         "--step2-algorithm",
@@ -451,7 +452,6 @@ def main(argv=None) -> int:
     ap.add_argument("--step2-step-frac", type=float, default=0.5, help="(unused by mean-shift)")
     ap.add_argument("--step2-direct-frac", type=float, default=0.1, help="(unused by mean-shift)")
     ap.add_argument("--step2-fail-bump-frac", type=float, default=0.01, help="(unused by mean-shift)")
-    ap.add_argument("--back-to-step1-streak", type=int, default=5)
     ap.add_argument("--done-step-mm", type=float, default=0.05, help="(unused by mean-shift)")
     ap.add_argument("--done-grad", type=float, default=0.05, help="(unused by mean-shift)")
 
