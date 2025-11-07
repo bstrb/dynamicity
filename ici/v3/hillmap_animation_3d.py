@@ -38,7 +38,7 @@ class Trial:
             wrf = None
         return Trial(float(dx), float(dy), ix, wrf)
 
-
+ 
 # -----------------------------
 # Visualization params & field
 # -----------------------------
@@ -59,46 +59,95 @@ class Step1VizParams:
 def _gauss2d(X, Y, cx, cy, sigma):
     return np.exp(-0.5 * ((X - cx) ** 2 + (Y - cy) ** 2) / (sigma ** 2))
 
-def probability_grid_from_trials(trials: List[Trial], params: Step1VizParams):
+# def probability_grid_from_trials(trials: List[Trial], params: Step1VizParams):
+#     """
+#     Accumulated Gaussians (same width) for all attempts:
+#       - first attempt: amp = +1.0
+#       - success:       amp = +0.2
+#       - failure:       amp = -0.1
+#     No normalization. Returns X, Y, W (height field).
+#     """
+#     # Domain/grid
+#     R = float(params.radius_mm)
+#     xs = np.linspace(-R, R, params.grid_N)
+#     ys = np.linspace(-R, R, params.grid_N)
+#     X, Y = np.meshgrid(xs, ys)
+#     disk_mask = (X**2 + Y**2) <= (R**2)
+
+#     # Fixed width for all Gaussians
+#     sigma = R / 2.0  # adjust to taste (e.g., R/3.0 for sharper bumps)
+
+#     # Start with zeros, then add Gaussians
+#     W = np.zeros_like(X, dtype=float)
+
+#     if trials:
+#         # First attempt: +1.0
+#         t0 = trials[0]
+#         W += 1.0 * _gauss2d(X, Y, t0.x_mm, t0.y_mm, sigma)
+
+#         # Subsequent attempts: +0.2 if indexed==1 else -0.1
+#         for t in trials[1:]:
+#             amp = 0.2 if t.indexed == 1 else -0.1
+#             W += amp * _gauss2d(X, Y, t.x_mm, t.y_mm, sigma)
+
+#     # Mask outside circular region (optional but cleaner)
+#     W = np.where(disk_mask, W, np.nan)
+
+#     # Optional: punch small NaN holes near previous trials so points stand out (can disable)
+#     if params.apply_min_spacing_mask and trials:
+#         ms = float(params.min_spacing_mm)
+#         for t in trials:
+#             near = ((X - t.x_mm)**2 + (Y - t.y_mm)**2) <= (ms**2)
+#             W[near] = np.nan
+
+#     return X, Y, W
+
+def probability_grid_from_trials(trials: List[Trial], params: Step1VizParams,
+                                 beta: float = 12.0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Accumulated Gaussians (same width) for all attempts:
-      - first attempt: amp = +1.0
-      - success:       amp = +0.2
-      - failure:       amp = -0.1
-    No normalization. Returns X, Y, W (height field).
+    Compute the evolving probability surface as used in the Boltzmann-weighted hillmap:
+      - base Gaussian around first attempt (A0 / n_success)
+      - positive hills at successful trials weighted by exp[-β*(wrmsd - wrmsd_min)]
+      - negative dips for failures
     """
-    # Domain/grid
     R = float(params.radius_mm)
     xs = np.linspace(-R, R, params.grid_N)
     ys = np.linspace(-R, R, params.grid_N)
     X, Y = np.meshgrid(xs, ys)
     disk_mask = (X**2 + Y**2) <= (R**2)
 
-    # Fixed width for all Gaussians
-    sigma = R / 2.0  # adjust to taste (e.g., R/3.0 for sharper bumps)
-
-    # Start with zeros, then add Gaussians
+    sigma = R / 1.0  # broader to merge nearby hills
     W = np.zeros_like(X, dtype=float)
 
-    if trials:
-        # First attempt: +1.0
-        t0 = trials[0]
-        W += 1.0 * _gauss2d(X, Y, t0.x_mm, t0.y_mm, sigma)
+    if not trials:
+        return X, Y, np.where(disk_mask, np.nan, np.nan)
 
-        # Subsequent attempts: +0.2 if indexed==1 else -0.1
-        for t in trials[1:]:
-            amp = 0.2 if t.indexed == 1 else -0.1
-            W += amp * _gauss2d(X, Y, t.x_mm, t.y_mm, sigma)
+    successes = [t for t in trials if t.indexed == 1 and t.wrmsd is not None]
+    failures = [t for t in trials if t.indexed == 0]
 
-    # Mask outside circular region (optional but cleaner)
+    # Base Gaussian (prior)
+    A0 = float(params.A0)
+    # if successes:
+    #     A0 /= len(successes)  # adaptive prior decay
+    t0 = trials[0]
+    W += A0 * _gauss2d(X, Y, t0.x_mm, t0.y_mm, sigma)
+
+    # Success hills (Boltzmann-weighted)
+    if successes:
+        wr_vals = np.array([t.wrmsd for t in successes], float)
+        wmin = float(np.min(wr_vals))
+        weights = np.exp(-beta * (wr_vals - wmin))
+        weights /= np.sum(weights)
+        for t, w in zip(successes, weights):
+            W += (params.hill_amp_frac * params.A0) * w * _gauss2d(X, Y, t.x_mm, t.y_mm, sigma)
+
+    # Failure dips
+    for t in failures:
+        W += -(params.drop_amp_frac * params.A0) * _gauss2d(X, Y, t.x_mm, t.y_mm, sigma)
+
+    # Apply mask and floor
     W = np.where(disk_mask, W, np.nan)
-
-    # Optional: punch small NaN holes near previous trials so points stand out (can disable)
-    if params.apply_min_spacing_mask and trials:
-        ms = float(params.min_spacing_mm)
-        for t in trials:
-            near = ((X - t.x_mm)**2 + (Y - t.y_mm)**2) <= (ms**2)
-            W[near] = np.nan
+    W = np.maximum(W, 0.0) + params.explore_floor
 
     return X, Y, W
 
@@ -452,10 +501,10 @@ if __name__ == "__main__":
     ap.add_argument("--event", type=int, help="Event ID to visualize (if omitted, first event with trials is used)")
     ap.add_argument("--fps", type=int, default=1, help="Frames per second in the GIF")
     ap.add_argument("--radius-mm", type=float, default=0.05)
-    ap.add_argument("--A0", type=float, default=1.0)
-    ap.add_argument("--hill-amp-frac", type=float, default=0.2)
-    ap.add_argument("--drop-amp-frac", type=float, default=0.1)
-    ap.add_argument("--min-spacing-mm", type=float, default=0.001)
+    ap.add_argument("--A0", type=float, default=2.0)
+    ap.add_argument("--hill-amp-frac", type=float, default=5.0)
+    ap.add_argument("--drop-amp-frac", type=float, default=0.2)
+    ap.add_argument("--min-spacing-mm", type=float, default=0.0001)
     ap.add_argument("--explore-floor", type=float, default=1e-6)
     ap.add_argument("--downsample", type=int, default=2, help="Grid downsample factor for speed (>=1)")
     ap.add_argument("--debug", action="store_true", help="Print parser diagnostics")

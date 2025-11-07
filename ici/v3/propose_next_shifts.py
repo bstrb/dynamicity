@@ -11,7 +11,8 @@ import argparse, os, sys, math, hashlib
 from typing import List, Tuple, Optional
 import numpy as np
 
-from step1_hillmap import Trial as Step1Trial, Step1Params, propose_step1
+# from step1_hillmap import Trial as Step1Trial, Step1Params, propose_step1
+from step1_hillmap_wrmsd import Trial as Step1Trial, Step1Params, propose_step1
 from step2_meanshift import propose_step2_meanshift, Step2MeanShiftConfig
 from step2_bayes import propose_step2_bayes, Step2BayesConfig
 from step2_dxdy import propose_step2_dxdy, Step2DxDyConfig
@@ -110,6 +111,38 @@ def _recent_unindexed_streak(trials: List[Tuple[int,float,float,int,Optional[flo
 
 # ------------------------ Main proposer ------------------------
 
+def wrmsd_recurring_convergence(successes_w, N=10, tol=0.02):
+    """
+    Detects convergence when the best wRMSD is repeatedly reached.
+    tol: allowed relative difference (e.g., 0.02 = 2%)
+    """
+    wr = [w for _,_,w in successes_w if w is not None]
+    if len(wr) < N:
+        return False, {}
+
+    wr_recent = np.array(wr[-N:], float)
+    best = np.min(wr_recent)
+    rel_improvement = (np.min(wr) - best) / max(best, 1e-9)
+
+    # count how many times we got within tol * best
+    near_best = np.sum(wr_recent <= best * (1 + tol))
+
+    converged = (rel_improvement < tol) and (near_best >= 2)
+    return converged, {
+        "best": best,
+        "rel_improvement": rel_improvement,
+        "near_best_count": int(near_best),
+        "N": N,
+    }
+def wrmsd_median_convergence(successes_w, N=10, rel_tol=0.05):
+    wr = [w for _,_,w in successes_w if w is not None]
+    if len(wr) < N*2:
+        return False
+    med1 = np.median(wr[-N:])
+    med2 = np.median(wr[-2*N:-N])
+    rel = abs(med1 - med2) / max(med2, 1e-9)
+    return rel < rel_tol
+
 def propose_event(
     step2algo: str,
     trials_sorted: List[Tuple[int,float,float,int,Optional[float]]],
@@ -133,6 +166,7 @@ def propose_event(
     ms_tol_mm: float = 0.003,
     ms_jitter_trials: int = 3,
     ms_jitter_sigma_frac: float = 0.5,
+    λ = 0.35,  # damping factor for dxdy
     # NEW: must be the *event directory* of the latest successful run when using dxdy
     event_abs_path: str = "",
 ) -> Tuple[Optional[float], Optional[float], str]:
@@ -253,7 +287,7 @@ def propose_event(
             # Was the refined one-shot already applied on the last run?
             # In subtract mode, applied center = prev − refined.
             # Use a tolerance that survives 6-decimal rounding in the log.
-            eps = max(5e-6, 0.25 * float(min_spacing))
+            eps = max(1e-3, 0.25 * float(min_spacing))
             already_applied = (
                 len(trials_sorted) >= 2
                 and abs(last_dx - (prev_dx - ndx)) <= eps
@@ -262,10 +296,35 @@ def propose_event(
 
             if already_applied:
                 if last_idx == 1:
-                    # Indexed at refined center (improvement or not) => DONE
-                    return None, None, "done_dxdy_reindexed"
+                    # --- New: check convergence of reindexing shifts using run history ---
+                    # Need at least 3 runs to have two applied refinements to compare
+                    if len(trials_sorted) >= 3:
+                        # Extract the last two *applied* shifts (i.e. centers we actually used)
+                        prev_shift = np.array([trials_sorted[-2][1], trials_sorted[-2][2]], float)
+                        last_shift = np.array([trials_sorted[-1][1], trials_sorted[-1][2]], float)
+                        shift_delta = np.linalg.norm(last_shift - prev_shift)
+
+                        conv_median = wrmsd_median_convergence(successes_w, N=5, rel_tol=0.2)
+                        conv_recur, mrecur = wrmsd_recurring_convergence(successes_w, N=5, tol=0.1)
+
+                        # if shift_delta <= eps:
+                        #     return None, None, "done_dxdy_converged"
+                        if shift_delta <= eps or conv_median or conv_recur:
+                            return None, None, (
+                                f"done_dxdy_converged(shiftΔ={shift_delta:.4g}, "
+                                f"hist={conv_median}, recur={conv_recur})"
+                            )
+                        else:
+                            # Not yet converged: keep refining at new refined center
+                            return (last_dx - λ * float(ndx)), (last_dy - λ * float(ndy)), "dxdy_continue_refinement"
+                            # return (last_dx - float(ndx)), (last_dy - float(ndy)), "dxdy_continue_refinement"# Original (undamped)
+                    else:
+                        # Only one refinement so far; allow at least one more iteration
+                        return (last_dx - λ * float(ndx)), (last_dy - λ * float(ndy)), "dxdy_continue_refinement"
+                        # return (last_dx - float(ndx)), (last_dy - float(ndy)), "dxdy_continue_refinement"# Original (undamped)
+
                 else:
-                    # Refined attempt failed to index => go back to Step-1
+                    # Refined attempt failed => back to Step-1 exploration
                     first_center = (trials_sorted[0][1], trials_sorted[0][2]) if trials_sorted else (0.0, 0.0)
                     s1_trials = [Step1Trial(dx, dy, idx, (float(wr) if _finite(wr) else None)) for _, dx, dy, idx, wr in trials_sorted]
                     s1_params = Step1Params(
@@ -285,13 +344,10 @@ def propose_event(
                         return None, None, "done_after_dxdy_fail_step1"
                     x, y = res.proposal_xy_mm
                     return float(x), float(y), "step1_after_dxdy_fail"
+                
+            return (last_dx - λ * float(ndx)), (last_dy - λ * float(ndy)), f"dxdy_damped_refine(lambda={λ:.2f})"
 
-            # print(f"[propose] dxdy refinement for event {event_abs_path}:")
-            # print(f"[propose] last tried: ({last_dx:.6f}, {last_dy:.6f})")
-            # print(f"[propose] dxdy refined: ({ndx:.6f}, {ndy:.6f})")
-            # print(f"[propose] difference: ({last_dx - float(ndx):.6f}, {last_dy - float(ndy):.6f})")
-            # Not yet applied -> propose the one-shot "previous − refined"
-            return (last_dx - float(ndx)), (last_dy - float(ndy)), "dxdy_prev_minus_refined"
+            # return (last_dx - float(ndx)), (last_dy - float(ndy)), "dxdy_prev_minus_refined" # Original (undamped)
 
 
         elif step2algo == "none":
@@ -334,13 +390,15 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=1337)
 
     # Step 1 knobs
-    ap.add_argument("--step1-A0", type=float, default=1.0)
-    ap.add_argument("--step1-hill-amp-frac", type=float, default=0.2)
+    ap.add_argument("--step1-A0", type=float, default=2.0)
+    ap.add_argument("--step1-hill-amp-frac", type=float, default=5.0)
     ap.add_argument("--step1-drop-amp-frac", type=float, default=0.1)
-    ap.add_argument("--min-spacing-mm", type=float, default=0.001)
+    ap.add_argument("--min-spacing-mm", type=float, default=0.0001)
     ap.add_argument("--step1-candidates", type=int, default=8192)
-    ap.add_argument("--step1-explore-floor", type=float, default=1e-6)
+    ap.add_argument("--step1-explore-floor", type=float, default=1e-5)
     ap.add_argument("--step1-allow-spacing-relax", action="store_true")
+
+    ap.add_argument("--N4-step2", type=int, default=1, help="Min successful indexed attempts to enable Step-2.")
 
     ap.add_argument(
         "--step2-algorithm",
@@ -351,7 +409,6 @@ def main(argv=None) -> int:
     )
 
     # (Legacy) Step-2 knobs mean-shift or Bayes
-    ap.add_argument("--N4-step2", type=int, default=1)
     ap.add_argument("--step2-step-frac", type=float, default=0.5, help="(unused by mean-shift)")
     ap.add_argument("--step2-direct-frac", type=float, default=0.1, help="(unused by mean-shift)")
     ap.add_argument("--step2-fail-bump-frac", type=float, default=0.01, help="(unused by mean-shift)")
@@ -448,12 +505,7 @@ def main(argv=None) -> int:
             step1_explore_floor=float(args.step1_explore_floor),
             min_spacing=float(args.min_spacing_mm),
             allow_spacing_relax=bool(args.step1_allow_spacing_relax),
-            step2_step_frac=float(args.step2_step_frac),
-            step2_direct_frac=float(args.step2_direct_frac),
-            step2_fail_bump_frac=float(args.step2_fail_bump_frac),
             back_to_step1_streak=int(args.back_to_step1_streak),
-            done_step_mm=float(args.done_step_mm),
-            done_grad=float(args.done_grad),
             N4step2=args.N4_step2,
             ms_k_nearest=int(args.ms_k_nearest),
             ms_q_best_seed=int(args.ms_q_best_seed),

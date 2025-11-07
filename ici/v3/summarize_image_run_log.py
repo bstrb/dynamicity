@@ -156,22 +156,27 @@ def proposal_breakdown_current(rows, run_cutoff: int):
     return ring_props, bo_props
 
 def done_events_summary(rows):
-    # "done" iff the last row for that event has next_dx_raw == next_dy_raw == "done"
+    # Group by event
     by_event = {}
     for r in rows:
         by_event.setdefault(r["event"], []).append(r)
-    done_events = []
+
+    done_wrmsd = []
     for ev, g in by_event.items():
         g.sort(key=lambda x: x["run"])
         last = g[-1]
+        # Only consider events that are marked done
         if last["next_dx_raw"] == "done" and last["next_dy_raw"] == "done":
-            done_events.append(ev)
-    # gather all successful wrmsd for done events
-    succ_done_wr = []
-    for r in rows:
-        if r["event"] in done_events and r["indexed"] == 1 and (r["wrmsd"] is not None) and not math.isnan(r["wrmsd"]):
-            succ_done_wr.append(r["wrmsd"])
-    return len(done_events), mean_safe(succ_done_wr), median_safe(succ_done_wr)
+            # Take the best (lowest) wrmsd among successful frames
+            wrs = [
+                r["wrmsd"] for r in g
+                if r["indexed"] == 1 and r["wrmsd"] is not None and not math.isnan(r["wrmsd"])
+            ]
+            if wrs:
+                done_wrmsd.append(min(wrs))
+
+    n_done = len(done_wrmsd)
+    return n_done, mean_safe(done_wrmsd), median_safe(done_wrmsd)
 
 def fmt(x, pct=False, nd=3):
     if x is None or (isinstance(x, float) and math.isnan(x)):
