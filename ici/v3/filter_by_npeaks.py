@@ -46,7 +46,8 @@ def recursive_copy_filtered(src, dst, frame_mask, n_frames, images_path):
     # Walk groups/datasets; filter datasets whose axis-0 == n_frames
     for key, item in src.items():
         if isinstance(item, h5py.Group):
-            g = dst.create_group(key)
+            # g = dst.create_group(key)
+            g = dst.require_group(key)
             copy_attrs(item, g)
             recursive_copy_filtered(item, g, frame_mask, n_frames, images_path)
         elif isinstance(item, h5py.Dataset):

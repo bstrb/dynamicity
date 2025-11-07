@@ -46,7 +46,8 @@ def create_like(dst_group, name, src_dset, new_shape):
 def recursive_copy_sampled(src, dst, idx, n_frames):
     for key, item in src.items():
         if isinstance(item, h5py.Group):
-            g = dst.create_group(key)
+            # g = dst.create_group(key)
+            g = dst.require_group(key)
             copy_attrs(item, g)
             recursive_copy_sampled(item, g, idx, n_frames)
         elif isinstance(item, h5py.Dataset):
