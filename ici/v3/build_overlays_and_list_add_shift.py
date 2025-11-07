@@ -145,10 +145,14 @@ def ensure_overlay_for_run(src_path: str, run_dir: str, next_run: int) -> str:
         pass
     return _abs(overlay_path)
 
+import h5py
+import numpy as np
+
 def write_all_shifts(run_dir: str, next_run: int, proposals_by_src: dict):
     """
-    For each source, write its proposed shifts to its overlay in run_dir.
-    Returns: dict src_path -> overlay_path
+    For each source HDF5, add the new event-level (next_dx, next_dy)
+    to the existing per-frame det_shift_x_mm / det_shift_y_mm arrays
+    instead of overwriting them.
     """
     overlay_paths = {}
     for src_path, ev2shift in proposals_by_src.items():
@@ -156,12 +160,26 @@ def write_all_shifts(run_dir: str, next_run: int, proposals_by_src: dict):
             continue
         overlay_path = ensure_overlay_for_run(src_path, run_dir, next_run)
         overlay_paths[src_path] = overlay_path
-        # Prepare vectors
-        indices = sorted(ev2shift.keys())
-        dx = [ev2shift[i][0] for i in indices]
-        dy = [ev2shift[i][1] for i in indices]
-        write_shifts_mm(overlay_path, indices, dx, dy)
+
+        # --- read original per-frame det_shifts from src ---
+        with h5py.File(src_path, "r") as f:
+            base_dx = np.array(f["/entry/data/det_shift_x_mm"][()], dtype=float)
+            base_dy = np.array(f["/entry/data/det_shift_y_mm"][()], dtype=float)
+
+        # apply event-level corrections (constant for each event)
+        for ev, (dx_event, dy_event) in ev2shift.items():
+            # here you could decide how to map events→frames
+            # e.g., one event per frame, so just add to that frame index
+            base_dx[ev] += dx_event
+            base_dy[ev] += dy_event
+
+        # --- write combined per-frame shifts into overlay ---
+        with h5py.File(overlay_path, "r+") as f:
+            f["/entry/data/det_shift_x_mm"][...] = base_dx
+            f["/entry/data/det_shift_y_mm"][...] = base_dy
+
     return overlay_paths
+
 
 def write_event_lists(run_dir: str, proposals_by_src: dict, overlay_paths: dict) -> int:
     """

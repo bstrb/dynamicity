@@ -123,10 +123,11 @@ def propose_step1(trials: List[Trial], params: Step1Params, beta = 10.0) -> Step
     cand_xy = cand_xy[keep, :]
 
     # Reference center
-    if trials:
-        c0x, c0y = trials[0].x_mm, trials[0].y_mm
-    else:
-        c0x, c0y = params.first_attempt_center_mm
+    # if trials:
+    #     c0x, c0y = trials[0].x_mm, trials[0].y_mm
+    # else:
+    #     c0x, c0y = params.first_attempt_center_mm
+    c0x, c0y = params.first_attempt_center_mm
 
     # Base Gaussian field
     w = np.zeros((cand_xy.shape[0],), float)
@@ -167,4 +168,5 @@ def propose_step1(trials: List[Trial], params: Step1Params, beta = 10.0) -> Step
     np_rng = np.random.default_rng(params.rng_seed ^ 0xA53E12B4)
     idx = int(np_rng.choice(np.arange(cand_xy.shape[0]), p=p))
     x_mm, y_mm = float(cand_xy[idx, 0]), float(cand_xy[idx, 1])
-    return Step1Result(False, (x_mm, y_mm), "step1_hillmap_wrmsd_sample")
+    # return Step1Result(False, (x_mm, y_mm), "step1_hillmap_wrmsd_sample")
+    return Step1Result(False, (c0x + x_mm, c0y + y_mm), "step1_hillmap_wrmsd_sample")

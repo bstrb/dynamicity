@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse, os, sys, math, hashlib
 from typing import List, Tuple, Optional
 import numpy as np
+import h5py
+
 
 # from step1_hillmap import Trial as Step1Trial, Step1Params, propose_step1
 from step1_hillmap_wrmsd import Trial as Step1Trial, Step1Params, propose_step1
@@ -257,7 +259,7 @@ def propose_event(
 
             # If CSV missing/invalid -> fall back to Step-1 exploration
             if ndx is None or ndy is None:
-                first_center = (trials_sorted[0][1], trials_sorted[0][2]) #if trials_sorted else (0.0, 0.0)
+                first_center = (trials_sorted[0][1], trials_sorted[0][2])
                 s1_trials = [Step1Trial(dx, dy, idx, (float(wr) if _finite(wr) else None)) for _, dx, dy, idx, wr in trials_sorted]
                 s1_params = Step1Params(
                     radius_mm=R,
@@ -325,7 +327,9 @@ def propose_event(
 
                 else:
                     # Refined attempt failed => back to Step-1 exploration
-                    first_center = (trials_sorted[0][1], trials_sorted[0][2]) if trials_sorted else (0.0, 0.0)
+                    first_center = (trials_sorted[0][1], trials_sorted[0][2])
+
+
                     s1_trials = [Step1Trial(dx, dy, idx, (float(wr) if _finite(wr) else None)) for _, dx, dy, idx, wr in trials_sorted]
                     s1_params = Step1Params(
                         radius_mm=R,
@@ -354,7 +358,9 @@ def propose_event(
             return None, None, "done_step2_disabled"
 
     # --- Step-1 exploration (HillMap) ---
-    first_center = (trials_sorted[0][1], trials_sorted[0][2]) if trials_sorted else (0.0, 0.0)
+    first_center = (trials_sorted[0][1], trials_sorted[0][2])
+    
+
     s1_trials = [Step1Trial(dx, dy, idx, (float(wr) if _finite(wr) else None)) for _, dx, dy, idx, wr in trials_sorted]
     s1_params = Step1Params(
         radius_mm=R,
@@ -446,6 +452,10 @@ def main(argv=None) -> int:
 
     for header, block in blocks:
         h5_path, event_id = _parse_event_header(header if header else "#/unknown event -1")
+        # Skip non-event blocks (preamble or malformed)
+        if event_id < 0:
+            new_lines.extend(block)  # pass through unchanged
+            continue
 
         # Parse rows of the block into (rn, dx, dy, idx, wr)
         rows: List[Tuple[int, float, float, int, Optional[float]]] = []
@@ -474,6 +484,29 @@ def main(argv=None) -> int:
             rows.append((rn, dx, dy, idx, wr))
 
         trials_sorted = sorted(rows, key=lambda t: t[0])
+        # --- Ensure the event has a first attempted center in the log ---
+        # If the block has no rows yet for this event, synthesize the first trial
+        # from the per-frame det shifts in the source HDF5 (never (0,0)).
+        if not trials_sorted:
+            # Safety: event_id must be a valid frame index
+            # if event_id < 0:
+            #     raise RuntimeError(f"Bad event_id parsed from header: {header!r}")
+            try:
+                with h5py.File(h5_path, "r") as f:
+                    seed_dx = float(f["/entry/data/det_shift_x_mm"][int(event_id)])
+                    seed_dy = float(f["/entry/data/det_shift_y_mm"][int(event_id)])
+            except KeyError as e:
+                raise KeyError(f"Missing det shift datasets in {h5_path}: {e}")
+            except Exception as e:
+                raise RuntimeError(f"Failed reading seed for {h5_path} event {event_id}: {e}")
+
+            # Append one data line to this block so trials_sorted[0] exists.
+            # Columns: run_n, dx, dy, idx, wrmsd, next_dx, next_dy
+            first_line = f"{latest_run},{seed_dx:.6f},{seed_dy:.6f},0,,,\n"
+            block.append(first_line)
+            rows.append((latest_run, seed_dx, seed_dy, 0, None))
+            trials_sorted = sorted(rows, key=lambda t: t[0])
+
 
         # Stable per-event RNG (unchanged)
         key_seed = int(
