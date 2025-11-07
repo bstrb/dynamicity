@@ -269,9 +269,12 @@ def propose_event(
                     )
                     for _, dx, dy, idx, wr in trials_sorted
                 ]
+                hist_salt = len(trials_sorted)
+                rng_seed = (int(rng.integers(0, 2**31 - 1)) ^ (hist_salt * 0x9E3779B1)) & 0x7fffffff
+
                 s1_params = Step1Params(
                     radius_mm=R,
-                    rng_seed=int(rng.integers(0, 2**31 - 1)),
+                    rng_seed=rng_seed,
                     n_candidates=int(step1_candidates),
                     A0=float(step1_A0),
                     hill_amp_frac=float(step1_hill_frac),
@@ -346,9 +349,12 @@ def propose_event(
                         )
                         for _, dx, dy, idx, wr in trials_sorted
                     ]
+                    hist_salt = len(trials_sorted)
+                    rng_seed = (int(rng.integers(0, 2**31 - 1)) ^ (hist_salt * 0x9E3779B1)) & 0x7fffffff
+
                     s1_params = Step1Params(
                         radius_mm=R,
-                        rng_seed=int(rng.integers(0, 2**31 - 1)),
+                        rng_seed=rng_seed,
                         n_candidates=int(step1_candidates),
                         A0=float(step1_A0),
                         hill_amp_frac=float(step1_hill_frac),
@@ -384,10 +390,12 @@ def propose_event(
         )
         for _, dx, dy, idx, wr in trials_sorted
     ]
+    hist_salt = len(trials_sorted)
+    rng_seed = (int(rng.integers(0, 2**31 - 1)) ^ (hist_salt * 0x9E3779B1)) & 0x7fffffff
 
     s1_params = Step1Params(
         radius_mm=R,
-        rng_seed=int(rng.integers(0, 2**31 - 1)),
+        rng_seed=rng_seed,
         n_candidates=int(step1_candidates),
         A0=float(step1_A0),
         hill_amp_frac=float(step1_hill_frac),
