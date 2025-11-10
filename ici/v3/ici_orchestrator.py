@@ -30,29 +30,29 @@ DEFAULT_MAX_ITERS = 20
 # DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
 # DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
 
-DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_100"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
+# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_100"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
+# DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
 
 # Default paths
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_010"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_010"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
 
 # Default indexamajig / xgandalf / integration flags
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    "--peaks=cxi",
-    # "--peaks=peakfinder9",
-    # "--min-snr-biggest-pix=1",
-    # "--min-snr-peak-pix=6",
-    # "--min-snr=1",
-    # "--min-sig=11",
-    # "--min-peak-over-neighbour=-inf",
-    # "--local-bg-radius=3",
+    # "--peaks=cxi",
+    "--peaks=peakfinder9",
+    "--min-snr-biggest-pix=1",
+    "--min-snr-peak-pix=6",
+    "--min-snr=1",
+    "--min-sig=11",
+    "--min-peak-over-neighbour=-inf",
+    "--local-bg-radius=3",
     # Other
     "-j", "24",
     "--min-peaks=15",

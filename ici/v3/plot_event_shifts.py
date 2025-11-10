@@ -182,6 +182,9 @@ def plot_group(path: str, event: int, rows: List[Row], outdir: str, dpi: int = 1
     plt.ylabel("det_shift_y_mm (centered at first run)")
     title = f"{os.path.basename(path)} — event {event} (centered at first run)"
     plt.title(title)
+    plt.xlim(-0.05, 0.05)
+    plt.ylim(-0.05, 0.05)
+
     plt.tight_layout()
 
     base = os.path.splitext(os.path.basename(path))[0]
