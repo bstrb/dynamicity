@@ -261,7 +261,7 @@ def main():
 
     # parallel execution: indexing + inline mille per event
     workers = max(1, int(args.jobs or 1))
-    print(f"[mp] running {len(ev_dirs)+1} event jobs with {workers} workers…")
+    print(f"[mp] running {len(ev_dirs)} event jobs with {workers} workers…")
     failures, mille_warn = [], []
     # from concurrent.futures import ProcessPoolExecutor, as_completed
     with ProcessPoolExecutor(max_workers=workers) as ex:

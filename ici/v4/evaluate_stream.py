@@ -297,13 +297,13 @@ def main(argv=None):
     print("Run dir  :", run_dir)
 
     mm, bounds = get_chunks(stream_path)
-    print(f"[scan] found {len(bounds)+1} chunks in stream")
+    print(f"[scan] found {len(bounds)} chunks in stream")
 
     workers = max(1, int(args.workers))
     n_tasks = len(bounds)
     workers = min(workers, n_tasks) if n_tasks > 0 else workers
     if workers > 1 and n_tasks > 0:
-        print(f"[mp] Using {workers} workers for {n_tasks+1} chunk(s)")
+        print(f"[mp] Using {workers} workers for {n_tasks} chunk(s)")
 
     rows = []
     if workers == 1:

@@ -22,7 +22,7 @@ import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
-DEFAULT_MAX_ITERS = 50
+DEFAULT_MAX_ITERS = 100
 
 # Default paths
 # DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"

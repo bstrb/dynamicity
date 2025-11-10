@@ -279,10 +279,8 @@ def main():
     ))
 
 
-    print("[summary] Proposals: due to unindexed (Hillmap search) = {}".format(
-        ring_props))
-    print("[summary] Proposals: due to local optimization (CrystFEL Refine or wRMSD-Boltzmann-weighted Hillmap search) = {}".format(
-        bo_props))
+    print("[summary] Proposals: due to unindexed (explore)={}, due to local optimization (TuRBO)={}".format(
+        ring_props, bo_props))
 
     print("[summary] Done events: count={}, wRMSD mean={}, median={}".format(
         n_done, fmt(wr_done_mean), fmt(wr_done_median)))

@@ -262,7 +262,7 @@ def main(argv=None) -> int:
     with open(log_path, "w", encoding="utf-8") as f:
         f.writelines(out_lines)
 
-    print(f"[log] Appended {appended_rows+1} new rows into grouped sections in {log_path}")
+    print(f"[log] Appended {appended_rows} new rows into grouped sections in {log_path}")
     return 0
 
 if __name__ == "__main__":
