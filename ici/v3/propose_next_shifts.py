@@ -12,11 +12,8 @@ from typing import List, Tuple, Optional
 import numpy as np
 import h5py
 
-
-# from step1_hillmap import Trial as Step1Trial, Step1Params, propose_step1
 from step1_hillmap_wrmsd import Trial as Step1Trial, Step1Params, propose_step1
 from step2_dxdy import propose_step2_dxdy, Step2DxDyConfig
-
 
 # ------------------------ CSV helpers ------------------------
 
@@ -109,7 +106,7 @@ def _recent_unindexed_streak(trials: List[Tuple[int,float,float,int,Optional[flo
             break
     return s
 
-# ------------------------ Main proposer ------------------------
+# ------------------------- Convergence checks ------------------------
 
 def wrmsd_recurring_convergence(successes_w, N=5, tol=0.1):
     """
@@ -148,6 +145,39 @@ def wrmsd_median_convergence(successes_w, N=5, rel_tol=0.05):
     rel = abs(med1 - med2) / max(med2, 1e-9)
     return rel < rel_tol
 
+def wrmsd_no_improvement(successes_w, N=5, eps=0.01):
+    """
+    successes_w: list[(run, dx, wrmsd)] with wrmsd for indexed frames
+    Returns True if best wRMSD over the last N successes has not improved
+    by at least eps relative to the best before that window.
+    """
+    wr = [w for _, _, w in successes_w if w is not None]
+    if len(wr) < N + 1:
+        return False
+    prev_best = min(wr[:-N])
+    recent_best = min(wr[-N:])
+    rel_gain = (prev_best - recent_best) / max(prev_best, 1e-9)
+    return rel_gain < eps
+
+
+def wrmsd_stability(successes_w, N=6, rel_std_tol=0.02):
+    """
+    Returns True if the relative std of the last N successful wRMSDs is ≤ rel_std_tol.
+    Uses relative std = std/mean; requires at least N successes.
+    """
+    wr = [w for _, _, w in successes_w if w is not None]
+    if len(wr) < N:
+        return False
+    recent = wr[-N:]
+    mu = float(np.mean(recent))
+    sd = float(np.std(recent))
+    if not np.isfinite(mu) or mu <= 0:
+        return False
+    rel_std = sd / mu
+    return rel_std <= rel_std_tol
+
+
+# ------------------------ Main proposer ------------------------
 def propose_event(
     step2algo: str,
     trials_sorted: List[Tuple[int,float,float,int,Optional[float]]],
@@ -165,7 +195,12 @@ def propose_event(
     recurring_tol: float = 0.1,
     median_rel_tol: float = 0.05,
     λ = 0.5,  # damping factor for dxdy, if set 1.0 = no damping
-    # NEW: must be the *event directory* of the latest successful run when using dxdy
+    done_on_streak_successes: int = 2,
+    done_on_streak_length: int = 6,
+    noimprove_N: int = 5,
+    noimprove_eps: float = 0.01,
+    stability_N: int = 6,
+    stability_std: float = 0.02,
     event_abs_path: str = "",
 ) -> Tuple[Optional[float], Optional[float], str]:
     """
@@ -185,9 +220,21 @@ def propose_event(
             failures.append((dx, dy))
     tried = np.array(tried, float) if tried else np.empty((0, 2), float)
 
+    # --- NEW: mark done if we already have enough successes AND a long unindexed streak
+    s_streak = _recent_unindexed_streak(trials_sorted)
+    if len(successes_w) >= done_on_streak_successes and s_streak >= done_on_streak_length:
+        return None, None, f"done_unindexed_streak(k={s_streak}, succ={len(successes_w)})"
+
+    # --- NEW: mark done if best wRMSD hasn’t improved by ≥ eps over last N successes
+    if wrmsd_no_improvement(successes_w, N=noimprove_N, eps=noimprove_eps):
+        return None, None, f"done_no_improve(N={noimprove_N}, eps={noimprove_eps:g})"
+    
+    # --- NEW: mark done if recent wRMSD is statistically stable (low relative std)
+    if wrmsd_stability(successes_w, N=stability_N, rel_std_tol=stability_std):
+        return None, None, f"done_stable_wrmsd(N={stability_N}, relstd≤{stability_std:g})"
+
     # Gate for Step-2
-    # n_succ = len(successes_w)
-    if _recent_unindexed_streak(trials_sorted) < back_to_step1_streak:
+    if s_streak < back_to_step1_streak:
 
         if step2algo == "dxdy":
             dxdy_cfg = Step2DxDyConfig(col_dx="dx", col_dy="dy")
@@ -246,12 +293,6 @@ def propose_event(
             # Use a tolerance that survives 6-decimal rounding in the log.
             eps = max(1e-3, 0.25 * float(min_spacing))
 
-            # already_applied = (
-            #     len(trials_sorted) >= 2
-            #     and abs(last_dx - (prev_dx - ndx)) <= eps
-            #     and abs(last_dy - (prev_dy - ndy)) <= eps
-            # )
-
             # Compare the shift we actually applied to λ * ndx/ndy
             applied_dx = prev_dx - last_dx
             applied_dy = prev_dy - last_dy
@@ -263,7 +304,7 @@ def propose_event(
             if already_applied:
                 if last_idx == 1:
                     # --- New: check convergence of reindexing shifts using run history ---
-                    # Need at least 3 runs to have two applied refinements to compare
+                    # Need at least 2 runs to have two applied refinements to compare
                     if len(trials_sorted) >= 2:
                         # Extract the last two *applied* shifts (i.e. centers we actually used)
                         prev_shift = np.array([trials_sorted[-2][1], trials_sorted[-2][2]], float)
@@ -271,10 +312,18 @@ def propose_event(
                         shift_delta = np.linalg.norm(last_shift - prev_shift)
 
                         conv_median = wrmsd_median_convergence(successes_w, N=N_conv, rel_tol=median_rel_tol)
-                        conv_recur, mrecur = wrmsd_recurring_convergence(successes_w, N=N_conv, tol=recurring_tol)
+                        conv_recur, _ = wrmsd_recurring_convergence(successes_w, N=N_conv, tol=recurring_tol)
 
-                        # if shift_delta <= eps:
-                        #     return None, None, "done_dxdy_converged"
+                        # Also apply the global convergence checks here
+                        # Also apply the global convergence checks here
+                        noimp = wrmsd_no_improvement(successes_w, N=noimprove_N, eps=noimprove_eps)
+                        stable = wrmsd_stability(successes_w, N=stability_N, rel_std_tol=stability_std)
+                        if noimp or stable:
+                            return None, None, (
+                                f"done_dxdy_converged(global: noimp={noimp}, stable={stable})"
+                            )
+
+
                         if shift_delta <= eps or conv_median or conv_recur:
                             return None, None, (
                                 f"done_dxdy_converged(shiftΔ={shift_delta:.4g}, "
@@ -372,23 +421,40 @@ def main(argv=None) -> int:
             "Step-2: 'dxdy' (one-shot refined center), 'meanshift', 'bayes', or 'none'."
         )
     )
+    # Required arguments
     ap.add_argument("--run-root", required=True)
     ap.add_argument("--radius-mm", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=1337)
+    ap.add_argument("--min-spacing-mm", type=float, default=0.0001)
 
     # Step 1 knobs
     ap.add_argument("--step1-A0", type=float, default=2.0)
     ap.add_argument("--step1-hill-amp-frac", type=float, default=5.0)
     ap.add_argument("--step1-drop-amp-frac", type=float, default=0.1)
-    ap.add_argument("--min-spacing-mm", type=float, default=0.0001)
     ap.add_argument("--step1-candidates", type=int, default=8192)
     ap.add_argument("--step1-explore-floor", type=float, default=1e-5)
-    ap.add_argument("--step1-allow-spacing-relax", action="store_true")
+    ap.add_argument("--step1-allow-spacing-relax", action="store_false", default=True)
+
     ap.add_argument("--back-to-step1-streak", type=int, default=1)
     ap.add_argument("--N_conv", type=int, default=2)
     ap.add_argument("--recurring-tol", type=float, default=0.8)
     ap.add_argument("--median-rel-tol", type=float, default=1)
     ap.add_argument("--damping-factor", type=float, default=0.8)
+    ap.add_argument("--done-on-streak-successes", type=int, default=2,
+                    help="Require at least this many indexed successes for an event before a long unindexed streak can mark it done.")
+    ap.add_argument("--done-on-streak-length", type=int, default=6,
+                    help="If we have >= --done-on-streak-successes successes and observe this many consecutive unindexed results, mark event done.")
+
+    ap.add_argument("--noimprove-N", type=int, default=5,
+                    help="Window size (count of successful results) for no-improvement check.")
+    ap.add_argument("--noimprove-eps", type=float, default=0.01,
+                    help="Minimum relative improvement (e.g., 0.01 = 1%) in best wRMSD over the last --noimprove-N successes; otherwise mark done.")
+
+    ap.add_argument("--stability-N", type=int, default=6,
+                    help="Number of most recent successful results used for wRMSD stability check.")
+    ap.add_argument("--stability-std", type=float, default=0.02,
+                    help="Relative std threshold for stability: std(wRMSD_recent)/mean(wRMSD_recent) ≤ threshold ⇒ mark done.")
+
 
     ap.add_argument(
         "--step2-algorithm",
@@ -452,9 +518,6 @@ def main(argv=None) -> int:
         # If the block has no rows yet for this event, synthesize the first trial
         # from the per-frame det shifts in the source HDF5 (never (0,0)).
         if not trials_sorted:
-            # Safety: event_id must be a valid frame index
-            # if event_id < 0:
-            #     raise RuntimeError(f"Bad event_id parsed from header: {header!r}")
             try:
                 with h5py.File(h5_path, "r") as f:
                     seed_dx = float(f["/entry/data/det_shift_x_mm"][int(event_id)])
@@ -507,6 +570,12 @@ def main(argv=None) -> int:
             recurring_tol=args.recurring_tol,
             median_rel_tol=args.median_rel_tol,
             λ=args.damping_factor,
+            done_on_streak_successes=int(args.done_on_streak_successes),
+            done_on_streak_length=int(args.done_on_streak_length),
+            noimprove_N=int(args.noimprove_N),
+            noimprove_eps=float(args.noimprove_eps),
+            stability_N=int(args.stability_N),
+            stability_std=float(args.stability_std),
             # IMPORTANT: for dxdy this must be the actual event dir of the success run
             event_abs_path=event_dir_for_dxdy,
         )
@@ -519,7 +588,7 @@ def main(argv=None) -> int:
         new_lines.extend(updated)
 
     write_log(log_path, new_lines)
-    print(f"[propose] {n_new+1} new proposals, {n_done} marked done")
+    print(f"[propose] {n_new} new proposals, {n_done} marked done")
     print(f"[propose] Updated {log_path} for run_{latest_run:03d}")
     return 0
 
