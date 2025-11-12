@@ -291,7 +291,7 @@ def propose_event(
             # Was the refined one-shot already applied on the last run?
             # In subtract mode, applied center = prev − refined.
             # Use a tolerance that survives 6-decimal rounding in the log.
-            eps = max(1e-4, 0.25 * float(min_spacing))
+            eps = float(min_spacing)
 
             # Compare the shift we actually applied to λ * ndx/ndy
             applied_dx = prev_dx - last_dx
@@ -425,7 +425,7 @@ def main(argv=None) -> int:
     ap.add_argument("--run-root", required=True)
     ap.add_argument("--radius-mm", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=1337)
-    ap.add_argument("--min-spacing-mm", type=float, default=0.0001)
+    ap.add_argument("--min-spacing-mm", type=float, default=0.0005)
 
     # Step 1 knobs
     ap.add_argument("--step1-A0", type=float, default=2.0)
