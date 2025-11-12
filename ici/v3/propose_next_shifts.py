@@ -291,7 +291,7 @@ def propose_event(
             # Was the refined one-shot already applied on the last run?
             # In subtract mode, applied center = prev − refined.
             # Use a tolerance that survives 6-decimal rounding in the log.
-            eps = max(1e-3, 0.25 * float(min_spacing))
+            eps = max(1e-4, 0.25 * float(min_spacing))
 
             # Compare the shift we actually applied to λ * ndx/ndy
             applied_dx = prev_dx - last_dx
@@ -440,19 +440,19 @@ def main(argv=None) -> int:
     ap.add_argument("--recurring-tol", type=float, default=0.8)
     ap.add_argument("--median-rel-tol", type=float, default=1)
     ap.add_argument("--damping-factor", type=float, default=0.8)
-    ap.add_argument("--done-on-streak-successes", type=int, default=2,
+    ap.add_argument("--done-on-streak-successes", type=int, default=1,
                     help="Require at least this many indexed successes for an event before a long unindexed streak can mark it done.")
-    ap.add_argument("--done-on-streak-length", type=int, default=6,
+    ap.add_argument("--done-on-streak-length", type=int, default=5,
                     help="If we have >= --done-on-streak-successes successes and observe this many consecutive unindexed results, mark event done.")
 
-    ap.add_argument("--noimprove-N", type=int, default=5,
+    ap.add_argument("--noimprove-N", type=int, default=3,
                     help="Window size (count of successful results) for no-improvement check.")
-    ap.add_argument("--noimprove-eps", type=float, default=0.01,
-                    help="Minimum relative improvement (e.g., 0.01 = 1%) in best wRMSD over the last --noimprove-N successes; otherwise mark done.")
+    ap.add_argument("--noimprove-eps", type=float, default=0.05,
+                    help="Minimum relative improvement (e.g., 0.05 = 5%) in best wRMSD over the last --noimprove-N successes; otherwise mark done.")
 
-    ap.add_argument("--stability-N", type=int, default=6,
+    ap.add_argument("--stability-N", type=int, default=5,
                     help="Number of most recent successful results used for wRMSD stability check.")
-    ap.add_argument("--stability-std", type=float, default=0.02,
+    ap.add_argument("--stability-std", type=float, default=0.05,
                     help="Relative std threshold for stability: std(wRMSD_recent)/mean(wRMSD_recent) ≤ threshold ⇒ mark done.")
 
 
