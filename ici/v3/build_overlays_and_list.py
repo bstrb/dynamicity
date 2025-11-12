@@ -225,7 +225,17 @@ def build_overlays_and_list(run_root: Path) -> int:
             _tag_overlay_with_original(overlay_path, src_abs)
 
             # write shifts for THIS source only (event_id -> (dx,dy))
-            write_shifts_mm(str(overlay_path), ev_map)
+            # write_shifts_mm(str(overlay_path), ev_map)
+            # write shifts for THIS source only (event_id -> (dx,dy))
+            if ev_map:
+                indices = list(ev_map.keys())
+                dxs = [v[0] for v in ev_map.values()]
+                dys = [v[1] for v in ev_map.values()]
+                write_shifts_mm(str(overlay_path), indices, dxs, dys)
+                print(f"[overlay] {overlay_path.name}: wrote {len(indices)} event shift(s)")
+            else:
+                print(f"[overlay] {overlay_path.name}: no event shifts to write")
+
 
             # remember mapping
             overlay_to_original[_real_abs(str(overlay_path))] = src_abs
