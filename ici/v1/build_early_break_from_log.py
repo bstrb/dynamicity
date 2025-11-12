@@ -45,7 +45,6 @@ from typing import Dict, Tuple, List, Optional
 HeaderKey = Tuple[str, int]  # (abs_image_path, event)
 EPS = 1e-12
 
-DEFAULT_RUN_ROOT = "/home/bubl3932/files/ici_trials/runs"
 DEFAULT_LOG_NAME = "image_run_log.csv"
 DEFAULT_OUT_NAME = "early_break.stream"
 
@@ -382,7 +381,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Incrementally update early_break.stream (improvement-only) with parallel per-run extraction."
     )
-    ap.add_argument("--run-root", default=DEFAULT_RUN_ROOT,
+    ap.add_argument("--run-root", required=True,
                     help="Path to 'runs/' containing image_run_log.csv and run_*/")
     ap.add_argument("--log-name", default=DEFAULT_LOG_NAME,
                     help=f"Log filename (default: {DEFAULT_LOG_NAME})")

@@ -6,8 +6,8 @@ Step 1 with "defaults-if-no-args":
 - If launched with NO arguments, uses hardcoded defaults for root/geom/cell/h5 and a standard flag set.
 - If launched WITH arguments, behaves as a normal CLI and appends any flags after `--`.
 - Always writes:
-    <run-root>/runs_ts/run_000/lst_000.lst
-    <run-root>/runs_ts/run_000/sh_000.sh
+    <run-root>/runs/run_000/lst_000.lst
+    <run-root>/runs/run_000/sh_000.sh
 - Does NOT execute indexamajig; only writes the exact command to sh_000.sh.
 
 Default dataset (used only when no CLI args are provided):
@@ -24,6 +24,18 @@ from typing import List
 import h5py
 
 IMAGES_DS = "/entry/data/images"
+
+# -------- Default config MacOS (applies ONLY when run with NO CLI args) --------
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+DEFAULT_H5   = DEFAULT_ROOT + "/sim.h5"
+
+# -------- Default config WSL(applies ONLY when run with NO CLI args) --------
+# DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300.cell"
+# DEFAULT_H5   = DEFAULT_ROOT + "/MFM300.h5"
 
 def _abs(p: str) -> str:
     return os.path.abspath(os.path.expanduser(p))
@@ -46,39 +58,25 @@ def _count_images(h5_path: str) -> int:
         if IMAGES_DS not in f:
             raise KeyError(f"{IMAGES_DS} not found in {h5_path}")
         return int(f[IMAGES_DS].shape[0])
-    
-# --- add this new helper (replace _write_combined_lst) ---
-def _write_per_image_lists(run_dir: str, h5_files: List[str]) -> int:
-    """
-    Create run_000/event_XXXXXX/ folders and write a one-line lst in each:
-      <run_dir>/event_000000/lst_000000.lst  ->  "<h5> //0"
-      <run_dir>/event_000001/lst_000001.lst  ->  "<h5> //1"
-      ...
-    Returns total number of images across all HDF5s.
-    """
-    Path(run_dir).mkdir(parents=True, exist_ok=True)
-    total = 0
-    ev = 0
-    for h5 in h5_files:
-        n = _count_images(h5)
-        for i in range(n):
-            ev_str = f"{ev:06d}"
-            ev_dir = os.path.join(run_dir, f"event_{ev_str}")
-            Path(ev_dir).mkdir(parents=True, exist_ok=True)
-            lst_path = os.path.join(ev_dir, f"lst_{ev_str}.lst")
-            with open(lst_path, "w", encoding="utf-8") as f:
-                f.write(f"{h5} //{i}\n")
-            ev += 1
-        total += n
-    return total
 
+def _write_combined_lst(lst_path: str, h5_files: List[str]) -> int:
+    """Write combined .lst across all HDF5s; returns total image count."""
+    total = 0
+    Path(lst_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(lst_path, "w", encoding="utf-8") as f:
+        for h5 in h5_files:
+            n = _count_images(h5)
+            for i in range(n):
+                f.write(f"{h5} //{i}\n")
+            total += n
+    return total
 
 def build_argparser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="Create a single combined .lst and a sh_000.sh with the exact indexamajig command (no execution).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--run-root", help="Root folder under which 'run_000' will be created.")
+    ap.add_argument("--run-root", help="Root folder under which 'runs/run_000' will be created.")
     ap.add_argument("--geom", help="Path to .geom file.")
     ap.add_argument("--cell", help="Path to .cell file.")
     ap.add_argument("sources", nargs="*", help="One or more .h5 files or directories to search recursively for .h5.")
@@ -92,20 +90,26 @@ def main(argv: List[str]) -> int:
 
     using_defaults = (len(ours) == 0)
 
-    # Validate provided arguments
-    if not args.run_root or not args.geom or not args.cell or not args.sources:
-        print("ERROR: Missing required arguments. Provide --run-root, --geom, --cell and at least one source, or run with NO args to use defaults.", file=sys.stderr)
-        return 2
-    run_root = _abs(args.run_root)
-    geom = _abs(args.geom)
-    cell = _abs(args.cell)
-    h5s = _gather_h5(args.sources)
+    if using_defaults:
+        run_root = _abs(DEFAULT_ROOT)
+        geom = _abs(DEFAULT_GEOM)
+        cell = _abs(DEFAULT_CELL)
+        h5s = _gather_h5([DEFAULT_H5])
+    else:
+        # Validate provided arguments
+        if not args.run_root or not args.geom or not args.cell or not args.sources:
+            print("ERROR: Missing required arguments. Provide --run-root, --geom, --cell and at least one source, or run with NO args to use defaults.", file=sys.stderr)
+            return 2
+        run_root = _abs(args.run_root)
+        geom = _abs(args.geom)
+        cell = _abs(args.cell)
+        h5s = _gather_h5(args.sources)
 
     if not h5s:
         print("No .h5 sources found.", file=sys.stderr)
         return 2
 
-    run_dir = os.path.join(run_root, "run_000")
+    run_dir = os.path.join(run_root, "runs", "run_000")
     os.makedirs(run_dir, exist_ok=True)
 
     lst_path = os.path.join(run_dir, "lst_000.lst")
@@ -118,9 +122,10 @@ def main(argv: List[str]) -> int:
     print(f"HDF5 files:  {len(h5s)}")
     print("===============================================================")
 
-    total_images = _write_per_image_lists(run_dir, h5s)
-    print(f"Wrote {total_images} one-line .lst files under {run_dir}/event_*/")
-    print("Per-image shell scripts will be generated by create_run_sh.py.")
+    total_images = _write_combined_lst(lst_path, h5s)
+    print(f"Wrote combined list: {lst_path}  (total images: {total_images})")
+    print("Inspect the .lst and .sh to verify before running.")
+
     return 0
 
 if __name__ == "__main__":

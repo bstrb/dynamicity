@@ -20,7 +20,8 @@ def main():
     args = ap.parse_args(ours)
 
     run = f"{int(args.run):03d}"
-    run_dir = os.path.join(os.path.abspath(os.path.expanduser(args.run_root)), f"run_{run}")
+    run_dir = os.path.join(os.path.abspath(os.path.expanduser(args.run_root)),
+                           "runs", f"run_{run}")
     Path(run_dir).mkdir(parents=True, exist_ok=True)
 
     lst_path = os.path.join(run_dir, f"lst_{run}.lst")

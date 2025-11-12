@@ -156,27 +156,22 @@ def proposal_breakdown_current(rows, run_cutoff: int):
     return ring_props, bo_props
 
 def done_events_summary(rows):
-    # Group by event
+    # "done" iff the last row for that event has next_dx_raw == next_dy_raw == "done"
     by_event = {}
     for r in rows:
         by_event.setdefault(r["event"], []).append(r)
-
-    done_wrmsd = []
+    done_events = []
     for ev, g in by_event.items():
         g.sort(key=lambda x: x["run"])
         last = g[-1]
-        # Only consider events that are marked done
         if last["next_dx_raw"] == "done" and last["next_dy_raw"] == "done":
-            # Take the best (lowest) wrmsd among successful frames
-            wrs = [
-                r["wrmsd"] for r in g
-                if r["indexed"] == 1 and r["wrmsd"] is not None and not math.isnan(r["wrmsd"])
-            ]
-            if wrs:
-                done_wrmsd.append(min(wrs))
-
-    n_done = len(done_wrmsd)
-    return n_done, mean_safe(done_wrmsd), median_safe(done_wrmsd)
+            done_events.append(ev)
+    # gather all successful wrmsd for done events
+    succ_done_wr = []
+    for r in rows:
+        if r["event"] in done_events and r["indexed"] == 1 and (r["wrmsd"] is not None) and not math.isnan(r["wrmsd"]):
+            succ_done_wr.append(r["wrmsd"])
+    return len(done_events), mean_safe(succ_done_wr), median_safe(succ_done_wr)
 
 def fmt(x, pct=False, nd=3):
     if x is None or (isinstance(x, float) and math.isnan(x)):
@@ -191,7 +186,7 @@ def main():
     ap.add_argument("--out-json", default=None, help="Optional path to write a JSON summary")
     args = ap.parse_args()
 
-    runs_dir = os.path.abspath(os.path.expanduser(args.run_root))
+    runs_dir = os.path.join(os.path.abspath(os.path.expanduser(args.run_root)), "runs")
     log_path = args.log or os.path.join(runs_dir, "image_run_log.csv")
     if not os.path.isfile(log_path):
         print(f"[summary] ERROR: missing {log_path}")

@@ -151,7 +151,7 @@ def main(argv=None) -> int:
     # If --run-root is omitted or empty, fall back to DEFAULT_ROOT
     run_root = os.path.abspath(os.path.expanduser(args.run_root or DEFAULT_ROOT))
 
-    runs_dir = run_root
+    runs_dir = os.path.join(run_root, "runs")
     os.makedirs(runs_dir, exist_ok=True)
 
     last_n, last_run_dir = _find_latest_run_dir(runs_dir)

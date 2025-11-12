@@ -289,7 +289,7 @@ def main(argv=None):
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
     run_root = os.path.abspath(os.path.expanduser(args.run_root))
-    run_dir  = os.path.join(run_root, f"run_{int(args.run):03d}")
+    run_dir  = os.path.join(run_root, "runs", f"run_{int(args.run):03d}")
     stream_path = os.path.join(run_dir, f"stream_{int(args.run):03d}.stream")
 
     print("Run root :", run_root)

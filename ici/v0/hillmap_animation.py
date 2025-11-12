@@ -22,8 +22,8 @@ class Step1VizParams:
     grid_N: int = 301
     apply_min_spacing_mask: bool = True
 
-def read_log(log_abs_path: str = "path/to/image_run_log.csv"):
-    p = Path(log_abs_path)
+def read_log(run_root: str, log_relpath: str = "runs/image_run_log.csv"):
+    p = Path(run_root) / log_relpath
     with p.open("r", encoding="utf-8") as f:
         return f.readlines()
 
@@ -121,12 +121,12 @@ def probability_grid_from_trials(trials, params: Step1VizParams):
     P = W / total if total > 0 else W
     return X, Y, P
 
-def animate_event_progress(log_abs_path: str, run_root: str, event_id: int = None, abs_path_contains: str = None,
+def animate_event_progress(run_root: str, event_id: int = None, abs_path_contains: str = None,
                            viz_params: Step1VizParams = None, fps: int = 2, out_path: str = None):
     if viz_params is None:
         viz_params = Step1VizParams()
 
-    lines = read_log(log_abs_path)
+    lines = read_log(run_root)
     blocks = group_blocks(lines)
 
     selected = None
@@ -196,10 +196,10 @@ if __name__ == "__main__":
     ap.add_argument("--event", type=int, help="Event ID to visualize")
     ap.add_argument("--fps", type=int, default=1, help="Frames per second in the GIF")
     ap.add_argument("--radius-mm", type=float, default=0.05)
-    ap.add_argument("--A0", type=float, default=1.0)
-    ap.add_argument("--hill-amp-frac", type=float, default=0.2)
-    ap.add_argument("--drop-amp-frac", type=float, default=0.1)
     ap.add_argument("--min-spacing-mm", type=float, default=0.001)
+    ap.add_argument("--A0", type=float, default=1.0)
+    ap.add_argument("--hill-amp-frac", type=float, default=0.8)
+    ap.add_argument("--drop-amp-frac", type=float, default=0.5)
     ap.add_argument("--explore-floor", type=float, default=1e-6)
     args = ap.parse_args()
 
@@ -216,7 +216,6 @@ if __name__ == "__main__":
     )
 
     gif_path = animate_event_progress(
-        log_abs_path=args.log,
         run_root=run_root,
         event_id=args.event,
         viz_params=viz,

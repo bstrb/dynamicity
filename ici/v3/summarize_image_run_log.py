@@ -14,8 +14,81 @@ Optional: write a CSV/JSON summary artifact.
 Usage:
   python3 summarize_image_run_log.py --run-root <root> [--out-csv summary.csv] [--out-json summary.json]
 """
-import argparse, os, math, json, statistics as stats
+import argparse, os, re, math, json, statistics as stats
 
+SECTION_RE = re.compile(r"^#(?P<path>/.*)\s+event\s+(?P<ev>\d+)\s*$")
+
+def _iter_sections_with_rows(log_path):
+    """
+    Yields ( (abs_path, ev), [row_lines_without_header] ).
+    Each row_line is a CSV line string (not parsed).
+    """
+    key = None
+    buf = []
+    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+        # skip the file CSV header if present
+        first = True
+        for ln in f:
+            if first and ln.strip().lower().startswith("run_n,"):
+                first = False
+                continue
+            first = False
+            m = SECTION_RE.match(ln)
+            if m:
+                if key is not None:
+                    yield key, buf
+                key = (os.path.abspath(m.group("path")), int(m.group("ev")))
+                buf = []
+            else:
+                if key is not None and ln.strip() and not ln.startswith("#"):
+                    buf.append(ln.rstrip("\n"))
+    if key is not None:
+        yield key, buf
+
+def _last_statusful(parts7):
+    """Return (nx, ny) if this row carries status (numeric or 'done'); else None."""
+    nx, ny = parts7[5], parts7[6]
+    return (nx, ny) if (nx or ny) else None
+
+def _split7(s):
+    p = [t.strip() for t in s.split(",")]
+    if len(p) < 7:
+        p += [""] * (7 - len(p))
+    return p
+
+def _count_done_events_by_last_statusful_row(log_path: str) -> int:
+    """
+    For each (src,event) section, find the most recent row that actually
+    carries a status (either numeric next_* or 'done'). If that last
+    status row is 'done,done', the section is considered done.
+    """
+    sec_last_status = {}
+    current_key = None
+
+    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+        for ln in f:
+            m = SECTION_RE.match(ln)
+            if m:
+                current_key = (os.path.abspath(m.group("path")), int(m.group("ev")))
+                continue
+            if not current_key or ln.startswith("#"):
+                continue
+            s = ln.strip()
+            if not s:
+                continue
+            parts = [p.strip() for p in s.split(",")]
+            if len(parts) < 7:
+                parts += [""] * (7 - len(parts))
+            nx, ny = parts[5], parts[6]
+            # Only record rows that actually carry a status (numeric or 'done')
+            if nx or ny:
+                sec_last_status[current_key] = (nx, ny)
+
+    return sum(
+        1
+        for (nx, ny) in sec_last_status.values()
+        if str(nx).lower() == "done" and str(ny).lower() == "done"
+    )
 def parse_log(log_path):
     rows = []
     current_event = None
@@ -26,31 +99,46 @@ def parse_log(log_path):
                 # header line: "#/abs/path event <num>"
                 try:
                     left, evs = ln[1:].rsplit(" event ", 1)
-                    current_event = (os.path.abspath(left.strip()), int(evs.strip()))
+                    src = os.path.abspath(left.strip())
+                    ev  = int(evs.strip())
+                    current_event = (src, ev)
                 except Exception:
                     current_event = None
                 continue
+
             parts = [p.strip() for p in ln.split(",")]
             if len(parts) < 7 or not parts[0].isdigit():
                 continue
+
             run = int(parts[0])
+
             def _f(s):
                 try:
                     return float(s) if s != "" else None
                 except Exception:
                     return None
+
             det_dx = _f(parts[1]); det_dy = _f(parts[2])
             indexed = int(parts[3]) if parts[3] else 0
             wr = _f(parts[4])
             next_dx_raw, next_dy_raw = parts[5], parts[6]
+
             def _f_next(s):
-                if s in ("", "done"): return None
-                try: return float(s)
-                except Exception: return None
+                if s in ("", "done"):
+                    return None
+                try:
+                    return float(s)
+                except Exception:
+                    return None
+
             next_dx = _f_next(next_dx_raw)
             next_dy = _f_next(next_dy_raw)
+
+            src, ev = (current_event if current_event else (None, None))
             rows.append({
-                "event": current_event[1] if current_event else None,
+                "src": src,
+                "event": ev,
+                "sec": (src, ev),  # <-- unique section key
                 "run": run,
                 "det_dx": det_dx, "det_dy": det_dy,
                 "indexed": indexed, "wrmsd": wr,
@@ -58,6 +146,7 @@ def parse_log(log_path):
                 "next_dx_raw": next_dx_raw, "next_dy_raw": next_dy_raw
             })
     return rows
+
 
 def mean_safe(vals):
     vals = [v for v in vals if v is not None and not math.isnan(v)]
@@ -70,45 +159,42 @@ def median_safe(vals):
 def run_stats_cumulative(rows, run_cutoff: int):
     """
     Cumulative-as-of-run stats:
-      - events_present: events that have appeared up to and including run_cutoff
-      - index_percent: (#events with >=1 success up to run_cutoff) / events_present * 100
-      - wrmsd_mean/median: mean/median of per-event BEST (min) wRMSD up to run_cutoff
+      - sections_present: sections (src,event) that have appeared up to and including run_cutoff
+      - index_percent: (#sections with ≥1 success up to run_cutoff) / sections_present * 100
+      - wrmsd_mean/median: mean/median of per-section BEST (min) wRMSD up to run_cutoff
     """
     import math, statistics as stats
 
-    # Rows up to the cutoff
     upto = [r for r in rows if r["run"] <= run_cutoff]
     if not upto:
         return {
-            "events_present": 0,
+            "events_present": 0,  # kept name for compatibility with your prints
             "success_count": 0,
             "index_percent": None,
             "wrmsd_mean": None,
             "wrmsd_median": None,
         }
 
-    # Events that have appeared by this run
-    events_present = sorted({r["event"] for r in upto})
+    sections_present = sorted({r["sec"] for r in upto})
 
-    # Per-event best (minimum) wRMSD so far
-    best_wr_by_event = {}
-    for ev in events_present:
+    best_wr_by_sec = {}
+    for sec in sections_present:
         wrs = [
             r["wrmsd"] for r in upto
-            if r["event"] == ev and r["indexed"] == 1 and (r["wrmsd"] is not None) and not math.isnan(r["wrmsd"])
+            if r["sec"] == sec and r["indexed"] == 1 and (r["wrmsd"] is not None) and not math.isnan(r["wrmsd"])
         ]
         if wrs:
-            best_wr_by_event[ev] = min(wrs)
+            best_wr_by_sec[sec] = min(wrs)
 
-    success_count = len(best_wr_by_event)
-    idx_pct = (success_count / len(events_present) * 100.0) if events_present else None
+    success_count = len(best_wr_by_sec)
+    idx_pct = (success_count / len(sections_present) * 100.0) if sections_present else None
 
-    wr_values = list(best_wr_by_event.values())
+    wr_values = list(best_wr_by_sec.values())
     wr_mean = (sum(wr_values) / len(wr_values)) if wr_values else None
     wr_median = (stats.median(wr_values) if wr_values else None)
 
     return {
-        "events_present": len(events_present),
+        "events_present": len(sections_present),
         "success_count": success_count,
         "index_percent": idx_pct,
         "wrmsd_mean": wr_mean,
@@ -117,32 +203,31 @@ def run_stats_cumulative(rows, run_cutoff: int):
 
 def proposal_breakdown_current(rows, run_cutoff: int):
     """
-    Returns (ring_props, bo_props) as COUNTS OF EVENTS currently proposed:
-      - If event is done at or before run_cutoff -> not counted
-      - Else if event has any success up to run_cutoff -> counts toward BO
+    Returns (ring_props, bo_props) counting SECTIONS (src,event):
+      - If section is done at/before run_cutoff -> not counted
+      - Else if section has any success up to run_cutoff -> counts toward BO
       - Else -> counts toward ring
     """
     import math
 
-    # group by event
-    by_event = {}
+    # group by section
+    by_sec = {}
     for r in rows:
         if r["run"] <= run_cutoff:
-            by_event.setdefault(r["event"], []).append(r)
+            by_sec.setdefault(r["sec"], []).append(r)
 
     ring_props = 0
     bo_props = 0
 
-    for ev, g in by_event.items():
+    for sec, g in by_sec.items():
         g.sort(key=lambda x: x["run"])
         last = g[-1]
 
-        # done if latest row says done,done
+        # If last status is done, skip (not proposed anymore)
         is_done = (last["next_dx_raw"] == "done") and (last["next_dy_raw"] == "done")
         if is_done:
             continue
 
-        # has ever been indexed up to run_cutoff ?
         has_success = any(
             (row["indexed"] == 1) and (row["wrmsd"] is not None) and (not math.isnan(row["wrmsd"]))
             for row in g
@@ -156,18 +241,16 @@ def proposal_breakdown_current(rows, run_cutoff: int):
     return ring_props, bo_props
 
 def done_events_summary(rows):
-    # Group by event
-    by_event = {}
+    # Group by section
+    by_sec = {}
     for r in rows:
-        by_event.setdefault(r["event"], []).append(r)
+        by_sec.setdefault(r["sec"], []).append(r)
 
     done_wrmsd = []
-    for ev, g in by_event.items():
+    for sec, g in by_sec.items():
         g.sort(key=lambda x: x["run"])
         last = g[-1]
-        # Only consider events that are marked done
         if last["next_dx_raw"] == "done" and last["next_dy_raw"] == "done":
-            # Take the best (lowest) wrmsd among successful frames
             wrs = [
                 r["wrmsd"] for r in g
                 if r["indexed"] == 1 and r["wrmsd"] is not None and not math.isnan(r["wrmsd"])
@@ -182,6 +265,74 @@ def fmt(x, pct=False, nd=3):
     if x is None or (isinstance(x, float) and math.isnan(x)):
         return "—"
     return f"{x:.{nd}f}" + ("%" if pct else "")
+def summarize(log_path):
+    total_sections = 0
+    done_sections  = 0
+    prop_unindexed = 0
+    prop_local     = 0
+
+    # Optional: track index-rate / wrmsd using the latest row in each section
+    latest_rows = []  # store parsed parts for stats if you need them
+
+    for (src_ev, rows) in _iter_sections_with_rows(log_path):
+        total_sections += 1
+        if not rows:
+            continue
+
+        # find the last statusful row in this section
+        last_status = None
+        last_parsed = None
+        for s in reversed(rows):
+            p = _split7(s)
+            last_parsed = p if last_parsed is None else last_parsed  # keep very last row for optional stats
+            ls = _last_statusful(p)
+            if ls is not None:
+                last_status = ls
+                break
+
+        # done?
+        if last_status and str(last_status[0]).lower() == "done" and str(last_status[1]).lower() == "done":
+            done_sections += 1
+
+        # proposal categorization:
+        # We classify the *latest* proposal reason by looking at the most recent row in the latest run
+        # with numeric next_*. You likely already have a rule; here’s a robust one:
+        # - If the row with numeric next_* followed an unindexed (=0) row -> "Hillmap/unindexed"
+        # - Else -> "local optimization"
+        last_numeric = None
+        last_numeric_idx = None
+        for s in reversed(rows):
+            p = _split7(s)
+            nx, ny = p[5], p[6]
+            if nx and nx.lower() != "done":
+                last_numeric = p
+                break
+        if last_numeric:
+            # find the immediately preceding row (same section), if any, to see indexed flag
+            idx_prev = 1  # default assume indexed if no prev
+            try:
+                i = rows[::-1].index(",".join(last_numeric))  # position in reversed list
+                j = len(rows) - 1 - i  # position in forward order
+                if j > 0:
+                    prev = _split7(rows[j-1])
+                    idx_prev = 1 if prev[3] == "1" else 0
+            except Exception:
+                pass
+            if idx_prev == 0:
+                prop_unindexed += 1
+            else:
+                prop_local += 1
+
+        if last_parsed:
+            latest_rows.append(last_parsed)
+
+    return {
+        "sections": total_sections,
+        "done": done_sections,
+        "prop_unindexed": prop_unindexed,
+        "prop_local": prop_local,
+        "latest_rows": latest_rows,  # use for mean/median if needed
+    }
 
 def main():
     ap = argparse.ArgumentParser()
@@ -283,9 +434,10 @@ def main():
         ring_props))
     print("[summary] Proposals: due to local optimization (CrystFEL Refine or wRMSD-Boltzmann-weighted Hillmap search) = {}".format(
         bo_props))
-
+    
     print("[summary] Done events: count={}, wRMSD mean={}, median={}".format(
-        n_done, fmt(wr_done_mean), fmt(wr_done_median)))
+    n_done, fmt(wr_done_mean), fmt(wr_done_median)))
+
 
     # optional artifacts
     if args.out_csv:

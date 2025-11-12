@@ -1,92 +1,294 @@
-#     sys.exit(main(sys.argv[1:]))
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-run_sh.py
+import argparse, os, sys, subprocess, re
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
-Usage:
-  python run_sh.py [--run-root <path>] [--run <run>]
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+EXTRACT_SCRIPT = os.path.join(SCRIPT_DIR, "extract_mille_shifts.py")
 
-Defaults (no args):
-  RUN ROOT = "/home/bubl3932/files/ici_trials"
-  RUN      = "000"
-  RUN DIR  = <RUN ROOT>/runs/run_<RUN>
-  SHELL    = /bin/bash
-"""
+def _check_index_success(ev_dir: str) -> tuple[bool, str]:
+    """
+    Determine if indexing truly succeeded for this event.
+    Strategy:
+      1) Parse idx.stderr 'Final: ... X indexable' (preferred & fast).
+      2) Fallback: parse stream_* .stream for 'num_reflections = N' (N>0).
 
-import argparse, os, sys, subprocess
-from pathlib import Path
+    Returns (ok, reason).
+    """
+    import re, os
 
-DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
-DEFAULT_RUN = "001"
-
-
-def build_ap():
-    ap = argparse.ArgumentParser(
-        description="Run sh_<run>.sh (indexamajig) for the selected run.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    ap.add_argument(
-        "--run-root",
-        help='Root folder that contains runs/run_<run> (e.g., ".../sim_004")',
-        default=None,
-    )
-    ap.add_argument(
-        "--run",
-        help='Run identifier (e.g., "000", "3", "12"). Will be zero-padded to width 3.',
-        default=None,
-    )
-    return ap
-
-
-def normalize_run(run: str) -> str:
-    """Return zero-padded run string (e.g. '0' -> '000')."""
+    # 1) idx.stderr heuristic
+    err_path = os.path.join(ev_dir, "idx.stderr")
     try:
-        return f"{int(run):03d}"
-    except (TypeError, ValueError):
-        # If not numeric, return as-is (e.g. custom labels)
-        return str(run)
+        with open(err_path, "r", encoding="utf-8", errors="replace") as f:
+            s = f.read()
+        m = re.search(r"Final:\s+\d+\s+images processed,.*?\b(\d+)\s+indexable\b", s, re.S)
+        if m:
+            idxable = int(m.group(1))
+            if idxable > 0:
+                return True, f"idx.stderr: indexable={idxable}"
+            else:
+                return False, f"idx.stderr: indexable={idxable}"
+    except FileNotFoundError:
+        pass
+
+    # 2) stream fallback
+    try:
+        parts = [p for p in os.listdir(ev_dir) if p.startswith("stream_") and p.endswith(".stream")]
+        if len(parts) == 1:
+            sp = os.path.join(ev_dir, parts[0])
+            with open(sp, "r", encoding="utf-8", errors="replace") as f:
+                t = f.read()
+            m2 = re.search(r"\bnum_reflections\s*=\s*(\d+)", t)
+            if m2:
+                nref = int(m2.group(1))
+                if nref > 0:
+                    return True, f"stream: num_reflections={nref}"
+                else:
+                    return False, f"stream: num_reflections={nref}"
+    except FileNotFoundError:
+        pass
+
+    return False, "no conclusive success marker"
+
+def run_one_event(ev_dir: str) -> tuple[str, int, int]:
+    """
+    Run per-event indexing and, if present, mille extraction in the same worker.
+    Returns (ev_dir, rc_sh, rc_mille) where rc_mille==0 if ran OK,
+    3 if mille-data.bin missing, and non-zero if extractor failed.
+    """
+    # 1) find sh_XXXXXX.sh
+    sh_candidates = sorted([p for p in os.listdir(ev_dir)
+                            if p.startswith("sh_") and p.endswith(".sh")])
+    if len(sh_candidates) != 1:
+        return ev_dir, 2, 3  # bad/missing script; mark mille as "missing"
+
+    sh_file = sh_candidates[0]
+    out_path = os.path.join(ev_dir, "idx.stdout")
+    err_path = os.path.join(ev_dir, "idx.stderr")
+
+    # # run indexing with cwd=ev_dir
+    # with open(out_path, "w", encoding="utf-8") as out, open(err_path, "w", encoding="utf-8") as err:
+    #     rc_sh = subprocess.call(["bash", sh_file], cwd=ev_dir, stdout=out, stderr=err)
+
+    # # if indexing failed, do NOT attempt mille; return early
+    # if rc_sh != 0:
+    #     return ev_dir, rc_sh, 3
+
+    with open(out_path, "w", encoding="utf-8") as out, open(err_path, "w", encoding="utf-8") as err:
+        rc_sh_raw = subprocess.call(["bash", sh_file], cwd=ev_dir, stdout=out, stderr=err)
+
+    # Robust success check (stderr 'Final: ... indexable' or stream num_reflections)
+    ok, why = _check_index_success(ev_dir)
+    if not ok:
+        # mark as failed indexing regardless of raw returncode
+        # use a distinct rc to distinguish "ran but unindexed"
+        return ev_dir, (rc_sh_raw if rc_sh_raw != 0 else 10), 3
+
+    # from here on we consider indexing successful
+    rc_sh = 0
 
 
-def run_script(run_dir: str, run: str) -> int:
-    """Execute sh_<run>.sh inside run_dir using /bin/bash. Capture stdout/stderr."""
-    sh = os.path.join(run_dir, f"sh_{run}.sh")
-    if not os.path.isfile(sh):
-        print(f"ERROR: not found: {sh}", file=sys.stderr)
-        return 2
+    # 2) immediately run mille extractor (same worker, same cwd) if mille-data.bin exists
+    bin_path = os.path.join(ev_dir, "mille-data.bin")
+    if not os.path.isfile(bin_path):
+        return ev_dir, rc_sh, 3  # no mille for this event; "missing"
 
-    out = os.path.join(run_dir, "idx.stdout")
-    err = os.path.join(run_dir, "idx.stderr")
+    # mille_out = os.path.join(ev_dir, "per_frame_dx_dy.csv")
+    with open(os.path.join(ev_dir, "mille.stdout"), "w", encoding="utf-8") as mout, \
+         open(os.path.join(ev_dir, "mille.stderr"), "w", encoding="utf-8") as merr:
+        # no flags required; adjust if you later want --globals/--scale
+        rc_mille = subprocess.call(
+            ["python3", EXTRACT_SCRIPT, "mille-data.bin"],
+            cwd=ev_dir, stdout=mout, stderr=merr
+        )
 
-    print(f"Running: {sh}")
-    with open(out, "w", encoding="utf-8") as fo, open(err, "w", encoding="utf-8") as fe:
-        proc = subprocess.run(["/bin/bash", sh], stdout=fo, stderr=fe, cwd=run_dir)
+    return ev_dir, rc_sh, rc_mille
 
-    print(f"Return code: {proc.returncode}")
-    if proc.returncode != 0:
-        print(f"WARNING: non-zero return (see {err})")
-    return proc.returncode
+# def concat_streams(run_dir: str, run_str: str, ev_dirs: list[str]) -> int:
+#     import re
+#     # collect stream parts (one per event)
+#     items = []
+#     for d in ev_dirs:
+#         parts = [p for p in os.listdir(d) if p.startswith("stream_") and p.endswith(".stream")]
+#         if len(parts) != 1:
+#             continue
+#         m = re.search(r"stream_(\d{6})\.stream$", parts[0])
+#         if not m:
+#             continue
+#         items.append((int(m.group(1)), os.path.join(d, parts[0])))
 
-def main(argv):
-    ap = build_ap()
-    args = ap.parse_args(argv)
+#     if not items:
+#         print(f"[ERR] no event stream parts found under {run_dir}", file=sys.stderr)
+#         return 2
 
-    # Resolve parameters: use defaults if not provided
-    run_root = args.run_root if args.run_root else DEFAULT_ROOT
-    run = normalize_run(args.run if args.run else DEFAULT_RUN)
+#     items.sort(key=lambda t: t[0])
+#     out_path = os.path.join(run_dir, f"stream_{run_str}.stream")
 
-    # Construct run directory from root and run
-    run_dir = os.path.join(run_root, f"run_{run}")
-    run_dir = os.path.abspath(os.path.expanduser(run_dir))
-    os.makedirs(run_dir, exist_ok=True)
+#     # keep header only from the first part
+#     with open(out_path, "wb") as wf:
+#         for i, (_, p) in enumerate(items):
+#             with open(p, "rb") as rf:
+#                 data = rf.read()
+#             if not data:
+#                 continue
+#             if i > 0:
+#                 idx = data.find(b"Begin chunk")
+#                 if idx > 0:
+#                     data = data[idx:]
+#             wf.write(data)
 
-    print(f"Run root : {os.path.abspath(os.path.expanduser(run_root))}")
-    print(f"Run      : {run}")
+#     print(f"[run] wrote {out_path} ({len(items)} parts, single header)")
+#     return 0
+def concat_streams(run_dir: str, run_str: str, ev_dirs: list[str]) -> int:
+    import os, re, sys, shutil
+
+    RE_BEGIN_CHUNK = re.compile(r"^-{3,}\s*Begin chunk\s*-{3,}\s*$")
+    out_path = os.path.join(run_dir, f"stream_{run_str}.stream")
+
+    # choose one *.stream per event dir (same logic you already use)
+    items = []
+    for d in sorted(ev_dirs):
+        try:
+            parts = [p for p in os.listdir(d) if p.startswith("stream_") and p.endswith(".stream")]
+        except FileNotFoundError:
+            continue
+        if not parts:
+            continue
+        parts.sort()
+        items.append(os.path.join(d, parts[0]))
+
+    if not items:
+        print(f"[fail] no per-event streams found in {run_dir}", file=sys.stderr)
+        return 1
+
+    wrote_chunks = 0
+    header_written = False
+    bufsize = 1024 * 256  # 256 KiB buffered copy for speed
+
+    with open(out_path, "w", encoding="utf-8") as out:
+        for i, path in enumerate(items):
+            try:
+                rf = open(path, "r", encoding="utf-8", errors="replace")
+            except FileNotFoundError:
+                continue
+
+            saw_begin = False
+
+            try:
+                # For the FIRST input: write header (everything before the first Begin chunk)
+                if not header_written:
+                    header_lines = []
+                    while True:
+                        line = rf.readline()
+                        if not line:
+                            break
+                        if RE_BEGIN_CHUNK.match(line):
+                            saw_begin = True
+                            # write header once
+                            if header_lines:
+                                out.write("".join(header_lines).rstrip() + "\n\n")
+                            header_written = True
+                            # write the delimiter line that we just matched
+                            out.write(line)
+                            break
+                        else:
+                            header_lines.append(line)
+
+                    # If we never found a chunk in this file, skip it
+                    if not saw_begin:
+                        rf.close()
+                        continue
+
+                else:
+                    # Subsequent files: skip until first Begin chunk, then write from there
+                    while True:
+                        line = rf.readline()
+                        if not line:
+                            break
+                        if RE_BEGIN_CHUNK.match(line):
+                            saw_begin = True
+                            # spacing between parts
+                            if wrote_chunks > 0:
+                                out.write("\n")
+                            out.write(line)
+                            break
+
+                    if not saw_begin:
+                        rf.close()
+                        continue
+
+                # From here on, stream the REST of the file to out (no reformatting)
+                shutil.copyfileobj(rf, out, length=bufsize)
+                wrote_chunks += 1
+
+            finally:
+                rf.close()
+
+    if wrote_chunks == 0:
+        try: os.remove(out_path)
+        except FileNotFoundError: pass
+        print("[fail] no chunks found to concatenate.", file=sys.stderr)
+        return 1
+
+    print(f"[concat] wrote {out_path} from {wrote_chunks} part(s) with a single header")
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Run each event's sh_XXXXXX.sh in parallel (cwd=event dir), inline mille extraction, then concatenate."
+    )
+    ap.add_argument("--run-root", required=True)
+    ap.add_argument("--run", required=True)
+    ap.add_argument("--jobs", type=int, default=os.cpu_count())
+    args = ap.parse_args()
+
+    run_str = f"{int(args.run):03d}"
+    run_dir = os.path.join(os.path.abspath(os.path.expanduser(args.run_root)), f"run_{run_str}")
+    print(f"Run root : {os.path.abspath(os.path.expanduser(args.run_root))}")
+    print(f"Run      : {run_str}")
     print(f"Run dir  : {run_dir}")
 
-    rc = run_script(run_dir, run)
-    return rc
+    if not os.path.isdir(run_dir):
+        print(f"[ERR] missing run dir: {run_dir}", file=sys.stderr)
+        return 2
+
+    ev_dirs = [os.path.join(run_dir, d) for d in sorted(os.listdir(run_dir))
+               if d.startswith("event_") and os.path.isdir(os.path.join(run_dir, d))]
+    if not ev_dirs:
+        print(f"[ERR] No event_* directories in {run_dir}", file=sys.stderr)
+        return 2
+
+    # parallel execution: indexing + inline mille per event
+    workers = max(1, int(args.jobs or 1))
+    print(f"[mp] running {len(ev_dirs)} event jobs with {workers} workers…")
+    failures, mille_warn = [], []
+    # from concurrent.futures import ProcessPoolExecutor, as_completed
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(run_one_event, d) for d in ev_dirs]
+        for fut in as_completed(futs):
+            ev_dir, rc_sh, rc_mille = fut.result()
+            name = os.path.basename(ev_dir)
+            if rc_sh != 0:
+                # print(f"[err] {name} (index rc={rc_sh}) — see {ev_dir}/idx.stderr", file=sys.stderr)
+                failures.append(ev_dir)
+            else:
+                if rc_mille == 0:
+                    # print(f"[ok]  {name} (index + mille)")
+                    pass
+                elif rc_mille == 3:
+                    # print(f"[ok]  {name} (index only; no mille-data.bin)")
+                    pass
+                else:
+                    print(f"[warn] {name} (mille rc={rc_mille}) — see {ev_dir}/mille.stderr", file=sys.stderr)
+                    # do not fail the whole run if mille fails; still allow concatenation
+                    mille_warn.append(ev_dir)
+
+    if failures:
+        print(f"[fail] {len(failures)} event(s) failed indexing.", file=sys.stderr)
+
+    # concatenate streams from successfully indexed events (all events attempted already)
+    return concat_streams(run_dir, run_str, ev_dirs)
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main())

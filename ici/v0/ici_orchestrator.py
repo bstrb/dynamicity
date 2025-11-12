@@ -22,21 +22,16 @@ import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
-DEFAULT_MAX_ITERS = 100
+DEFAULT_MAX_ITERS = 0
 
 # Default paths
-# DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
-
-DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_100"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
+DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"
+DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
+DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
 
 # Default paths
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_010"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_006"
 # DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
 # DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
 # DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
@@ -45,14 +40,14 @@ DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    "--peaks=cxi",
-    # "--peaks=peakfinder9",
-    # "--min-snr-biggest-pix=1",
-    # "--min-snr-peak-pix=6",
-    # "--min-snr=1",
-    # "--min-sig=11",
-    # "--min-peak-over-neighbour=-inf",
-    # "--local-bg-radius=3",
+    # "--peaks=cxi",
+    "--peaks=peakfinder9",
+    "--min-snr-biggest-pix=1",
+    "--min-snr-peak-pix=6",
+    "--min-snr=1",
+    "--min-sig=11",
+    "--min-peak-over-neighbour=-inf",
+    "--local-bg-radius=3",
     # Other
     "-j", "24",
     "--min-peaks=15",
@@ -95,7 +90,8 @@ class OrchestratorRunLogger:
     """
     def __init__(self, runs_dir: str):
         os.makedirs(runs_dir, exist_ok=True)
-        self.log_path = os.path.join(runs_dir, "orchestrator.log")
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_path = os.path.join(runs_dir, f"{ts}_orchestrator.log")
         self._fh = None
         self._t0 = None
         self._old_out = None
@@ -125,10 +121,9 @@ class OrchestratorRunLogger:
             print(f"[orchestrator] ERROR: {exc_type.__name__}: {exc}")
         print(f"[orchestrator] total elapsed: {elapsed:.3f}s; log: {self.log_path}")
 # --- end: tiny tee-logger and timer ----------------------------------
-def runs_dir(run_root: str) -> str:
-    # run_root is already the timestamped runs folder
-    return os.path.abspath(os.path.expanduser(run_root))
 
+def runs_dir(run_root: str) -> str:
+    return os.path.join(os.path.abspath(os.path.expanduser(run_root)), "runs")
 
 def list_run_numbers(run_root: str) -> List[int]:
     rd = runs_dir(run_root)
@@ -238,7 +233,7 @@ def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list):
     run_py("evaluate_stream.py", ["--run-root", run_root, "--run", "000"], check=False)
     run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
     run_py("summarize_image_run_log.py", ["--run-root", run_root,])
-    run_py("build_early_break_from_log.py", ["--run-root", run_root])
+    run_py("build_early_break_from_log.py", ["--run-root", os.path.join(run_root, "runs")])
     print("[done] Initialization cycle complete. Proceeding to loop...")
 
 def iterate_until_done(run_root, max_iters=DEFAULT_MAX_ITERS):
@@ -295,7 +290,7 @@ def iterate_until_done(run_root, max_iters=DEFAULT_MAX_ITERS):
         run_py("evaluate_stream.py", ["--run-root", run_root, "--run", run_str], check=False)
         run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
         run_py("summarize_image_run_log.py", ["--run-root", run_root,])
-        run_py("build_early_break_from_log.py", ["--run-root", run_root])
+        run_py("build_early_break_from_log.py", ["--run-root", os.path.join(run_root, "runs")])
 
     else:
         print(f"[stop] Reached max-iters={max_iters} without satisfying 'done'.")
@@ -311,23 +306,19 @@ def main(argv=None):
 
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
+    run_root = os.path.abspath(os.path.expanduser(args.run_root))
+    os.makedirs(runs_dir(run_root), exist_ok=True)
 
-    exp_root = os.path.abspath(os.path.expanduser(args.run_root))
-
-    # one timestamp per orchestration
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    sess = os.path.join(exp_root, f"runs_{ts}")
-    os.makedirs(runs_dir(sess), exist_ok=True)
 
     # --- begin: wrap whole orchestration with logger (Change #2) ---
-    with OrchestratorRunLogger(runs_dir(sess)):
+    with OrchestratorRunLogger(runs_dir(run_root)):
         # If no runs, initialize run_000 first
-        if not list_run_numbers(sess):
+        if not list_run_numbers(run_root):
             # do_init_sequence(run_root)
-            do_init_sequence(sess, args.geom, args.cell, args.h5)
+            do_init_sequence(run_root, args.geom, args.cell, args.h5)
 
         # Iterate until all next_* == done
-        iterate_until_done(sess)
+        iterate_until_done(run_root)
 
     # --- end: wrap whole orchestration with logger ------------------
 

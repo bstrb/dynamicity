@@ -6,8 +6,8 @@ Step 1 with "defaults-if-no-args":
 - If launched with NO arguments, uses hardcoded defaults for root/geom/cell/h5 and a standard flag set.
 - If launched WITH arguments, behaves as a normal CLI and appends any flags after `--`.
 - Always writes:
-    <run-root>/runs/run_000/lst_000.lst
-    <run-root>/runs/run_000/sh_000.sh
+    <run-root>/runs_ts/run_000/lst_000.lst
+    <run-root>/runs_ts/run_000/sh_000.sh
 - Does NOT execute indexamajig; only writes the exact command to sh_000.sh.
 
 Default dataset (used only when no CLI args are provided):
@@ -76,7 +76,7 @@ def build_argparser() -> argparse.ArgumentParser:
         description="Create a single combined .lst and a sh_000.sh with the exact indexamajig command (no execution).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--run-root", help="Root folder under which 'runs/run_000' will be created.")
+    ap.add_argument("--run-root", help="Root folder under which 'run_000' will be created.")
     ap.add_argument("--geom", help="Path to .geom file.")
     ap.add_argument("--cell", help="Path to .cell file.")
     ap.add_argument("sources", nargs="*", help="One or more .h5 files or directories to search recursively for .h5.")
@@ -109,7 +109,7 @@ def main(argv: List[str]) -> int:
         print("No .h5 sources found.", file=sys.stderr)
         return 2
 
-    run_dir = os.path.join(run_root, "runs", "run_000")
+    run_dir = os.path.join(run_root, "run_000")
     os.makedirs(run_dir, exist_ok=True)
 
     lst_path = os.path.join(run_dir, "lst_000.lst")

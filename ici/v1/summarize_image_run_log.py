@@ -186,7 +186,7 @@ def main():
     ap.add_argument("--out-json", default=None, help="Optional path to write a JSON summary")
     args = ap.parse_args()
 
-    runs_dir = os.path.join(os.path.abspath(os.path.expanduser(args.run_root)), "runs")
+    runs_dir = os.path.abspath(os.path.expanduser(args.run_root))
     log_path = args.log or os.path.join(runs_dir, "image_run_log.csv")
     if not os.path.isfile(log_path):
         print(f"[summary] ERROR: missing {log_path}")

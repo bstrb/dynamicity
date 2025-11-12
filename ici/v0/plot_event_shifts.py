@@ -16,9 +16,6 @@ Examples:
 
   # all events (optionally filter by filename substring) + mark true center
   python plot_event_shifts.py --log image_run_log.csv --all-events --image-substr sim1.h5 --true-center -0.028 -0.028 --outdir ./plots
-
-  # all events but skip those without any finite wRMSD
-  python plot_event_shifts.py --log image_run_log.csv --all-events --skip-no-wrmsd
 """
 import argparse
 import math
@@ -100,14 +97,7 @@ def iter_groups_for_args(groups, event: Optional[int], image_substr: Optional[st
     keys.sort(key=lambda k: (k[1], k[0]))
     return keys
 
-def plot_group(path: str,
-               event: int,
-               rows: List[Row],
-               outdir: str,
-               dpi: int = 150,
-               annotate: bool = True,
-               true_center: Optional[Tuple[float,float]] = None,
-               event_only_title: bool = False) -> str:
+def plot_group(path: str, event: int, rows: List[Row], outdir: str, dpi: int = 150, annotate: bool = True, true_center: Optional[Tuple[float,float]] = None) -> str:
     xs_abs = [r[1] for r in rows]
     ys_abs = [r[2] for r in rows]
     runs   = [r[0] for r in rows]
@@ -158,6 +148,7 @@ def plot_group(path: str,
             pass
     # else: not enough area → skip heatmap gracefully
 
+
     # colored points by wRMSD
     if wrs_f:
         sc = plt.scatter(xs_f, ys_f, c=wrs_f, zorder=6)
@@ -189,18 +180,8 @@ def plot_group(path: str,
     plt.gca().set_aspect("equal", adjustable="box")
     plt.xlabel("det_shift_x_mm (centered at first run)")
     plt.ylabel("det_shift_y_mm (centered at first run)")
-
-    # --- Title behavior ---
-    if event_only_title:
-        title = f"event {event}"
-    else:
-        title = f"{os.path.basename(path)} — event {event} (centered at first run)"
+    title = f"{os.path.basename(path)} — event {event} (centered at first run)"
     plt.title(title)
-
-    # Fixed limits
-    plt.xlim(-0.05, 0.05)
-    plt.ylim(-0.05, 0.05)
-
     plt.tight_layout()
 
     base = os.path.splitext(os.path.basename(path))[0]
@@ -223,10 +204,6 @@ def main():
     ap.add_argument("--no_annotate", action="store_true", help="Do not annotate run numbers next to points")
     ap.add_argument("--true-center", type=float, nargs=2, metavar=("CX","CY"),
                     help="Optional marker (mm) for known true center (e.g. --true-center -0.028 -0.028)")
-    ap.add_argument("--skip-out-of-limits", action="store_true",
-                    help="If set, skip plotting any (image,event) groups where all points lie outside the fixed x/y limits (-0.05 to 0.05 mm).")
-    ap.add_argument("--skip-no-wrmsd", action="store_true",
-                    help="If set, skip plotting any (image,event) groups with no finite wRMSD values.")
     args = ap.parse_args()
 
     groups = parse_image_run_log(_abs(args.log))
@@ -236,6 +213,7 @@ def main():
         log_dir = os.path.dirname(os.path.abspath(args.log))
         args.outdir = os.path.join(log_dir, "plots_event_shifts")
     os.makedirs(args.outdir, exist_ok=True)
+
 
     if args.list_keys:
         print("# Available (image,event) keys:")
@@ -254,32 +232,9 @@ def main():
     plotted = []
     for (p, ev) in keys:
         rows = groups[(p, ev)]
-
-        # Optional skip if all points outside fixed x/y limits
-        if args.skip_out_of_limits:
-            xs = [r[1] for r in rows]
-            ys = [r[2] for r in rows]
-            if all((abs(x - xs[0]) > 0.05 or abs(y - ys[0]) > 0.05) for x, y in zip(xs, ys)):
-                print(f"Skipped (all points outside x/y limits): event {ev}\t{p}")
-                if args.first_only:
-                    break
-                continue
-
-        # Optional skip if no finite wRMSD present
-        if args.skip_no_wrmsd:
-            has_wrmsd = any((w is not None) for (_, _, _, _, w, _, _) in rows)
-            if not has_wrmsd:
-                print(f"Skipped (no wRMSD): event {ev}\t{p}")
-                if args.first_only:
-                    break
-                continue
-
-        out_png = plot_group(
-            p, ev, rows, args.outdir, dpi=args.dpi,
-            annotate=(not args.no_annotate),
-            true_center=(tuple(args.true_center) if args.true_center else None),
-            event_only_title=args.all_events  # <-- event-only title when plotting all events
-        )
+        out_png = plot_group(p, ev, rows, args.outdir, dpi=args.dpi,
+                             annotate=(not args.no_annotate),
+                             true_center=(tuple(args.true_center) if args.true_center else None))
         print(f"Wrote: {out_png}")
         plotted.append(out_png)
         if args.first_only:

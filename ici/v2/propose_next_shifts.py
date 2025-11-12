@@ -1,32 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-propose_next_shifts.py — Uses external Step-1 (HillMap); Step-2 imported from step2_meanshift.py (mean-shift jump) or step2_bayes.py (Bayesian optimization jump)
+propose_next_shifts.py — Step-1 (HillMap) exploration; Step-2 can be:
+  - dxdy: apply refined det shifts from per_frame_dx_dy.csv of the latest successful run (one-shot reindex at refined center, then done)
+  - meanshift: local mean-shift optimization (optional)
+  - bayes: Bayesian optimization (optional)
 """
 from __future__ import annotations
 import argparse, os, sys, math, hashlib
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional
 import numpy as np
+import h5py
 
-from step1_hillmap import Trial as Step1Trial, Step1Params, propose_step1
-# NEW: import the mean-shift and bayes Step-2 module
+
+# from step1_hillmap import Trial as Step1Trial, Step1Params, propose_step1
+from step1_hillmap_wrmsd import Trial as Step1Trial, Step1Params, propose_step1
 from step2_meanshift import propose_step2_meanshift, Step2MeanShiftConfig
-from step2_bayes import propose_step2_bayes, Step2BayesConfig 
+from step2_bayes import propose_step2_bayes, Step2BayesConfig
+from step2_dxdy import propose_step2_dxdy, Step2DxDyConfig
+
 
 # ------------------------ CSV helpers ------------------------
 
 def _fmt6(x: float) -> str:
     return f"{x:.6f}"
-
-def _finite_float_or_none(s: str) -> Optional[float]:
-    if s is None: return None
-    s = str(s).strip()
-    if s == "" or s.lower() in {"nan","none"}: return None
-    try:
-        v = float(s)
-        return v if math.isfinite(v) else None
-    except Exception:
-        return None
 
 def _group_blocks(lines: List[str]) -> List[Tuple[str, List[str]]]:
     blocks = []
@@ -45,6 +42,7 @@ def _group_blocks(lines: List[str]) -> List[Tuple[str, List[str]]]:
     return blocks
 
 def _parse_event_header(header_line: str) -> Tuple[str, int]:
+    """Returns (hdf5_path, event_id)."""
     try:
         prefix, ev = header_line[1:].split(" event ")
         return prefix.strip(), int(ev.strip())
@@ -66,7 +64,7 @@ def parse_blocks(lines: List[str]) -> Tuple[List[Tuple[str, List[str]]], int]:
     latest_run = -1
     for _, block in blocks:
         for ln in block:
-            if not ln or ln.startswith("#") or ln.strip().startswith("run_n"):
+            if (not ln) or ln.startswith("#") or ln.strip().startswith("run_n"):
                 continue
             try:
                 rn = int(ln.split(",")[0].strip())
@@ -78,10 +76,11 @@ def parse_blocks(lines: List[str]) -> Tuple[List[Tuple[str, List[str]]], int]:
 def update_block_latest_run(block_lines: List[str], latest_run: int, new_dx: Optional[float], new_dy: Optional[float]) -> List[str]:
     out = []
     for ln in block_lines:
-        if not ln or ln.startswith("#") or ln.strip().startswith("run_n"):
+        if (not ln) or ln.startswith("#") or ln.strip().startswith("run_n"):
             out.append(ln); continue
         parts = [p.strip() for p in ln.rstrip("\n").split(",")]
-        if len(parts) < 7: parts += [""] * (7 - len(parts))
+        if len(parts) < 7:
+            parts += [""] * (7 - len(parts))
         try:
             rn = int(parts[0])
         except Exception:
@@ -106,33 +105,78 @@ def _finite(x) -> bool:
 def _recent_unindexed_streak(trials: List[Tuple[int,float,float,int,Optional[float]]]) -> int:
     s = 0
     for _, _, _, idx, _ in reversed(trials):
-        if idx == 0: s += 1
-        else: break
+        if idx == 0:
+            s += 1
+        else:
+            break
     return s
-
-def _make_seed(abs_path: str, event_id: int, global_seed: int) -> int:
-    key = f"{abs_path}::{event_id}::{global_seed}"
-    return int.from_bytes(hashlib.blake2s(key.encode(), digest_size=8).digest(), "big") & 0x7FFFFFFF
 
 # ------------------------ Main proposer ------------------------
 
-def propose_event(step2algo , trials_sorted, R, rng,
-                  step1_A0, step1_hill_frac, step1_drop_frac, step1_candidates, step1_explore_floor, min_spacing, allow_spacing_relax,
-                  step2_step_frac, step2_direct_frac, step2_fail_bump_frac, back_to_step1_streak, done_step_mm, done_grad, N4step2,
-                  # NEW: mean-shift config passthrough
-                  ms_k_nearest: int = 40,
-                  ms_q_best_seed: int = 12,
-                  ms_wrmsd_eps: float = 0.02,
-                  ms_wrmsd_power: float = 2.0,
-                  ms_bandwidth_scale: float = 1.3,
-                  ms_max_iters: int = 6,
-                  ms_tol_mm: float = 0.003,
-                  ms_jitter_trials: int = 3,
-                  ms_jitter_sigma_frac: float = 0.5,
-                  ):
+def wrmsd_recurring_convergence(successes_w, N=10, tol=0.02):
+    """
+    Detects convergence when the best wRMSD is repeatedly reached.
+    tol: allowed relative difference (e.g., 0.02 = 2%)
+    """
+    wr = [w for _,_,w in successes_w if w is not None]
+    if len(wr) < N:
+        return False, {}
+
+    wr_recent = np.array(wr[-N:], float)
+    best = np.min(wr_recent)
+    rel_improvement = (np.min(wr) - best) / max(best, 1e-9)
+
+    # count how many times we got within tol * best
+    near_best = np.sum(wr_recent <= best * (1 + tol))
+
+    converged = (rel_improvement < tol) and (near_best >= 2)
+    return converged, {
+        "best": best,
+        "rel_improvement": rel_improvement,
+        "near_best_count": int(near_best),
+        "N": N,
+    }
+def wrmsd_median_convergence(successes_w, N=10, rel_tol=0.05):
+    wr = [w for _,_,w in successes_w if w is not None]
+    if len(wr) < N*2:
+        return False
+    med1 = np.median(wr[-N:])
+    med2 = np.median(wr[-2*N:-N])
+    rel = abs(med1 - med2) / max(med2, 1e-9)
+    return rel < rel_tol
+
+def propose_event(
+    step2algo: str,
+    trials_sorted: List[Tuple[int,float,float,int,Optional[float]]],
+    R: float,
+    rng: np.random.Generator,
+    step1_A0: float,
+    step1_hill_frac: float,
+    step1_drop_frac: float,
+    step1_candidates: int,
+    step1_explore_floor: float,
+    min_spacing: float,
+    allow_spacing_relax: bool,
+    back_to_step1_streak: int,
+    N4step2: int,
+    ms_k_nearest: int = 40,
+    ms_q_best_seed: int = 12,
+    ms_wrmsd_eps: float = 0.02,
+    ms_wrmsd_power: float = 2.0,
+    ms_bandwidth_scale: float = 1.3,
+    ms_max_iters: int = 6,
+    ms_tol_mm: float = 0.003,
+    ms_jitter_trials: int = 3,
+    ms_jitter_sigma_frac: float = 0.5,
+    λ = 0.5,  # damping factor for dxdy
+    # NEW: must be the *event directory* of the latest successful run when using dxdy
+    event_abs_path: str = "",
+) -> Tuple[Optional[float], Optional[float], str]:
     """
     Return (next_dx_mm, next_dy_mm, reason). If done, returns (None, None, "done_*").
+    trials_sorted: list of (run_n, dx, dy, indexed{0/1}, wrmsd{float|None})
     """
+
     # Parse trials into successes/failures/tried
     successes_w = []
     failures = []
@@ -143,12 +187,11 @@ def propose_event(step2algo , trials_sorted, R, rng,
             successes_w.append((dx, dy, float(wr)))
         elif idx == 0:
             failures.append((dx, dy))
-    tried = np.array(tried, float) if tried else np.empty((0,2), float)
+    tried = np.array(tried, float) if tried else np.empty((0, 2), float)
 
-    # Gate: only Step-2 if enough signal and not in a miss-streak
+    # Gate for Step-2
     n_succ = len(successes_w)
     if n_succ >= N4step2 and _recent_unindexed_streak(trials_sorted) < back_to_step1_streak:
-        # --- Step-2: call the imported mean-shift proposer ---
         if step2algo == "meanshift":
             ms_cfg = Step2MeanShiftConfig(
                 k_nearest=ms_k_nearest,
@@ -171,7 +214,9 @@ def propose_event(step2algo , trials_sorted, R, rng,
                 rng=rng,
                 cfg=ms_cfg,
             )
-        elif step2algo == "bayes":  # step2algo == "bayes"
+            return ndx, ndy, reason
+
+        elif step2algo == "bayes":
             bayes_cfg = Step2BayesConfig(
                 max_train_successes=100,
                 y_noise_frac=0.03,
@@ -198,55 +243,220 @@ def propose_event(step2algo , trials_sorted, R, rng,
                 min_spacing_mm=min_spacing,
                 cfg=bayes_cfg,
             )
-        elif step2algo == "none":
-            ndx, ndy, reason = None, None, "done_step2_disabled"
-        return ndx, ndy, reason
+            return ndx, ndy, reason
 
-    # --- Step-1 exploration (your HillMap module) ---
-    first_center = (trials_sorted[0][1], trials_sorted[0][2]) if trials_sorted else (0.0, 0.0)
-    s1_trials = [Step1Trial(dx, dy, idx, (float(wr) if _finite(wr) else None)) for _, dx, dy, idx, wr in trials_sorted]
-    s1_params = Step1Params(radius_mm=R, rng_seed=int(rng.integers(0, 2**31-1)), n_candidates=int(step1_candidates),
-                            A0=float(step1_A0), hill_amp_frac=float(step1_hill_frac), drop_amp_frac=float(step1_drop_frac),
-                            explore_floor=float(step1_explore_floor), min_spacing_mm=float(min_spacing),
-                            first_attempt_center_mm=first_center, allow_spacing_relax=bool(allow_spacing_relax))
+        elif step2algo == "dxdy":
+            dxdy_cfg = Step2DxDyConfig(col_dx="dx", col_dy="dy")
+            ndx, ndy, reason_dxdy = propose_step2_dxdy(
+                successes_w=successes_w,
+                failures=failures,
+                tried=tried,
+                R=R,
+                min_spacing_mm=min_spacing,
+                event_dir=event_abs_path,
+                cfg=dxdy_cfg,
+            )
+
+            # If CSV missing/invalid -> fall back to Step-1 exploration
+            if ndx is None or ndy is None:
+                first_center = (trials_sorted[0][1], trials_sorted[0][2])
+                s1_trials = [
+                    Step1Trial(
+                        dx - first_center[0],
+                        dy - first_center[1],
+                        idx,
+                        (float(wr) if _finite(wr) else None),
+                    )
+                    for _, dx, dy, idx, wr in trials_sorted
+                ]
+                hist_salt = len(trials_sorted)
+                rng_seed = (int(rng.integers(0, 2**31 - 1)) ^ (hist_salt * 0x9E3779B1)) & 0x7fffffff
+
+                s1_params = Step1Params(
+                    radius_mm=R,
+                    rng_seed=rng_seed,
+                    n_candidates=int(step1_candidates),
+                    A0=float(step1_A0),
+                    hill_amp_frac=float(step1_hill_frac),
+                    drop_amp_frac=float(step1_drop_frac),
+                    explore_floor=float(step1_explore_floor),
+                    min_spacing_mm=float(min_spacing),
+                    first_attempt_center_mm=first_center,
+                    allow_spacing_relax=bool(allow_spacing_relax),
+                )
+                res = propose_step1(s1_trials, s1_params)
+                if res.done:
+                    return None, None, "done_step1_fallback"
+                x, y = res.proposal_xy_mm
+                return float(x), float(y), "step1_fallback_due_to_dxdy_error"
+
+            # Pull last / previous tried centers (unchanged)
+            last_dx  = trials_sorted[-1][1] if trials_sorted else 0.0
+            last_dy  = trials_sorted[-1][2] if trials_sorted else 0.0
+            last_idx = trials_sorted[-1][3] if trials_sorted else 0
+            prev_dx  = trials_sorted[-2][1] if len(trials_sorted) >= 2 else 0.0
+            prev_dy  = trials_sorted[-2][2] if len(trials_sorted) >= 2 else 0.0
+
+            # Was the refined one-shot already applied on the last run?
+            # In subtract mode, applied center = prev − refined.
+            # Use a tolerance that survives 6-decimal rounding in the log.
+            eps = max(1e-3, 0.25 * float(min_spacing))
+            already_applied = (
+                len(trials_sorted) >= 2
+                and abs(last_dx - (prev_dx - ndx)) <= eps
+                and abs(last_dy - (prev_dy - ndy)) <= eps
+            )
+
+            if already_applied:
+                if last_idx == 1:
+                    # --- New: check convergence of reindexing shifts using run history ---
+                    # Need at least 3 runs to have two applied refinements to compare
+                    if len(trials_sorted) >= 3:
+                        # Extract the last two *applied* shifts (i.e. centers we actually used)
+                        prev_shift = np.array([trials_sorted[-2][1], trials_sorted[-2][2]], float)
+                        last_shift = np.array([trials_sorted[-1][1], trials_sorted[-1][2]], float)
+                        shift_delta = np.linalg.norm(last_shift - prev_shift)
+
+                        conv_median = wrmsd_median_convergence(successes_w, N=5, rel_tol=0.2)
+                        conv_recur, mrecur = wrmsd_recurring_convergence(successes_w, N=5, tol=0.1)
+
+                        # if shift_delta <= eps:
+                        #     return None, None, "done_dxdy_converged"
+                        if shift_delta <= eps or conv_median or conv_recur:
+                            return None, None, (
+                                f"done_dxdy_converged(shiftΔ={shift_delta:.4g}, "
+                                f"hist={conv_median}, recur={conv_recur})"
+                            )
+                        else:
+                            # Not yet converged: keep refining at new refined center
+                            return (last_dx - λ * float(ndx)), (last_dy - λ * float(ndy)), "dxdy_continue_refinement"
+                            # return (last_dx - float(ndx)), (last_dy - float(ndy)), "dxdy_continue_refinement"# Original (undamped)
+                    else:
+                        # Only one refinement so far; allow at least one more iteration
+                        return (last_dx - λ * float(ndx)), (last_dy - λ * float(ndy)), "dxdy_continue_refinement"
+                        # return (last_dx - float(ndx)), (last_dy - float(ndy)), "dxdy_continue_refinement"# Original (undamped)
+
+                else:
+                    # Refined attempt failed => back to Step-1 exploration
+                    first_center = (trials_sorted[0][1], trials_sorted[0][2])
+
+                    s1_trials = [
+                        Step1Trial(
+                            dx - first_center[0],
+                            dy - first_center[1],
+                            idx,
+                            (float(wr) if _finite(wr) else None),
+                        )
+                        for _, dx, dy, idx, wr in trials_sorted
+                    ]
+                    hist_salt = len(trials_sorted)
+                    rng_seed = (int(rng.integers(0, 2**31 - 1)) ^ (hist_salt * 0x9E3779B1)) & 0x7fffffff
+
+                    s1_params = Step1Params(
+                        radius_mm=R,
+                        rng_seed=rng_seed,
+                        n_candidates=int(step1_candidates),
+                        A0=float(step1_A0),
+                        hill_amp_frac=float(step1_hill_frac),
+                        drop_amp_frac=float(step1_drop_frac),
+                        explore_floor=float(step1_explore_floor),
+                        min_spacing_mm=float(min_spacing),
+                        first_attempt_center_mm=first_center,
+                        allow_spacing_relax=bool(allow_spacing_relax),
+                    )
+                    res = propose_step1(s1_trials, s1_params)
+                    if res.done:
+                        return None, None, "done_after_dxdy_fail_step1"
+                    x, y = res.proposal_xy_mm
+                    return float(x), float(y), "step1_after_dxdy_fail"
+                
+            return (last_dx - λ * float(ndx)), (last_dy - λ * float(ndy)), f"dxdy_damped_refine(lambda={λ:.2f})"
+
+            # return (last_dx - float(ndx)), (last_dy - float(ndy)), "dxdy_prev_minus_refined" # Original (undamped)
+
+
+        elif step2algo == "none":
+            return None, None, "done_step2_disabled"
+
+    # --- Step-1 exploration (HillMap) ---
+    first_center = (trials_sorted[0][1], trials_sorted[0][2])
+    # Convert prior trials to the LOCAL frame (relative to first_center)
+    s1_trials = [
+        Step1Trial(
+            dx - first_center[0],
+            dy - first_center[1],
+            idx,
+            (float(wr) if _finite(wr) else None),
+        )
+        for _, dx, dy, idx, wr in trials_sorted
+    ]
+    hist_salt = len(trials_sorted)
+    rng_seed = (int(rng.integers(0, 2**31 - 1)) ^ (hist_salt * 0x9E3779B1)) & 0x7fffffff
+
+    s1_params = Step1Params(
+        radius_mm=R,
+        rng_seed=rng_seed,
+        n_candidates=int(step1_candidates),
+        A0=float(step1_A0),
+        hill_amp_frac=float(step1_hill_frac),
+        drop_amp_frac=float(step1_drop_frac),
+        explore_floor=float(step1_explore_floor),
+        min_spacing_mm=float(min_spacing),
+        first_attempt_center_mm=first_center,   # seed stays absolute
+        allow_spacing_relax=bool(allow_spacing_relax),
+    )
+
     res = propose_step1(s1_trials, s1_params)
+    x, y = res.proposal_xy_mm      # still absolute (because step1 adds seed internally)
     if res.done:
         return None, None, res.reason
     else:
         x, y = res.proposal_xy_mm
         return float(x), float(y), res.reason
 
+
 # ------------------------ CLI runner ------------------------
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Propose next shifts per event (Step-1 imported, Step-2 = mean-shift).")
+    ap = argparse.ArgumentParser(
+        description=(
+            "Propose next shifts per event. Step-1: HillMap. "
+            "Step-2: 'dxdy' (one-shot refined center), 'meanshift', 'bayes', or 'none'."
+        )
+    )
     ap.add_argument("--run-root", required=True)
     ap.add_argument("--radius-mm", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=1337)
 
     # Step 1 knobs
-    ap.add_argument("--step1-A0", type=float, default=1.0)
-    ap.add_argument("--step1-hill-amp-frac", type=float, default=0.8)
-    ap.add_argument("--step1-drop-amp-frac", type=float, default=0.5)
+    ap.add_argument("--step1-A0", type=float, default=2.0)
+    ap.add_argument("--step1-hill-amp-frac", type=float, default=5.0)
+    ap.add_argument("--step1-drop-amp-frac", type=float, default=0.1)
+    ap.add_argument("--min-spacing-mm", type=float, default=0.0001)
     ap.add_argument("--step1-candidates", type=int, default=8192)
-    ap.add_argument("--step1-explore-floor", type=float, default=1e-6)
+    ap.add_argument("--step1-explore-floor", type=float, default=1e-5)
     ap.add_argument("--step1-allow-spacing-relax", action="store_true")
 
-    ap.add_argument("--step2-algorithm", type=str, default="none",
-                choices=["bayes", "meanshift", "none"], help="'bayes','meanshift' or 'none' to disable optimization after Step 1")
+    ap.add_argument("--N4-step2", type=int, default=1, help="Min successful indexed attempts to enable Step-2.")
+    ap.add_argument("--back-to-step1-streak", type=int, default=1)
+
+    ap.add_argument(
+        "--step2-algorithm",
+        type=str,
+        default="dxdy",
+        choices=["dxdy", "bayes", "meanshift", "none"],
+        help="'dxdy' = apply per_frame_dx_dy.csv once; 'bayes'/'meanshift' optional; 'none' disables Step-2.",
+    )
 
     # (Legacy) Step-2 knobs mean-shift or Bayes
-    ap.add_argument("--N4-step2", type=int, default=1)
     ap.add_argument("--step2-step-frac", type=float, default=0.5, help="(unused by mean-shift)")
     ap.add_argument("--step2-direct-frac", type=float, default=0.1, help="(unused by mean-shift)")
     ap.add_argument("--step2-fail-bump-frac", type=float, default=0.01, help="(unused by mean-shift)")
-    ap.add_argument("--back-to-step1-streak", type=int, default=5)
     ap.add_argument("--done-step-mm", type=float, default=0.05, help="(unused by mean-shift)")
     ap.add_argument("--done-grad", type=float, default=0.05, help="(unused by mean-shift)")
 
-    ap.add_argument("--min-spacing-mm", type=float, default=0.001)
 
-    # NEW: mean-shift config flags
+    # mean-shift config flags
     ap.add_argument("--ms-k-nearest", type=int, default=40)
     ap.add_argument("--ms-q-best-seed", type=int, default=12)
     ap.add_argument("--ms-wrmsd-eps", type=float, default=0.02)
@@ -259,22 +469,29 @@ def main(argv=None) -> int:
 
     args = ap.parse_args(argv)
 
-    log_path = os.path.join(args.run_root, "runs", "image_run_log.csv")
+    log_path = os.path.join(args.run_root, "image_run_log.csv")
     if not os.path.isfile(log_path):
-        print(f"ERROR: not found: {log_path}", file=sys.stderr); return 2
+        print(f"ERROR: not found: {log_path}", file=sys.stderr)
+        return 2
 
     lines = read_log(log_path)
     blocks, latest_run = parse_blocks(lines)
     if latest_run < 0:
-        print("ERROR: Could not determine latest run_n in CSV.", file=sys.stderr); return 2
+        print("ERROR: Could not determine latest run_n in CSV.", file=sys.stderr)
+        return 2
 
     new_lines: List[str] = []
     n_new, n_done = 0, 0
 
     for header, block in blocks:
-        abs_path, event_id = _parse_event_header(header if header else "#/unknown event -1")
+        h5_path, event_id = _parse_event_header(header if header else "#/unknown event -1")
+        # Skip non-event blocks (preamble or malformed)
+        if event_id < 0:
+            new_lines.extend(block)  # pass through unchanged
+            continue
 
-        rows = []
+        # Parse rows of the block into (rn, dx, dy, idx, wr)
+        rows: List[Tuple[int, float, float, int, Optional[float]]] = []
         for ln in block:
             s = ln.strip()
             if (not s) or s.startswith("#") or s.startswith("run_n"):
@@ -291,17 +508,56 @@ def main(argv=None) -> int:
             except Exception:
                 dx, dy = 0.0, 0.0
             idx = 1 if parts[3] == "1" else 0
-            wrs = parts[4]
             wr = None
             try:
+                wrs = parts[4]
                 wr = float(wrs) if wrs not in ("", "nan", "None", "none") else None
             except Exception:
                 wr = None
             rows.append((rn, dx, dy, idx, wr))
 
         trials_sorted = sorted(rows, key=lambda t: t[0])
-        key_seed = int(hashlib.blake2s(f"{abs_path}::{event_id}::{int(args.seed)}".encode(), digest_size=8).hexdigest(), 16) & 0x7FFFFFFF
+        # --- Ensure the event has a first attempted center in the log ---
+        # If the block has no rows yet for this event, synthesize the first trial
+        # from the per-frame det shifts in the source HDF5 (never (0,0)).
+        if not trials_sorted:
+            # Safety: event_id must be a valid frame index
+            # if event_id < 0:
+            #     raise RuntimeError(f"Bad event_id parsed from header: {header!r}")
+            try:
+                with h5py.File(h5_path, "r") as f:
+                    seed_dx = float(f["/entry/data/det_shift_x_mm"][int(event_id)])
+                    seed_dy = float(f["/entry/data/det_shift_y_mm"][int(event_id)])
+            except KeyError as e:
+                raise KeyError(f"Missing det shift datasets in {h5_path}: {e}")
+            except Exception as e:
+                raise RuntimeError(f"Failed reading seed for {h5_path} event {event_id}: {e}")
+
+            # Append one data line to this block so trials_sorted[0] exists.
+            # Columns: run_n, dx, dy, idx, wrmsd, next_dx, next_dy
+            first_line = f"{latest_run},{seed_dx:.6f},{seed_dy:.6f},0,,,\n"
+            block.append(first_line)
+            rows.append((latest_run, seed_dx, seed_dy, 0, None))
+            trials_sorted = sorted(rows, key=lambda t: t[0])
+
+
+        # Stable per-event RNG (unchanged)
+        key_seed = int(
+            hashlib.blake2s(f"{h5_path}::{event_id}::{int(args.seed)}".encode(), digest_size=8).hexdigest(),
+            16,
+        ) & 0x7FFFFFFF
         rng = np.random.default_rng(key_seed)
+
+        # Resolve the event directory for dxdy from the latest SUCCESSFUL run of this event
+        succ_runs = [rn for (rn, _dx, _dy, idx, wr) in trials_sorted if idx == 1 and (wr is not None)]
+        event_dir_for_dxdy = ""
+        if succ_runs:
+            event_last_rn = trials_sorted[-1][0]
+            prev_succs = [rn for rn in succ_runs if rn < event_last_rn]
+            use_rn = max(prev_succs) if prev_succs else max(succ_runs)
+            event_dir_for_dxdy = os.path.join(
+                args.run_root, f"run_{use_rn:03d}", f"event_{int(event_id):06d}"
+            )
 
         ndx, ndy, reason = propose_event(
             step2algo=args.step2_algorithm,
@@ -315,12 +571,7 @@ def main(argv=None) -> int:
             step1_explore_floor=float(args.step1_explore_floor),
             min_spacing=float(args.min_spacing_mm),
             allow_spacing_relax=bool(args.step1_allow_spacing_relax),
-            step2_step_frac=float(args.step2_step_frac),
-            step2_direct_frac=float(args.step2_direct_frac),
-            step2_fail_bump_frac=float(args.step2_fail_bump_frac),
             back_to_step1_streak=int(args.back_to_step1_streak),
-            done_step_mm=float(args.done_step_mm),
-            done_grad=float(args.done_grad),
             N4step2=args.N4_step2,
             ms_k_nearest=int(args.ms_k_nearest),
             ms_q_best_seed=int(args.ms_q_best_seed),
@@ -331,17 +582,22 @@ def main(argv=None) -> int:
             ms_tol_mm=float(args.ms_tol_mm),
             ms_jitter_trials=int(args.ms_jitter_trials),
             ms_jitter_sigma_frac=float(args.ms_jitter_sigma_frac),
+            # IMPORTANT: for dxdy this must be the actual event dir of the success run
+            event_abs_path=event_dir_for_dxdy,
         )
 
         updated = update_block_latest_run(block_lines=block, latest_run=latest_run, new_dx=ndx, new_dy=ndy)
-        if ndx is None and ndy is None: n_done += 1
-        else: n_new += 1
+        if ndx is None and ndy is None:
+            n_done += 1
+        else:
+            n_new += 1
         new_lines.extend(updated)
 
     write_log(log_path, new_lines)
     print(f"[propose] {n_new} new proposals, {n_done} marked done")
     print(f"[propose] Updated {log_path} for run_{latest_run:03d}")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

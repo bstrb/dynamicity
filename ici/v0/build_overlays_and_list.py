@@ -24,7 +24,6 @@ Notes:
 from __future__ import annotations
 
 import argparse, os, sys, math, json
-from pathlib import Path
 
 # DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
 DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
@@ -163,28 +162,22 @@ def write_all_shifts(run_dir: str, next_run: int, proposals_by_src: dict):
         write_shifts_mm(overlay_path, indices, dx, dy)
     return overlay_paths
 
-def write_event_lists(run_dir: str, proposals_by_src: dict, overlay_paths: dict) -> int:
+def write_lst(lst_path: str, proposals_by_src: dict, overlay_paths: dict):
     """
-    Create per-event folders + one-line .lst files:
-      run_dir/event_XXXXXX/lst_XXXXXX.lst  -> "<overlay.h5> //XXXXXX"
-    Returns number of lists written.
+    Write lines like:
+      /path/to/overlay_run_number.h5 //event_number
     """
     n = 0
-    Path(run_dir).mkdir(parents=True, exist_ok=True)
-    for src_path, ev2shift in sorted(proposals_by_src.items()):
-        if not ev2shift:
-            continue
-        ov = overlay_paths.get(src_path)
-        if not ov:
-            continue
-        for ev in sorted(ev2shift.keys()):
-            ev_str = f"{int(ev):06d}"
-            ev_dir = os.path.join(run_dir, f"event_{ev_str}")
-            Path(ev_dir).mkdir(parents=True, exist_ok=True)
-            lst_path = os.path.join(ev_dir, f"lst_{ev_str}.lst")
-            with open(lst_path, "w", encoding="utf-8") as f:
-                f.write(f"{ov} //{int(ev)}\n")
-            n += 1
+    with open(lst_path, "w", encoding="utf-8") as f:
+        for src_path, ev2shift in sorted(proposals_by_src.items()):
+            if not ev2shift:
+                continue
+            ov = overlay_paths.get(src_path)
+            if not ov:
+                continue
+            for ev in sorted(ev2shift.keys()):
+                f.write(f"{ov} //{ev}\n")
+                n += 1
     return n
 
 def write_overlay_mapping(run_dir: str, overlay_paths: dict) -> str:
@@ -217,9 +210,10 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     run_root = _abs(args.run_root or DEFAULT_ROOT)
-    log_path = os.path.join(run_root, "image_run_log.csv")
+    runs_dir = os.path.join(run_root, "runs")
+    log_path = os.path.join(runs_dir, "image_run_log.csv")
     if not os.path.isfile(log_path):
-        print("ERROR: missing image_run_log.csv", file=sys.stderr)
+        print("ERROR: missing runs/image_run_log.csv", file=sys.stderr)
         return 2
 
     entries, latest_run = parse_log(log_path)
@@ -233,14 +227,15 @@ def main(argv=None) -> int:
         return 0
 
     next_run = latest_run + 1
-    next_run_dir = os.path.join(run_root, f"run_{next_run:03d}")
+    next_run_dir = os.path.join(runs_dir, f"run_{next_run:03d}")
     os.makedirs(next_run_dir, exist_ok=True)
 
     # Create per-source overlays inside the next run folder, named with run number
     overlay_paths = write_all_shifts(next_run_dir, next_run, proposals_by_src)
 
     # Create the list file with the desired format
-    n_lines = write_event_lists(next_run_dir, proposals_by_src, overlay_paths)
+    lst_path = os.path.join(next_run_dir, f"lst_{next_run:03d}.lst")
+    n_lines = write_lst(lst_path, proposals_by_src, overlay_paths)
 
     # Persist the overlay→original mapping (JSON + TSV)
     map_json_path = write_overlay_mapping(next_run_dir, overlay_paths)

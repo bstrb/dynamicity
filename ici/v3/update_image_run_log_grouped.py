@@ -137,6 +137,27 @@ def _existing_run_lines_in_section(section_lines: List[str]) -> set:
             existing.add(s)
     return existing
 
+def _section_latest_status(section_lines: List[str]) -> Optional[Tuple[str, str]]:
+    """
+    Scan the section bottom-up and return the (next_dx_mm, next_dy_mm) from the
+    most recent row that actually carries a status (either numeric or 'done').
+    Returns None if the section has no status-bearing row yet.
+    """
+    for ln in reversed(section_lines):
+        if not ln or ln.startswith("#"):
+            continue
+        s = ln.strip()
+        if not s:
+            continue
+        parts = [p.strip() for p in s.split(",")]
+        if len(parts) < 7:
+            parts += [""] * (7 - len(parts))
+        nx, ny = parts[5], parts[6]
+        # treat presence of either field as a "status row" (numeric or 'done')
+        if nx or ny:
+            return nx, ny
+    return None
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Append latest run rows to runs/image_run_log.csv grouped by image-event (no next_*)."
@@ -221,12 +242,22 @@ def main(argv=None) -> int:
         if key not in sections:
             _ensure_section(sections, key)
             new_section_order.append(key)
+            
+        # If the latest status row in this section is 'done,done', skip appending
+        latest_status = _section_latest_status(sections[key])
+        if latest_status is not None:
+            nx, ny = latest_status
+            if str(nx).lower() == "done" and str(ny).lower() == "done":
+                # This section is already finalized; do not add fresh rows
+                # (keeps the latest row as 'done,done' so downstream summary is correct)
+                continue
 
         # Avoid duplicates within the section
         existing_set = _existing_run_lines_in_section(sections[key])
         if csv_line.strip() not in existing_set:
             sections[key].append(csv_line)
             appended_rows += 1
+
 
     # Reassemble file with preserved order:
     # 1) header

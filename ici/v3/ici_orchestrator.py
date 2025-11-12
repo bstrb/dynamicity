@@ -36,17 +36,19 @@ DEFAULT_MAX_ITERS = 50
 # DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
 # DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
 
-# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_100"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
-
-DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/"
+DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
 DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
 DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038.h5",
-                 DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822.h5",
-                   DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712.h5"]
+DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5", 
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5", 
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
+
+# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
+# DEFAULT_H5   = [DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038.h5",
+#                  DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822.h5",
+#                    DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712.h5"]
 
 
 # Default indexamajig / xgandalf / integration flags
@@ -63,7 +65,7 @@ DEFAULT_FLAGS = [
     # "--local-bg-radius=3",
     # Other
     "-j", "24",
-    "--min-peaks=15",
+    "--min-peaks=10",
     "--tolerance=10,10,10,5",
     "--xgandalf-sampling-pitch=5",
     "--xgandalf-grad-desc-iterations=1",
@@ -72,7 +74,7 @@ DEFAULT_FLAGS = [
     "--no-retry",
     "--no-half-pixel-shift",
     "--no-non-hits-in-stream",
-    # "--fix-profile-radius=70000000",
+    "--fix-profile-radius=70000000",
     "--indexing=xgandalf",
     "--integration=rings",
 ]

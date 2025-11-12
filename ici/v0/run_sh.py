@@ -77,7 +77,7 @@ def main(argv):
     run = normalize_run(args.run if args.run else DEFAULT_RUN)
 
     # Construct run directory from root and run
-    run_dir = os.path.join(run_root, f"run_{run}")
+    run_dir = os.path.join(run_root, "runs", f"run_{run}")
     run_dir = os.path.abspath(os.path.expanduser(run_dir))
     os.makedirs(run_dir, exist_ok=True)
 
