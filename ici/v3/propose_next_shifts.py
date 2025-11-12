@@ -436,11 +436,12 @@ def main(argv=None) -> int:
     ap.add_argument("--step1-allow-spacing-relax", action="store_false", default=True)
 
     ap.add_argument("--back-to-step1-streak", type=int, default=1)
-    ap.add_argument("--N_conv", type=int, default=2)
-    ap.add_argument("--recurring-tol", type=float, default=0.8)
-    ap.add_argument("--median-rel-tol", type=float, default=1)
+    ap.add_argument("--N_conv", type=int, default=3)
+    ap.add_argument("--recurring-tol", type=float, default=0.1)
+    ap.add_argument("--median-rel-tol", type=float, default=0.1)
     ap.add_argument("--damping-factor", type=float, default=0.8)
-    ap.add_argument("--done-on-streak-successes", type=int, default=1,
+
+    ap.add_argument("--done-on-streak-successes", type=int, default=2,
                     help="Require at least this many indexed successes for an event before a long unindexed streak can mark it done.")
     ap.add_argument("--done-on-streak-length", type=int, default=5,
                     help="If we have >= --done-on-streak-successes successes and observe this many consecutive unindexed results, mark event done.")
