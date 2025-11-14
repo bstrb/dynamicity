@@ -200,60 +200,6 @@ def concat_streams(run_dir: str, run_str: str, ev_dirs: list[str]) -> int:
     # print(f"[concat] wrote {out_path} from {wrote_chunks} parts")
     return 0
 
-
-# def main():
-#     ap = argparse.ArgumentParser(
-#         description="Run each event's sh_XXXXXX.sh in parallel; inline mille; concatenate."
-#     )
-#     ap.add_argument("--run-root", required=True)
-#     ap.add_argument("--run", required=True)
-#     ap.add_argument("--jobs", type=int, default=os.cpu_count())
-#     args = ap.parse_args()
-
-#     run_str = f"{int(args.run):03d}"
-#     run_dir = os.path.join(os.path.abspath(os.path.expanduser(args.run_root)), f"run_{run_str}")
-
-#     if not os.path.isdir(run_dir):
-#         print(f"[ERR] missing run dir: {run_dir}", file=sys.stderr)
-#         return 2
-
-#     ev_dirs = [os.path.join(run_dir, d) for d in sorted(os.listdir(run_dir))
-#                if d.startswith("event_") and os.path.isdir(os.path.join(run_dir, d))]
-
-#     if not ev_dirs:
-#         print(f"[ERR] No event_* dirs in {run_dir}", file=sys.stderr)
-#         return 2
-
-#     workers = max(1, int(args.jobs or 1))
-    
-#     print(f"[mp] running {len(ev_dirs)} event jobs with {workers} workers…", flush=True)
-
-
-#     failures, mille_warn = [], []
-
-#     with ProcessPoolExecutor(max_workers=workers) as ex:
-#         futs = [ex.submit(run_one_event, d) for d in ev_dirs]
-
-#         for fut in as_completed(futs):
-#             ev_dir, rc_sh, rc_mille = fut.result()
-
-#             if rc_sh != 0:
-#                 failures.append(ev_dir)
-#             else:
-#                 if rc_mille not in (0, 3):
-#                     mille_warn.append(ev_dir)
-
-#             # NEW: notify orchestrator that one event is done
-#             print("__EVENT_DONE__", flush=True)
-
-
-#     if failures:
-#         print(f"[fail] {len(failures)} event(s) failed indexing.", file=sys.stderr)
-
-#     n_exp, n_act = _expect_actual_report(run_dir)
-#     # print(f"[concat] sanity: expected {n_exp}, found {n_act}")
-
-#     return concat_streams(run_dir, run_str, ev_dirs)
 def main():
     ap = argparse.ArgumentParser(
         description="Run each event's sh_XXXXXX.sh in parallel; inline mille; concatenate."
@@ -281,8 +227,12 @@ def main():
     if not ev_dirs:
         print(f"[ERR] No event_* dirs in {run_dir}", file=sys.stderr)
         return 2
+    
+    if args.jobs >= int(os.cpu_count()):
+        workers = os.cpu_count()
+    else:
+        workers = max(1, int(args.jobs or 1))
 
-    workers = max(1, int(args.jobs or 1))
 
     print(f"[mp] running {len(ev_dirs)} event jobs with {workers} workers…", flush=True)
 

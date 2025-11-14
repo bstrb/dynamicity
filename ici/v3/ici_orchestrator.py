@@ -24,34 +24,15 @@ from typing import List, Tuple
 
 
 # Default paths
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
-#                 DEFAULT_ROOT + "/sim2.h5",
-#                 DEFAULT_ROOT + "/sim3.h5"]
-
-# Default paths
-# DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/4135627.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
-
-DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5", 
-                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5", 
-                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
-
-# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038.h5",
-#                  DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822.h5",
-#                    DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712.h5"]
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
+                DEFAULT_ROOT + "/sim2.h5",
+                DEFAULT_ROOT + "/sim3.h5"]
 
 DEFAULT_MAX_ITERS = 20          # maximum number of iterations
+DEFAULT_NUM_CPU   = 8           # default number of parallel jobs set to os.cpu_count() for max
 
 # Default propose next shift parameters
 radius_mm        = 0.05          # search radius 
@@ -71,17 +52,17 @@ done_on_streak_length   = 5     # length of streak to consider done when at leas
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    "--peaks=cxi",
-    # "--peaks=peakfinder9",
-    # "--min-snr-biggest-pix=1",
-    # "--min-snr-peak-pix=6",
-    # "--min-snr=1",
-    # "--min-sig=11",
-    # "--min-peak-over-neighbour=-inf",
-    # "--local-bg-radius=3",
+    # "--peaks=cxi",
+    "--peaks=peakfinder9",
+    "--min-snr-biggest-pix=1",
+    "--min-snr-peak-pix=6",
+    "--min-snr=1",
+    "--min-sig=11",
+    "--min-peak-over-neighbour=-inf",
+    "--local-bg-radius=3",
     # Other
-    "-j", "24",
-    "--min-peaks=10",
+    "-j", "1",
+    "--min-peaks=15",
     "--tolerance=10,10,10,5",
     "--xgandalf-sampling-pitch=5",
     "--xgandalf-grad-desc-iterations=1",
@@ -308,7 +289,7 @@ def all_next_done_for_latest(log_path: str, latest: int) -> bool:
     except FileNotFoundError:
         return False
 
-def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list):
+def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list, jobs=os.cpu_count()):
     print("[phase] Initializing run_000")
     sources = []
     for s in h5_sources:
@@ -323,19 +304,6 @@ def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list):
     print("[init] Convergence parameters:")
     print(f" radius_mm = {radius_mm}, min_spacing_mm = {min_spacing_mm}, N_conv = {N_conv}, recurring_tol = {recurring_tol}, median_rel_tol = {median_rel_tol}, noimprove_N = {noimprove_N}, noimprove_eps = {noimprove_eps}, stability_N = {stability_N}, stability_std = {stability_std}, done_on_streak_successes = {done_on_streak_successes}, done_on_streak_length = {done_on_streak_length}, damping_factor (λ) = {λ}")
 
-    # print(f"  radius_mm                 = {radius_mm}")
-    # print(f"  min_spacing_mm            = {min_spacing_mm}")
-    # print(f"  N_conv                    = {N_conv}")
-    # print(f"  recurring_tol             = {recurring_tol}")
-    # print(f"  median_rel_tol            = {median_rel_tol}")
-    # print(f"  noimprove_N               = {noimprove_N}")
-    # print(f"  noimprove_eps             = {noimprove_eps}")
-    # print(f"  stability_N               = {stability_N}")
-    # print(f"  stability_std             = {stability_std}")
-    # print(f"  done_on_streak_successes  = {done_on_streak_successes}")
-    # print(f"  done_on_streak_length     = {done_on_streak_length}")
-    # print(f"  damping_factor (λ)        = {λ}")
-
     run_py(
             "no_run_prep_singlelist.py",
             [
@@ -348,14 +316,14 @@ def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list):
     run_py("create_run_sh.py", ["--run-root", run_root, "--geom", geom, "--cell", cell, "--run", "000",
         "--",  # everything after this is passed directly into indexamajig
         *DEFAULT_FLAGS,], check=False)
-    run_py("run_sh.py", ["--run-root", run_root, "--run", "000"], check=False)
+    run_py("run_sh.py", ["--run-root", run_root, "--run", "000", "--jobs", str(jobs)], check=False)
     run_py("evaluate_stream.py", ["--run-root", run_root, "--run", "000"], check=False)
     run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
     run_py("summarize_image_run_log.py", ["--run-root", run_root,])
     run_py("build_early_break_from_log.py", ["--run-root", run_root])
     print("[done] Initialization cycle complete. Proceeding to loop...")
 
-def iterate_until_done(run_root, max_iters=DEFAULT_MAX_ITERS):
+def iterate_until_done(run_root, max_iters=10, jobs=os.cpu_count()):
     rd = runs_dir(run_root)
     it = 0
     while it < max_iters:
@@ -424,7 +392,7 @@ def iterate_until_done(run_root, max_iters=DEFAULT_MAX_ITERS):
         run_py("create_run_sh.py", ["--run-root", run_root, "--geom", DEFAULT_GEOM, "--cell", DEFAULT_CELL, "--run", run_str,
         "--",  # everything after this is passed directly into indexamajig
         *DEFAULT_FLAGS], check=False)
-        run_py("run_sh.py", ["--run-root", run_root, "--run", run_str], check=False)
+        run_py("run_sh.py", ["--run-root", run_root, "--run", run_str, "--jobs", str(jobs)], check=False)
         _ = run_py("fix_stream_paths.py", ["--run-dir", latest_dir, "--run", run_str, "--inplace"], check=False)
         run_py("evaluate_stream.py", ["--run-root", run_root, "--run", run_str], check=False)
         run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
@@ -442,6 +410,8 @@ def main(argv=None):
     ap.add_argument("--cell", default=DEFAULT_CELL, help="Cell file for initialization.")
     ap.add_argument("--h5", nargs="+", default=DEFAULT_H5, help="One or more HDF5 sources or globs (e.g., sim_001.h5 sim_002.h5 or sim_*.h5)")
     ap.add_argument("--flags", nargs="*", default=DEFAULT_FLAGS, help="Additional indexamajig / xgandalf / integration flags for initialization.")
+    ap.add_argument("--max-iters", type=int, default=DEFAULT_MAX_ITERS, help="Maximum number of iterations before stopping.")
+    ap.add_argument("--jobs", type=str, default=DEFAULT_NUM_CPU, help="Number of parallel jobs for indexamajig/xgandalf.")
 
     ap.add_argument("--radius-mm", type=float, default=radius_mm)
     ap.add_argument("--min-spacing-mm", type=float, default=min_spacing_mm)
@@ -471,10 +441,10 @@ def main(argv=None):
         # If no runs, initialize run_000 first
         if not list_run_numbers(sess):
             # do_init_sequence(run_root)
-            do_init_sequence(sess, args.geom, args.cell, args.h5)
+            do_init_sequence(sess, args.geom, args.cell, args.h5, jobs=args.jobs)
 
         # Iterate until all next_* == done
-        iterate_until_done(sess)
+        iterate_until_done(sess, max_iters=args.max_iters, jobs=args.jobs)
 
     # --- end: wrap whole orchestration with logger ------------------
 
