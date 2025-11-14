@@ -279,8 +279,6 @@ def get_chunks(path: str):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Fast, panel-aware evaluator for CrystFEL .stream files.")
-    # ap.add_argument("--run-root", required=True, help="Experiment root containing 'runs/'")
-    # ap.add_argument("--run", required=True, help="Run number, e.g. 000")
     ap.add_argument("--run-root", default=DEFAULT_ROOT, help="Experiment root containing 'runs/'")
     ap.add_argument("--run", default=DEFAULT_RUN, help="Run number, e.g. 000")
     ap.add_argument("--mr", type=float, default=4.0, help="Match radius for peak↔refl (pixels)")
@@ -292,9 +290,9 @@ def main(argv=None):
     run_dir  = os.path.join(run_root, f"run_{int(args.run):03d}")
     stream_path = os.path.join(run_dir, f"stream_{int(args.run):03d}.stream")
 
-    print("Run root :", run_root)
-    print("Run      :", f"{int(args.run):03d}")
-    print("Run dir  :", run_dir)
+    # print("Run root :", run_root)
+    # print("Run      :", f"{int(args.run):03d}")
+    # print("Run dir  :", run_dir)
 
     mm, bounds = get_chunks(stream_path)
     print(f"[scan] found {len(bounds)} chunks in stream")
@@ -345,13 +343,8 @@ def main(argv=None):
         f.write(f"chunks={n_chunks}\nindexed={n_indexed}\n")
         f.write(f"wrmsd_best={wr_best if wr_best is not None else ''}\n")
         f.write(f"wrmsd_median={wr_med if wr_med is not None else ''}\n")
-    print(f"Wrote: {sum_path}")
+    # print(f"Wrote: {sum_path}")
 
-    dbg_path = os.path.join(run_dir, f"parse_debug_{int(args.run):03d}.txt")
-    with open(dbg_path, "w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(f"{r.image},{r.event},{r.det_dx_mm},{r.det_dy_mm},{r.indexed},{r.wrmsd},{r.n_matches},{r.n_kept},{r.reason}\n")
-    print(f"Wrote: {dbg_path}")
 
     return 0
 

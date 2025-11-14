@@ -201,6 +201,7 @@ def propose_event(
     noimprove_eps: float = 0.01,
     stability_N: int = 6,
     stability_std: float = 0.02,
+    beta: float = 10.0,
     event_abs_path: str = "",
 ) -> Tuple[Optional[float], Optional[float], str]:
     """
@@ -275,7 +276,7 @@ def propose_event(
                     first_attempt_center_mm=first_center,
                     allow_spacing_relax=bool(allow_spacing_relax),
                 )
-                res = propose_step1(s1_trials, s1_params)
+                res = propose_step1(s1_trials, s1_params, beta=beta)
                 if res.done:
                     return None, None, "done_step1_fallback"
                 x, y = res.proposal_xy_mm
@@ -364,7 +365,7 @@ def propose_event(
                         first_attempt_center_mm=first_center,
                         allow_spacing_relax=bool(allow_spacing_relax),
                     )
-                    res = propose_step1(s1_trials, s1_params)
+                    res = propose_step1(s1_trials, s1_params, beta=beta)
                     if res.done:
                         return None, None, "done_after_dxdy_fail_step1"
                     x, y = res.proposal_xy_mm
@@ -403,7 +404,7 @@ def propose_event(
         allow_spacing_relax=bool(allow_spacing_relax),
     )
 
-    res = propose_step1(s1_trials, s1_params)
+    res = propose_step1(s1_trials, s1_params, beta=beta)
     x, y = res.proposal_xy_mm      # still absolute (because step1 adds seed internally)
     if res.done:
         return None, None, res.reason
@@ -427,34 +428,35 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=1337)
     ap.add_argument("--min-spacing-mm", type=float, default=0.0005)
 
-    # Step 1 knobs
+    # Hillmap search knobs
     ap.add_argument("--step1-A0", type=float, default=2.0)
     ap.add_argument("--step1-hill-amp-frac", type=float, default=5.0)
     ap.add_argument("--step1-drop-amp-frac", type=float, default=0.1)
     ap.add_argument("--step1-candidates", type=int, default=8192)
     ap.add_argument("--step1-explore-floor", type=float, default=1e-5)
-    ap.add_argument("--step1-allow-spacing-relax", action="store_false", default=True)
+    ap.add_argument("--step1-allow-spacing-relax", action="store_true")
+    ap.add_argument("--beta", type=float, default=10.0)
 
-    ap.add_argument("--back-to-step1-streak", type=int, default=1)
-    ap.add_argument("--N_conv", type=int, default=3)
-    ap.add_argument("--recurring-tol", type=float, default=0.1)
-    ap.add_argument("--median-rel-tol", type=float, default=0.1)
-    ap.add_argument("--damping-factor", type=float, default=0.8)
-
-    ap.add_argument("--done-on-streak-successes", type=int, default=2,
-                    help="Require at least this many indexed successes for an event before a long unindexed streak can mark it done.")
-    ap.add_argument("--done-on-streak-length", type=int, default=5,
-                    help="If we have >= --done-on-streak-successes successes and observe this many consecutive unindexed results, mark event done.")
-
-    ap.add_argument("--noimprove-N", type=int, default=3,
+    # Convergence / done criteria
+    ap.add_argument("--back-to-step1-streak", type=int, default=1,
+                    help="If we have this many or more consecutive unindexed results, go back to Step-1 exploration.")
+    ap.add_argument("--N-conv", type=int, default=3,
+                    help="Number of recent successful results used for recurring and median convergence checks.")
+    ap.add_argument("--recurring-tol", type=float, default=0.1,
+                    help="Relative tolerance for recurring best-wRMSD convergence check.")
+    ap.add_argument("--median-rel-tol", type=float, default=0.1,
+                    help="Relative tolerance for median wRMSD convergence check.")
+    ap.add_argument("--damping-factor", type=float, default=0.8,
+                    help="Damping factor λ for dxdy refined shifts; 1.0 = no damping.")
+    ap.add_argument("--done-on-streak-successes", type=int, default=2, help="Require at least this many indexed successes for an event before a long unindexed streak can mark it done.")
+    ap.add_argument("--done-on-streak-length", type=int, default=5, help="If we have >= --done-on-streak-successes successes and observe this many consecutive unindexed results, mark event done.")
+    ap.add_argument("--noimprove-N", type=int, default=2,
                     help="Window size (count of successful results) for no-improvement check.")
-    ap.add_argument("--noimprove-eps", type=float, default=0.05,
-                    help="Minimum relative improvement (e.g., 0.05 = 5%) in best wRMSD over the last --noimprove-N successes; otherwise mark done.")
-
-    ap.add_argument("--stability-N", type=int, default=5,
+    ap.add_argument("--noimprove-eps", type=float, default=0.02, help="Minimum relative improvement (e.g., 0.05 = 5%) in best wRMSD over the last --noimprove-N successes; otherwise mark done.")
+    ap.add_argument("--stability-N", type=int, default=3,
                     help="Number of most recent successful results used for wRMSD stability check.")
     ap.add_argument("--stability-std", type=float, default=0.05,
-                    help="Relative std threshold for stability: std(wRMSD_recent)/mean(wRMSD_recent) ≤ threshold ⇒ mark done.")
+                    help="Relative std threshold for stability: std(wRMSD_recent)/mean(wRMSD_recent) ≤ threshold ⇒ done.")
 
 
     ap.add_argument(
@@ -462,7 +464,7 @@ def main(argv=None) -> int:
         type=str,
         default="dxdy",
         choices=["dxdy", "none"],
-        help="'dxdy' = apply per_frame_dx_dy.csv once; 'none' disables Step-2.",
+        help="'dxdy' = apply per_frame_dx_dy.csv once; 'none' disables Step-2 and marks event done once indexed.",
     )
 
     args = ap.parse_args(argv)
@@ -577,6 +579,7 @@ def main(argv=None) -> int:
             noimprove_eps=float(args.noimprove_eps),
             stability_N=int(args.stability_N),
             stability_std=float(args.stability_std),
+            beta=float(args.beta),
             # IMPORTANT: for dxdy this must be the actual event dir of the success run
             event_abs_path=event_dir_for_dxdy,
         )
@@ -590,7 +593,7 @@ def main(argv=None) -> int:
 
     write_log(log_path, new_lines)
     print(f"[propose] {n_new} new proposals, {n_done} marked done")
-    print(f"[propose] Updated {log_path} for run_{latest_run:03d}")
+    # print(f"[propose] Updated {log_path} for run_{latest_run:03d}")
     return 0
 
 

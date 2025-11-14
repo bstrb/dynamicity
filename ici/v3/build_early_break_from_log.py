@@ -101,7 +101,6 @@ def parse_image_run_log(log_path: str) -> Dict[HeaderKey, List[dict]]:
 
     return groups
 
-
 def decide_updates(groups: Dict[HeaderKey, List[dict]]) -> Dict[HeaderKey, int]:
     out: Dict[HeaderKey, int] = {}
     for key, rows in groups.items():
@@ -145,7 +144,6 @@ def parse_stream_chunks(stream_path: str):
             start = None
 
     return bounds, lines, header
-
 
 def chunk_key_from_slice(lines_slice: List[str]) -> Optional[HeaderKey]:
     img_path = None

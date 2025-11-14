@@ -22,13 +22,15 @@ import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
-DEFAULT_MAX_ITERS = 50
+DEFAULT_MAX_ITERS = 10
 
 # Default paths
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_010"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
 # DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
 # DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
+# DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
+#                 DEFAULT_ROOT + "/sim2.h5",
+#                 DEFAULT_ROOT + "/sim3.h5"]
 
 # Default paths
 # DEFAULT_ROOT = "/home/bubl3932/files/simulations/MFM300-VIII_tI/sim_002"
@@ -36,35 +38,49 @@ DEFAULT_MAX_ITERS = 50
 # DEFAULT_CELL = DEFAULT_ROOT + "/4135627.cell"
 # DEFAULT_H5   = [DEFAULT_ROOT + "/sim.h5"]
 
-# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5", 
-#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5", 
-#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
-
-DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/"
+DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
 DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
 DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038.h5",
-                 DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822.h5",
-                   DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712.h5"]
+DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5", 
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5", 
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
+
+# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
+# DEFAULT_H5   = [DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038.h5",
+#                  DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822.h5",
+#                    DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712.h5"]
+
+# Default propose_next_shifts.py parameters
+radius_mm       = 0.05
+min_spacing_mm   = 5e-4
+N_conv           = 3
+recurring_tol    = 0.1
+median_rel_tol   = 0.1
+noimprove_N      = 2
+noimprove_eps    = 0.02
+stability_N      = 3
+stability_std    = 0.05
+done_on_streak_successes = 2
+done_on_streak_length   = 5
+λ                = 0.8
 
 # Default indexamajig / xgandalf / integration flags
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    "--peaks=cxi",
-    # "--peaks=peakfinder9",
-    # "--min-snr-biggest-pix=1",
-    # "--min-snr-peak-pix=6",
-    # "--min-snr=1",
-    # "--min-sig=11",
-    # "--min-peak-over-neighbour=-inf",
-    # "--local-bg-radius=3",
+    # "--peaks=cxi",
+    "--peaks=peakfinder9",
+    "--min-snr-biggest-pix=1",
+    "--min-snr-peak-pix=6",
+    "--min-snr=1",
+    "--min-sig=11",
+    "--min-peak-over-neighbour=-inf",
+    "--local-bg-radius=3",
     # Other
     "-j", "24",
-    "--min-peaks=10",
+    "--min-peaks=15",
     "--tolerance=10,10,10,5",
     "--xgandalf-sampling-pitch=5",
     "--xgandalf-grad-desc-iterations=1",
@@ -133,6 +149,7 @@ class OrchestratorRunLogger:
         if exc:
             print(f"[orchestrator] ERROR: {exc_type.__name__}: {exc}")
         print(f"[orchestrator] total elapsed: {elapsed:.3f}s; log: {self.log_path}")
+
 # --- end: tiny tee-logger and timer ----------------------------------
 def runs_dir(run_root: str) -> str:
     # run_root is already the timestamped runs folder
@@ -159,11 +176,48 @@ def latest_run(run_root: str) -> Tuple[int, str]:
 
 def run_py(script: str, args: List[str], check: bool = True) -> int:
     import subprocess, sys
-    cmd = ["python3", script, *args]
-    print(f"[RUN] {' '.join(cmd)}", flush=True)
+    from tqdm import tqdm
 
-    # Capture child stdout/stderr, reprint to our stdout
-    # so it flows through the Tee into both console + log.
+    # cmd = ["python3", script, *args]
+    # print(f"[RUN] {' '.join(cmd)}", flush=True)
+    is_run_sh = (script == "run_sh.py")
+
+    if is_run_sh:
+        # force unbuffered stdout from the child
+        cmd = ["python3", "-u", script, *args]
+    else:
+        cmd = ["python3", script, *args]
+
+    # print(f"[RUN] {' '.join(cmd)}", flush=True)
+
+    # Normal behavior for all scripts except run_sh.py
+    is_run_sh = (script == "run_sh.py")
+
+    if not is_run_sh:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        try:
+            for line in proc.stdout:
+                # BEFORE:
+                # print(line, end="")
+                # AFTER:
+                print(line, end="", flush=True)
+        finally:
+            proc.stdout.close()
+        rc = proc.wait()
+        if check and rc != 0:
+            raise SystemExit(f"[ERR] {script} exited with {rc}")
+        return rc
+
+    # --- Special Case: run_sh.py → use single-line tqdm progress bar ---
+    total_events = None
+    event_re = re.compile(r"\brunning\s+(\d+)\s+event\b", re.I)
+
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -171,17 +225,48 @@ def run_py(script: str, args: List[str], check: bool = True) -> int:
         text=True,
         bufsize=1
     )
+
+    pbar = None
     try:
         for line in proc.stdout:
-            # forward exactly as the child wrote it
-            print(line, end="")  # our _Tee will duplicate to file + console
+            if "__EVENT_DONE__" in line:
+                if pbar is not None:
+                    pbar.update(1)
+                continue
+
+            # BEFORE:
+            # print(line, end="")
+            # AFTER:
+            print(line, end="", flush=True)
+
+            m = event_re.search(line)
+            if m and pbar is None:
+                total_events = int(m.group(1))
+                real_stdout = getattr(sys, "__stdout__", sys.stdout)
+                pbar = tqdm(
+                    total=total_events,
+                    desc="[run_sh] Indexing",
+                    unit="evt",
+                    ncols=80,
+                    ascii=True,
+                    dynamic_ncols=False,
+                    leave=False,
+                    file=real_stdout,
+                    bar_format="{desc}: |{bar}| {percentage:3.0f}% ETA {remaining}",
+                )
+                continue
     finally:
+        if pbar is not None:
+            pbar.close()
         proc.stdout.close()
+
+
     rc = proc.wait()
 
     if check and rc != 0:
         raise SystemExit(f"[ERR] {script} exited with {rc}")
     return rc
+
 
 def detect_latest_run_from_log(log_path: str) -> int:
     try:
@@ -223,13 +308,31 @@ def all_next_done_for_latest(log_path: str, latest: int) -> bool:
         return False
 
 def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list):
-    print("[phase] No runs detected -> initializing run_000")
+    print("[phase] Initializing run_000")
     sources = []
     for s in h5_sources:
         matches = sorted(glob(s))
         sources.extend(matches if matches else [s])
 
     print(f"[init] using {len(sources)} HDF5 source(s):", *sources, sep="\n  ")
+    print(f"[init] using following indexamajig flags:")
+    print(f" {' '.join(DEFAULT_FLAGS)}")
+    
+    # Print convergence parameters once at initialization
+    print("\n[init] Convergence parameters:")
+    print(f"  radius_mm                 = {radius_mm}")
+    print(f"  min_spacing_mm            = {min_spacing_mm}")
+    print(f"  N_conv                    = {N_conv}")
+    print(f"  recurring_tol             = {recurring_tol}")
+    print(f"  median_rel_tol            = {median_rel_tol}")
+    print(f"  noimprove_N               = {noimprove_N}")
+    print(f"  noimprove_eps             = {noimprove_eps}")
+    print(f"  stability_N               = {stability_N}")
+    print(f"  stability_std             = {stability_std}")
+    print(f"  done_on_streak_successes  = {done_on_streak_successes}")
+    print(f"  done_on_streak_length     = {done_on_streak_length}")
+    print(f"  damping_factor (λ)        = {λ}")
+    print("")
 
     run_py(
             "no_run_prep_singlelist.py",
@@ -263,7 +366,27 @@ def iterate_until_done(run_root, max_iters=DEFAULT_MAX_ITERS):
         print(f"\n[loop] Iteration {it} started at {ts}", flush=True)
 
         # 1) Propose next shifts
-        run_py("propose_next_shifts.py", ["--run-root", run_root])
+        # run_py("propose_next_shifts.py", ["--run-root", run_root])
+        run_py(
+            "propose_next_shifts.py",
+            [
+                "--run-root", run_root,
+                "--radius-mm", str(radius_mm),
+                "--min-spacing-mm", str(min_spacing_mm),
+                "--N-conv", str(N_conv),
+                "--recurring-tol", str(recurring_tol),
+                "--median-rel-tol", str(median_rel_tol),
+                "--noimprove-N", str(noimprove_N),
+                "--noimprove-eps", str(noimprove_eps),
+                "--stability-N", str(stability_N),
+                "--stability-std", str(stability_std),
+                "--done-on-streak-successes", str(done_on_streak_successes),
+                "--done-on-streak-length", str(done_on_streak_length),
+                "--damping-factor", str(λ),
+                "--step2-algorithm", "dxdy",
+            ]
+        )
+
 
         # evaluate stop condition based on latest run in the *log*
         log_path = os.path.join(rd, "image_run_log.csv")
@@ -317,6 +440,19 @@ def main(argv=None):
     ap.add_argument("--cell", default=DEFAULT_CELL, help="Cell file for initialization.")
     ap.add_argument("--h5", nargs="+", default=DEFAULT_H5, help="One or more HDF5 sources or globs (e.g., sim_001.h5 sim_002.h5 or sim_*.h5)")
     ap.add_argument("--flags", nargs="*", default=DEFAULT_FLAGS, help="Additional indexamajig / xgandalf / integration flags for initialization.")
+
+    ap.add_argument("--radius-mm", type=float, default=radius_mm)
+    ap.add_argument("--min-spacing-mm", type=float, default=min_spacing_mm)
+    ap.add_argument("--N-conv", type=int, default=N_conv)
+    ap.add_argument("--recurring-tol", type=float, default=recurring_tol)
+    ap.add_argument("--median-rel-tol", type=float, default=median_rel_tol)
+    ap.add_argument("--noimprove-N", type=int, default=noimprove_N)
+    ap.add_argument("--noimprove-eps", type=float, default=noimprove_eps)
+    ap.add_argument("--stability-N", type=int, default=stability_N)
+    ap.add_argument("--stability-std", type=float, default=stability_std)
+    ap.add_argument("--done-on-streak-successes", type=int, default=done_on_streak_successes)
+    ap.add_argument("--done-on-streak-length", type=int, default=done_on_streak_length)
+    ap.add_argument("--damping-factor", type=float, default=λ)
 
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 

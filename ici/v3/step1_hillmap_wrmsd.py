@@ -103,7 +103,6 @@ def propose_step1(trials: List[Trial], params: Step1Params, beta = 10.0) -> Step
     rng = random.Random(params.rng_seed)
     R = params.radius_mm
     sigma = R / 2.0  # 2σ = R
-    # sigma = R / 3.0  # σ = R
     A0 = params.A0
     A_hill = params.hill_amp_frac * A0
     A_drop = -params.drop_amp_frac * A0
@@ -123,10 +122,6 @@ def propose_step1(trials: List[Trial], params: Step1Params, beta = 10.0) -> Step
     cand_xy = cand_xy[keep, :]
 
     # Reference center
-    # if trials:
-    #     c0x, c0y = trials[0].x_mm, trials[0].y_mm
-    # else:
-    #     c0x, c0y = params.first_attempt_center_mm
     c0x, c0y = params.first_attempt_center_mm
 
     # Base Gaussian field

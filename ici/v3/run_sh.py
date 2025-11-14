@@ -4,33 +4,29 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXTRACT_SCRIPT = os.path.join(SCRIPT_DIR, "extract_mille_shifts.py")
+
 def _check_index_success(ev_dir: str) -> tuple[bool, str]:
     """
     Determine if indexing truly succeeded for this event.
     Strategy:
-      A) Try idx.stderr for '... indexable' (robust parse).
-      B) Always fall back to parsing the per-event stream for num_reflections > 0.
-    Returns (ok, reason).
+      A) Try idx.stderr for '... indexable'
+      B) Fallback: parse per-event stream for num_reflections > 0
     """
-    import re, os
-
-    # --- A) idx.stderr parse (robust / flexible) ---
     err_path = os.path.join(ev_dir, "idx.stderr")
+
+    # A) try reading idx.stderr
     try:
         with open(err_path, "r", encoding="utf-8", errors="replace") as f:
             s = f.read()
-
-        # Be flexible: grab the LAST "<number> indexable" we see anywhere.
         m_all = re.findall(r'\b(\d+)\s+indexable\b', s, flags=re.I)
         if m_all:
             idxable = int(m_all[-1])
             if idxable > 0:
                 return True, f"idx.stderr: indexable={idxable}"
-            # don't return False yet; we still do a stream fallback
     except FileNotFoundError:
         pass
 
-    # --- B) fallback: look into the per-event stream for nonzero reflections ---
+    # B) fallback: parse stream
     try:
         parts = [p for p in os.listdir(ev_dir) if p.startswith("stream_") and p.endswith(".stream")]
         if len(parts) == 1:
@@ -47,21 +43,18 @@ def _check_index_success(ev_dir: str) -> tuple[bool, str]:
     except FileNotFoundError:
         pass
 
-    # If neither check shows success, call it a failure
     return False, "no conclusive success marker"
 
 
 def run_one_event(ev_dir: str) -> tuple[str, int, int]:
     """
-    Run per-event indexing and, if present, mille extraction in the same worker.
-    Returns (ev_dir, rc_sh, rc_mille) where rc_mille==0 if ran OK,
-    3 if mille-data.bin missing, and non-zero if extractor failed.
+    Run per-event indexing, then optional mille extraction.
+    Return (event_dir, rc_index, rc_mille)
     """
-    # 1) find sh_XXXXXX.sh
     sh_candidates = sorted([p for p in os.listdir(ev_dir)
                             if p.startswith("sh_") and p.endswith(".sh")])
     if len(sh_candidates) != 1:
-        return ev_dir, 2, 3  # bad/missing script; mark mille as "missing"
+        return ev_dir, 2, 3
 
     sh_file = sh_candidates[0]
     out_path = os.path.join(ev_dir, "idx.stdout")
@@ -70,89 +63,76 @@ def run_one_event(ev_dir: str) -> tuple[str, int, int]:
     with open(out_path, "w", encoding="utf-8") as out, open(err_path, "w", encoding="utf-8") as err:
         rc_sh_raw = subprocess.call(["bash", sh_file], cwd=ev_dir, stdout=out, stderr=err)
 
-    # Robust success check (stderr 'Final: ... indexable' or stream num_reflections)
     ok, why = _check_index_success(ev_dir)
     if not ok:
-        # mark as failed indexing regardless of raw returncode
-        # use a distinct rc to distinguish "ran but unindexed"
         return ev_dir, (rc_sh_raw if rc_sh_raw != 0 else 10), 3
 
-    # from here on we consider indexing successful
-    rc_sh = 0
+    rc_sh = 0  # indexing success
 
-
-    # 2) immediately run mille extractor (same worker, same cwd) if mille-data.bin exists
+    # Mille extraction
     bin_path = os.path.join(ev_dir, "mille-data.bin")
     if not os.path.isfile(bin_path):
-        return ev_dir, rc_sh, 3  # no mille for this event; "missing"
+        return ev_dir, rc_sh, 3
 
-    # mille_out = os.path.join(ev_dir, "per_frame_dx_dy.csv")
     with open(os.path.join(ev_dir, "mille.stdout"), "w", encoding="utf-8") as mout, \
          open(os.path.join(ev_dir, "mille.stderr"), "w", encoding="utf-8") as merr:
-        # no flags required; adjust if you later want --globals/--scale
         rc_mille = subprocess.call(
             ["python3", EXTRACT_SCRIPT, "mille-data.bin"],
             cwd=ev_dir, stdout=mout, stderr=merr
         )
 
     return ev_dir, rc_sh, rc_mille
-# --- sanity check: expected vs. actual per-event parts -----------------
+
+
 def _expect_actual_report(run_dir: str) -> tuple[int, int]:
     """
-    Count how many event_* dirs *should* produce a part (expected)
-    vs how many actually produced a '*.stream' file (actual).
-    Writes 'missing_event_parts.txt' listing any event_* dirs that are missing a part.
+    Count expected vs. actual stream parts.
     """
-    import glob, os
+    import glob
 
     ev_dirs = sorted(
         d for d in glob.glob(os.path.join(run_dir, "event_*"))
         if os.path.isdir(d)
     )
 
-    # Expected = every event dir that has a .lst (i.e. scheduled to run)
-    expected_dirs = []
+    expected = []
+    actual = []
+
     for d in ev_dirs:
         if glob.glob(os.path.join(d, "*.lst")):
-            expected_dirs.append(os.path.basename(d))
-
-    # Actual = every event dir that has a per-event *.stream output
-    actual_dirs = []
-    for d in ev_dirs:
+            expected.append(os.path.basename(d))
         if glob.glob(os.path.join(d, "*.stream")):
-            actual_dirs.append(os.path.basename(d))
+            actual.append(os.path.basename(d))
 
-    missing = sorted(set(expected_dirs) - set(actual_dirs))
+    missing = sorted(set(expected) - set(actual))
     if missing:
         miss_report = os.path.join(run_dir, "missing_event_parts.txt")
         with open(miss_report, "w", encoding="utf-8") as f:
-            f.write("# Event dirs that did not produce a .stream part in this run\n")
+            f.write("# Event dirs that did not produce a .stream part\n")
             for m in missing:
                 f.write(m + "\n")
-        print(f"[warn] {len(missing)} event(s) produced no .stream part (see {miss_report})")
+        print(f"[warn] {len(missing)} event(s) missing a part (see {miss_report})")
     else:
         print("[ok] All expected events produced a .stream part")
 
-    return len(expected_dirs), len(actual_dirs)
-# -----------------------------------------------------------------------
+    return len(expected), len(actual)
+
 
 def concat_streams(run_dir: str, run_str: str, ev_dirs: list[str]) -> int:
-    import os, re, sys, shutil
+    import shutil
 
     RE_BEGIN_CHUNK = re.compile(r"^-{3,}\s*Begin chunk\s*-{3,}\s*$")
     out_path = os.path.join(run_dir, f"stream_{run_str}.stream")
 
-    # choose one *.stream per event dir (same logic you already use)
     items = []
     for d in sorted(ev_dirs):
         try:
             parts = [p for p in os.listdir(d) if p.startswith("stream_") and p.endswith(".stream")]
         except FileNotFoundError:
             continue
-        if not parts:
-            continue
-        parts.sort()
-        items.append(os.path.join(d, parts[0]))
+        if parts:
+            parts.sort()
+            items.append(os.path.join(d, parts[0]))
 
     if not items:
         print(f"[fail] no per-event streams found in {run_dir}", file=sys.stderr)
@@ -160,19 +140,17 @@ def concat_streams(run_dir: str, run_str: str, ev_dirs: list[str]) -> int:
 
     wrote_chunks = 0
     header_written = False
-    bufsize = 1024 * 256  # 256 KiB buffered copy for speed
+    bufsize = 1024 * 256
 
     with open(out_path, "w", encoding="utf-8") as out:
-        for i, path in enumerate(items):
+        for path in items:
             try:
                 rf = open(path, "r", encoding="utf-8", errors="replace")
             except FileNotFoundError:
                 continue
 
             saw_begin = False
-
             try:
-                # For the FIRST input: write header (everything before the first Begin chunk)
                 if not header_written:
                     header_lines = []
                     while True:
@@ -181,40 +159,32 @@ def concat_streams(run_dir: str, run_str: str, ev_dirs: list[str]) -> int:
                             break
                         if RE_BEGIN_CHUNK.match(line):
                             saw_begin = True
-                            # write header once
                             if header_lines:
                                 out.write("".join(header_lines).rstrip() + "\n\n")
                             header_written = True
-                            # write the delimiter line that we just matched
                             out.write(line)
                             break
                         else:
                             header_lines.append(line)
 
-                    # If we never found a chunk in this file, skip it
                     if not saw_begin:
                         rf.close()
                         continue
-
                 else:
-                    # Subsequent files: skip until first Begin chunk, then write from there
                     while True:
                         line = rf.readline()
                         if not line:
                             break
                         if RE_BEGIN_CHUNK.match(line):
                             saw_begin = True
-                            # spacing between parts
                             if wrote_chunks > 0:
                                 out.write("\n")
                             out.write(line)
                             break
-
                     if not saw_begin:
                         rf.close()
                         continue
 
-                # From here on, stream the REST of the file to out (no reformatting)
                 shutil.copyfileobj(rf, out, length=bufsize)
                 wrote_chunks += 1
 
@@ -224,23 +194,69 @@ def concat_streams(run_dir: str, run_str: str, ev_dirs: list[str]) -> int:
     if wrote_chunks == 0:
         try: os.remove(out_path)
         except FileNotFoundError: pass
-        print("[fail] no chunks found to concatenate.", file=sys.stderr)
+        print("[fail] no chunks to concatenate.", file=sys.stderr)
         return 1
-    have_stream = 0
-    for d in sorted(ev_dirs):
-        try:
-            parts = [p for p in os.listdir(d) if p.startswith("stream_") and p.endswith(".stream")]
-            if parts:
-                have_stream += 1
-        except FileNotFoundError:
-            pass
-    print(f"[concat] wrote {out_path} from {wrote_chunks} part(s) with a single header")
+
+    # print(f"[concat] wrote {out_path} from {wrote_chunks} parts")
     return 0
 
 
+# def main():
+#     ap = argparse.ArgumentParser(
+#         description="Run each event's sh_XXXXXX.sh in parallel; inline mille; concatenate."
+#     )
+#     ap.add_argument("--run-root", required=True)
+#     ap.add_argument("--run", required=True)
+#     ap.add_argument("--jobs", type=int, default=os.cpu_count())
+#     args = ap.parse_args()
+
+#     run_str = f"{int(args.run):03d}"
+#     run_dir = os.path.join(os.path.abspath(os.path.expanduser(args.run_root)), f"run_{run_str}")
+
+#     if not os.path.isdir(run_dir):
+#         print(f"[ERR] missing run dir: {run_dir}", file=sys.stderr)
+#         return 2
+
+#     ev_dirs = [os.path.join(run_dir, d) for d in sorted(os.listdir(run_dir))
+#                if d.startswith("event_") and os.path.isdir(os.path.join(run_dir, d))]
+
+#     if not ev_dirs:
+#         print(f"[ERR] No event_* dirs in {run_dir}", file=sys.stderr)
+#         return 2
+
+#     workers = max(1, int(args.jobs or 1))
+    
+#     print(f"[mp] running {len(ev_dirs)} event jobs with {workers} workers…", flush=True)
+
+
+#     failures, mille_warn = [], []
+
+#     with ProcessPoolExecutor(max_workers=workers) as ex:
+#         futs = [ex.submit(run_one_event, d) for d in ev_dirs]
+
+#         for fut in as_completed(futs):
+#             ev_dir, rc_sh, rc_mille = fut.result()
+
+#             if rc_sh != 0:
+#                 failures.append(ev_dir)
+#             else:
+#                 if rc_mille not in (0, 3):
+#                     mille_warn.append(ev_dir)
+
+#             # NEW: notify orchestrator that one event is done
+#             print("__EVENT_DONE__", flush=True)
+
+
+#     if failures:
+#         print(f"[fail] {len(failures)} event(s) failed indexing.", file=sys.stderr)
+
+#     n_exp, n_act = _expect_actual_report(run_dir)
+#     # print(f"[concat] sanity: expected {n_exp}, found {n_act}")
+
+#     return concat_streams(run_dir, run_str, ev_dirs)
 def main():
     ap = argparse.ArgumentParser(
-        description="Run each event's sh_XXXXXX.sh in parallel (cwd=event dir), inline mille extraction, then concatenate."
+        description="Run each event's sh_XXXXXX.sh in parallel; inline mille; concatenate."
     )
     ap.add_argument("--run-root", required=True)
     ap.add_argument("--run", required=True)
@@ -249,55 +265,49 @@ def main():
 
     run_str = f"{int(args.run):03d}"
     run_dir = os.path.join(os.path.abspath(os.path.expanduser(args.run_root)), f"run_{run_str}")
-    print(f"Run root : {os.path.abspath(os.path.expanduser(args.run_root))}")
-    print(f"Run      : {run_str}")
-    print(f"Run dir  : {run_dir}")
 
     if not os.path.isdir(run_dir):
         print(f"[ERR] missing run dir: {run_dir}", file=sys.stderr)
         return 2
 
-    ev_dirs = [os.path.join(run_dir, d) for d in sorted(os.listdir(run_dir))
-               if d.startswith("event_") and os.path.isdir(os.path.join(run_dir, d))]
+    import glob
+
+    # Collect *all* physical event_* directories
+    ev_dirs = sorted(
+        d for d in glob.glob(os.path.join(run_dir, "event_*"))
+        if os.path.isdir(d)
+    )
+
     if not ev_dirs:
-        print(f"[ERR] No event_* directories in {run_dir}", file=sys.stderr)
+        print(f"[ERR] No event_* dirs in {run_dir}", file=sys.stderr)
         return 2
 
-    # parallel execution: indexing + inline mille per event
     workers = max(1, int(args.jobs or 1))
-    print(f"[mp] running {len(ev_dirs)} event jobs with {workers} workers…")
+
+    print(f"[mp] running {len(ev_dirs)} event jobs with {workers} workers…", flush=True)
+
     failures, mille_warn = [], []
-    # from concurrent.futures import ProcessPoolExecutor, as_completed
+
     with ProcessPoolExecutor(max_workers=workers) as ex:
         futs = [ex.submit(run_one_event, d) for d in ev_dirs]
+
         for fut in as_completed(futs):
             ev_dir, rc_sh, rc_mille = fut.result()
-            name = os.path.basename(ev_dir)
+
             if rc_sh != 0:
-                # print(f"[err] {name} (index rc={rc_sh}) — see {ev_dir}/idx.stderr", file=sys.stderr)
                 failures.append(ev_dir)
             else:
-                if rc_mille == 0:
-                    # print(f"[ok]  {name} (index + mille)")
-                    pass
-                elif rc_mille == 3:
-                    # print(f"[ok]  {name} (index only; no mille-data.bin)")
-                    pass
-                else:
-                    print(f"[warn] {name} (mille rc={rc_mille}) — see {ev_dir}/mille.stderr", file=sys.stderr)
-                    # do not fail the whole run if mille fails; still allow concatenation
+                if rc_mille not in (0, 3):
                     mille_warn.append(ev_dir)
+
+            # notify orchestrator that one event is done
+            print("__EVENT_DONE__", flush=True)
 
     if failures:
         print(f"[fail] {len(failures)} event(s) failed indexing.", file=sys.stderr)
 
-    # Sanity check: how many parts should exist vs actually exist?
     n_exp, n_act = _expect_actual_report(run_dir)
-    print(f"[concat] sanity: expected {n_exp} per-event part(s), found {n_act}")
 
-    # Concatenate whatever parts exist (keeps pipeline moving).
-    # If you prefer to fail hard when n_act != n_exp, add:
-    #   if n_act != n_exp: return 2
     return concat_streams(run_dir, run_str, ev_dirs)
 
 

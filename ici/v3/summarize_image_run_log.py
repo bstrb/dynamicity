@@ -56,39 +56,6 @@ def _split7(s):
         p += [""] * (7 - len(p))
     return p
 
-def _count_done_events_by_last_statusful_row(log_path: str) -> int:
-    """
-    For each (src,event) section, find the most recent row that actually
-    carries a status (either numeric next_* or 'done'). If that last
-    status row is 'done,done', the section is considered done.
-    """
-    sec_last_status = {}
-    current_key = None
-
-    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-        for ln in f:
-            m = SECTION_RE.match(ln)
-            if m:
-                current_key = (os.path.abspath(m.group("path")), int(m.group("ev")))
-                continue
-            if not current_key or ln.startswith("#"):
-                continue
-            s = ln.strip()
-            if not s:
-                continue
-            parts = [p.strip() for p in s.split(",")]
-            if len(parts) < 7:
-                parts += [""] * (7 - len(parts))
-            nx, ny = parts[5], parts[6]
-            # Only record rows that actually carry a status (numeric or 'done')
-            if nx or ny:
-                sec_last_status[current_key] = (nx, ny)
-
-    return sum(
-        1
-        for (nx, ny) in sec_last_status.values()
-        if str(nx).lower() == "done" and str(ny).lower() == "done"
-    )
 def parse_log(log_path):
     rows = []
     current_event = None

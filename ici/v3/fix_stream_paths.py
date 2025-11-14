@@ -154,10 +154,10 @@ def main(argv=None) -> int:
         for ln in lines:
             fout.write(_swap_line(ln, mapping))
 
-    print(f"[stream-fix] Run dir: {run_dir}")
-    print(f"[stream-fix] Stream in : {in_stream}")
-    print(f"[stream-fix] Stream out: {out_stream}")
-    print(f"[stream-fix] Mapping  : overlay_to_original.(json|tsv)")
+    # print(f"[stream-fix] Run dir: {run_dir}")
+    # print(f"[stream-fix] Stream in : {in_stream}")
+    # print(f"[stream-fix] Stream out: {out_stream}")
+    # print(f"[stream-fix] Mapping  : overlay_to_original.(json|tsv)")
     return 0
 
 if __name__ == "__main__":

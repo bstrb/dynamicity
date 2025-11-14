@@ -52,7 +52,7 @@ def main():
         os.chmod(sh_ev, 0o755)
         n_events += 1
 
-    print(f"[ok] wrote {n_events} event scripts under {run_dir}")
+    # print(f"[ok] wrote {n_events} event scripts under {run_dir}")
 
 if __name__ == "__main__":
     main()
