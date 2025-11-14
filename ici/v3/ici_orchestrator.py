@@ -22,7 +22,6 @@ import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
-DEFAULT_MAX_ITERS = 10
 
 # Default paths
 # DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
@@ -52,35 +51,37 @@ DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_
 #                  DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822.h5",
 #                    DEFAULT_ROOT + "MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712.h5"]
 
-# Default propose_next_shifts.py parameters
-radius_mm       = 0.05
-min_spacing_mm   = 5e-4
-N_conv           = 3
-recurring_tol    = 0.1
-median_rel_tol   = 0.1
-noimprove_N      = 2
-noimprove_eps    = 0.02
-stability_N      = 3
-stability_std    = 0.05
-done_on_streak_successes = 2
-done_on_streak_length   = 5
-λ                = 0.8
+DEFAULT_MAX_ITERS = 20          # maximum number of iterations
+
+# Default propose next shift parameters
+radius_mm        = 0.05          # search radius 
+min_spacing_mm   = 5e-4         # minimum spacing between shifts
+N_conv           = 3            # minimum number o events to consider convergence
+recurring_tol    = 0.1          # tolerance for recurring shifts (0.1 = 10%)
+median_rel_tol   = 0.1          # median relative tolerance for convergence (0.1 = 10%)
+noimprove_N      = 2            # number of iterations with no improvement to consider convergence
+noimprove_eps    = 0.02         # minimum improvement for noimprove trigger (0.02 = 2%)
+stability_N      = 3            # number of iterations to consider for stability
+stability_std    = 0.05         # standard deviation threshold for stability (0.05 = 5%)
+done_on_streak_successes = 2    # number of  successes to consider done after unindexed streak
+done_on_streak_length   = 5     # length of streak to consider done when at least done_on_streak_successes
+λ                = 0.8          # damping factor for refinded shift updates
 
 # Default indexamajig / xgandalf / integration flags
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    # "--peaks=cxi",
-    "--peaks=peakfinder9",
-    "--min-snr-biggest-pix=1",
-    "--min-snr-peak-pix=6",
-    "--min-snr=1",
-    "--min-sig=11",
-    "--min-peak-over-neighbour=-inf",
-    "--local-bg-radius=3",
+    "--peaks=cxi",
+    # "--peaks=peakfinder9",
+    # "--min-snr-biggest-pix=1",
+    # "--min-snr-peak-pix=6",
+    # "--min-snr=1",
+    # "--min-sig=11",
+    # "--min-peak-over-neighbour=-inf",
+    # "--local-bg-radius=3",
     # Other
     "-j", "24",
-    "--min-peaks=15",
+    "--min-peaks=10",
     "--tolerance=10,10,10,5",
     "--xgandalf-sampling-pitch=5",
     "--xgandalf-grad-desc-iterations=1",
@@ -319,20 +320,21 @@ def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list):
     print(f" {' '.join(DEFAULT_FLAGS)}")
     
     # Print convergence parameters once at initialization
-    print("\n[init] Convergence parameters:")
-    print(f"  radius_mm                 = {radius_mm}")
-    print(f"  min_spacing_mm            = {min_spacing_mm}")
-    print(f"  N_conv                    = {N_conv}")
-    print(f"  recurring_tol             = {recurring_tol}")
-    print(f"  median_rel_tol            = {median_rel_tol}")
-    print(f"  noimprove_N               = {noimprove_N}")
-    print(f"  noimprove_eps             = {noimprove_eps}")
-    print(f"  stability_N               = {stability_N}")
-    print(f"  stability_std             = {stability_std}")
-    print(f"  done_on_streak_successes  = {done_on_streak_successes}")
-    print(f"  done_on_streak_length     = {done_on_streak_length}")
-    print(f"  damping_factor (λ)        = {λ}")
-    print("")
+    print("[init] Convergence parameters:")
+    print(f" radius_mm = {radius_mm}, min_spacing_mm = {min_spacing_mm}, N_conv = {N_conv}, recurring_tol = {recurring_tol}, median_rel_tol = {median_rel_tol}, noimprove_N = {noimprove_N}, noimprove_eps = {noimprove_eps}, stability_N = {stability_N}, stability_std = {stability_std}, done_on_streak_successes = {done_on_streak_successes}, done_on_streak_length = {done_on_streak_length}, damping_factor (λ) = {λ}")
+
+    # print(f"  radius_mm                 = {radius_mm}")
+    # print(f"  min_spacing_mm            = {min_spacing_mm}")
+    # print(f"  N_conv                    = {N_conv}")
+    # print(f"  recurring_tol             = {recurring_tol}")
+    # print(f"  median_rel_tol            = {median_rel_tol}")
+    # print(f"  noimprove_N               = {noimprove_N}")
+    # print(f"  noimprove_eps             = {noimprove_eps}")
+    # print(f"  stability_N               = {stability_N}")
+    # print(f"  stability_std             = {stability_std}")
+    # print(f"  done_on_streak_successes  = {done_on_streak_successes}")
+    # print(f"  done_on_streak_length     = {done_on_streak_length}")
+    # print(f"  damping_factor (λ)        = {λ}")
 
     run_py(
             "no_run_prep_singlelist.py",
