@@ -327,14 +327,18 @@ class OrchestratorMainWindow(QMainWindow):
 
         self.progress_start_time = None
 
-
-
         # ---------- Log output ----------
         self.log_edit = QPlainTextEdit(container)
         self.log_edit.setReadOnly(True)
         self.log_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.log_edit.setMinimumHeight(300)  # make it bigger by default
         main_layout.addWidget(self.log_edit, stretch=1)
+
+    # ---------- Path normalization helper ----------
+
+    def _normalize_path(self, path: str) -> str:
+        """Expand ~ and make path absolute."""
+        return os.path.abspath(os.path.expanduser(path))
 
     # ---------- Browsers ----------
 
@@ -644,10 +648,17 @@ class OrchestratorMainWindow(QMainWindow):
             return None
 
         # HDF5 sources: one per non-empty line
-        h5_lines = [line.strip() for line in self.h5_edit.toPlainText().splitlines() if line.strip()]
-        if not h5_lines:
-            # If empty, fall back to orchestrator default
-            h5_lines = list(orch.DEFAULT_H5)
+        # h5_lines = [line.strip() for line in self.h5_edit.toPlainText().splitlines() if line.strip()]
+        # if not h5_lines:
+        #     # If empty, fall back to orchestrator default
+        #     h5_lines = list(orch.DEFAULT_H5)
+
+
+        raw_h5_lines = [line.strip() for line in self.h5_edit.toPlainText().splitlines() if line.strip()]
+        if not raw_h5_lines:
+            raw_h5_lines = list(orch.DEFAULT_H5)
+
+        h5_lines = [self._normalize_path(p) for p in raw_h5_lines]
 
         max_iters = self.max_iters_spin.value()
         jobs = self.jobs_spin.value()
