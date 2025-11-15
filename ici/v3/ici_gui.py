@@ -573,7 +573,6 @@ class OrchestratorMainWindow(QMainWindow):
 
     def on_progress_init(self, total: int):
         # Called when run_sh.py prints "running N event"
-        self.append_text(f"\n[GUI] Detected run_sh.py indexing {total} events.\n")
         self.progress_start_time = time.time()
 
         self.progress_bar.setMinimum(0)

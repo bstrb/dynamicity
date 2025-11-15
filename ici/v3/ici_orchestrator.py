@@ -24,13 +24,20 @@ from typing import List, Tuple
 
 
 # Default paths
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+# DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
+#                 DEFAULT_ROOT + "/sim2.h5",
+#                 DEFAULT_ROOT + "/sim3.h5"]
+
+DEFAULT_ROOT = "home/bubl3932/files/MFM300_VIII/MP15_3x100"
 DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
 DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
-                DEFAULT_ROOT + "/sim2.h5",
-                DEFAULT_ROOT + "/sim3.h5"]
-
+DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
+                
 DEFAULT_MAX_ITERS = 20          # maximum number of iterations
 DEFAULT_NUM_CPU   = 8           # default number of parallel jobs set to os.cpu_count() for max
 
