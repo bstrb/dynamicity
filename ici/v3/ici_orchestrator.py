@@ -39,7 +39,7 @@ DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_
                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
                 
 DEFAULT_MAX_ITERS = 20          # maximum number of iterations
-DEFAULT_NUM_CPU   = 8           # default number of parallel jobs set to os.cpu_count() for max
+DEFAULT_NUM_CPU   = 24           # default number of parallel jobs set to os.cpu_count() for max
 
 # Default propose next shift parameters
 radius_mm        = 0.05          # search radius 
@@ -59,14 +59,14 @@ done_on_streak_length   = 5     # length of streak to consider done when at leas
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    # "--peaks=cxi",
-    "--peaks=peakfinder9",
-    "--min-snr-biggest-pix=1",
-    "--min-snr-peak-pix=6",
-    "--min-snr=1",
-    "--min-sig=11",
-    "--min-peak-over-neighbour=-inf",
-    "--local-bg-radius=3",
+    "--peaks=cxi",
+    # "--peaks=peakfinder9",
+    # "--min-snr-biggest-pix=1",
+    # "--min-snr-peak-pix=6",
+    # "--min-snr=1",
+    # "--min-sig=11",
+    # "--min-peak-over-neighbour=-inf",
+    # "--local-bg-radius=3",
     # Other
     "-j", "1",
     "--min-peaks=15",
