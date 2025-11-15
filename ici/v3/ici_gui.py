@@ -626,6 +626,17 @@ class OrchestratorMainWindow(QMainWindow):
         self.progress_start_time = None
 
 
+    # def build_argv(self):
+    #     """
+    #     Build a CLI-style argv list for orch.main from the GUI state.
+    #     Instead of passing --flags on the CLI (which is awkward because
+    #     the flags themselves begin with "-"), we override orch.DEFAULT_FLAGS
+    #     directly based on the free-text field.
+    #     """
+    #     run_root = self.run_root_edit.text().strip()
+    #     geom = self.geom_edit.text().strip()
+    #     cell = self.cell_edit.text().strip()
+    
     def build_argv(self):
         """
         Build a CLI-style argv list for orch.main from the GUI state.
@@ -633,9 +644,10 @@ class OrchestratorMainWindow(QMainWindow):
         the flags themselves begin with "-"), we override orch.DEFAULT_FLAGS
         directly based on the free-text field.
         """
-        run_root = self.run_root_edit.text().strip()
-        geom = self.geom_edit.text().strip()
-        cell = self.cell_edit.text().strip()
+        run_root = self._normalize_path(self.run_root_edit.text().strip())
+        geom     = self._normalize_path(self.geom_edit.text().strip())
+        cell     = self._normalize_path(self.cell_edit.text().strip())
+
 
         if not run_root:
             QMessageBox.critical(self, "Missing run root", "Please specify a run root directory.")
