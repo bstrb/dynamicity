@@ -171,7 +171,7 @@ class OrchestratorMainWindow(QMainWindow):
         h5_clear_btn.clicked.connect(self.clear_h5_files)
         h5_buttons_layout.addWidget(h5_add_btn)
         h5_buttons_layout.addWidget(h5_clear_btn)
-        paths_layout.addRow("HDF5 files / globs:", self.h5_edit)
+        paths_layout.addRow("HDF5 files:", self.h5_edit)
         paths_layout.addRow("", h5_buttons_layout)
 
         # Max iterations and Jobs on the same row
@@ -354,7 +354,7 @@ class OrchestratorMainWindow(QMainWindow):
         # Free text, pre-filled from DEFAULT_FLAGS
         self.flags_edit.setPlainText(" ".join(orch.DEFAULT_FLAGS))
 
-        flags_layout.addWidget(QLabel("Flags passed to indexamajig (free text and must include --peaks, --indexing=xgandalf, --no-half-pixel-shift):", flags_group))
+        flags_layout.addWidget(QLabel("Flags passed to indexamajig as free text. Make sure the command is valid and includes\nmandatory flags like --peaks, --indexing=xgandalf, and --no-half-pixel-shift etc", flags_group))
         flags_layout.addWidget(self.flags_edit)
 
         main_layout.addWidget(flags_group)

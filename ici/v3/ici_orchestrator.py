@@ -65,14 +65,14 @@ done_on_streak_length   = 5     # length of streak to consider done when at leas
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    # "--peaks=cxi",
-    "--peaks=peakfinder9",
-    "--min-snr-biggest-pix=1",
-    "--min-snr-peak-pix=6",
-    "--min-snr=1",
-    "--min-sig=11",
-    "--min-peak-over-neighbour=-inf",
-    "--local-bg-radius=3",
+    "--peaks=cxi",
+    # "--peaks=peakfinder9",
+    # "--min-snr-biggest-pix=1",
+    # "--min-snr-peak-pix=6",
+    # "--min-snr=1",
+    # "--min-sig=11",
+    # "--min-peak-over-neighbour=-inf",
+    # "--local-bg-radius=3",
     # Other
     "-j", "1",
     "--min-peaks=15",
