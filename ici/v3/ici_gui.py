@@ -103,7 +103,7 @@ class OrchestratorMainWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setWindowTitle("SerialED Orchestrator GUI")
+        self.setWindowTitle("ICI Orchestrator GUI")
         self.resize(1000, 800)
 
         self._thread = None
@@ -124,6 +124,11 @@ class OrchestratorMainWindow(QMainWindow):
         # ---------- Top group: paths and basic settings ----------
         paths_group = QGroupBox("Paths and basic settings", container)
         paths_layout = QFormLayout(paths_group)
+
+        # Left-align labels and fields for this form layout
+        paths_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        paths_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        paths_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
         # Run root
         self.run_root_edit = QLineEdit(paths_group)
@@ -169,19 +174,26 @@ class OrchestratorMainWindow(QMainWindow):
         paths_layout.addRow("HDF5 files / globs:", self.h5_edit)
         paths_layout.addRow("", h5_buttons_layout)
 
-        # Max iterations
+        # Max iterations and Jobs on the same row
         self.max_iters_spin = QSpinBox(paths_group)
         self.max_iters_spin.setMinimum(1)
         self.max_iters_spin.setMaximum(10_000)
         self.max_iters_spin.setValue(orch.DEFAULT_MAX_ITERS)
-        paths_layout.addRow("Max iterations:", self.max_iters_spin)
 
-        # Jobs (parallelism)
         self.jobs_spin = QSpinBox(paths_group)
         self.jobs_spin.setMinimum(1)
         self.jobs_spin.setMaximum(512)
-        self.jobs_spin.setValue(int(orch.DEFAULT_NUM_CPU))
-        paths_layout.addRow("Jobs:", self.jobs_spin)
+        self.jobs_spin.setValue(int(orch.DEFAULT_NUM_CPU) if orch.DEFAULT_NUM_CPU is not None else os.cpu_count())
+
+        iters_jobs_row = QHBoxLayout()
+        iters_jobs_row.addWidget(QLabel("Max iterations:", paths_group))
+        iters_jobs_row.addWidget(self.max_iters_spin)
+        iters_jobs_row.addSpacing(20)
+        iters_jobs_row.addWidget(QLabel("Jobs:", paths_group))
+        iters_jobs_row.addWidget(self.jobs_spin)
+        iters_jobs_row.addStretch(1)
+
+        paths_layout.addRow(iters_jobs_row)
 
         main_layout.addWidget(paths_group)
 
@@ -189,96 +201,148 @@ class OrchestratorMainWindow(QMainWindow):
         conv_group = QGroupBox("Convergence / propose_next_shifts parameters", container)
         conv_layout = QFormLayout(conv_group)
 
+        conv_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        conv_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        conv_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+
+        # --- Widgets (same behavior as before) ---
+
         # radius_mm
         self.radius_spin = QDoubleSpinBox(conv_group)
-        self.radius_spin.setDecimals(6)
+        self.radius_spin.setDecimals(3)
         self.radius_spin.setRange(0.0, 10.0)
         self.radius_spin.setSingleStep(0.001)
         self.radius_spin.setValue(float(orch.radius_mm))
-        conv_layout.addRow("radius_mm:", self.radius_spin)
 
         # min_spacing_mm
         self.min_spacing_spin = QDoubleSpinBox(conv_group)
-        self.min_spacing_spin.setDecimals(8)
+        self.min_spacing_spin.setDecimals(5)
         self.min_spacing_spin.setRange(0.0, 1.0)
         self.min_spacing_spin.setSingleStep(1e-4)
         self.min_spacing_spin.setValue(float(orch.min_spacing_mm))
-        conv_layout.addRow("min_spacing_mm:", self.min_spacing_spin)
 
         # N_conv
         self.N_conv_spin = QSpinBox(conv_group)
         self.N_conv_spin.setMinimum(1)
         self.N_conv_spin.setMaximum(1000)
         self.N_conv_spin.setValue(int(orch.N_conv))
-        conv_layout.addRow("N_conv:", self.N_conv_spin)
 
         # recurring_tol
         self.recurring_tol_spin = QDoubleSpinBox(conv_group)
-        self.recurring_tol_spin.setDecimals(6)
+        self.recurring_tol_spin.setDecimals(2)
         self.recurring_tol_spin.setRange(0.0, 1.0)
         self.recurring_tol_spin.setSingleStep(0.01)
         self.recurring_tol_spin.setValue(float(orch.recurring_tol))
-        conv_layout.addRow("recurring_tol:", self.recurring_tol_spin)
 
         # median_rel_tol
         self.median_rel_tol_spin = QDoubleSpinBox(conv_group)
-        self.median_rel_tol_spin.setDecimals(6)
+        self.median_rel_tol_spin.setDecimals(2)
         self.median_rel_tol_spin.setRange(0.0, 1.0)
         self.median_rel_tol_spin.setSingleStep(0.01)
         self.median_rel_tol_spin.setValue(float(orch.median_rel_tol))
-        conv_layout.addRow("median_rel_tol:", self.median_rel_tol_spin)
 
         # noimprove_N
         self.noimprove_N_spin = QSpinBox(conv_group)
         self.noimprove_N_spin.setMinimum(1)
         self.noimprove_N_spin.setMaximum(1000)
         self.noimprove_N_spin.setValue(int(orch.noimprove_N))
-        conv_layout.addRow("noimprove_N:", self.noimprove_N_spin)
 
         # noimprove_eps
         self.noimprove_eps_spin = QDoubleSpinBox(conv_group)
-        self.noimprove_eps_spin.setDecimals(6)
+        self.noimprove_eps_spin.setDecimals(2)
         self.noimprove_eps_spin.setRange(0.0, 1.0)
         self.noimprove_eps_spin.setSingleStep(0.01)
         self.noimprove_eps_spin.setValue(float(orch.noimprove_eps))
-        conv_layout.addRow("noimprove_eps:", self.noimprove_eps_spin)
 
         # stability_N
         self.stability_N_spin = QSpinBox(conv_group)
         self.stability_N_spin.setMinimum(1)
         self.stability_N_spin.setMaximum(1000)
         self.stability_N_spin.setValue(int(orch.stability_N))
-        conv_layout.addRow("stability_N:", self.stability_N_spin)
 
         # stability_std
         self.stability_std_spin = QDoubleSpinBox(conv_group)
-        self.stability_std_spin.setDecimals(6)
+        self.stability_std_spin.setDecimals(2)
         self.stability_std_spin.setRange(0.0, 1.0)
         self.stability_std_spin.setSingleStep(0.01)
         self.stability_std_spin.setValue(float(orch.stability_std))
-        conv_layout.addRow("stability_std:", self.stability_std_spin)
 
         # done_on_streak_successes
         self.done_streak_succ_spin = QSpinBox(conv_group)
         self.done_streak_succ_spin.setMinimum(1)
         self.done_streak_succ_spin.setMaximum(1000)
         self.done_streak_succ_spin.setValue(int(orch.done_on_streak_successes))
-        conv_layout.addRow("done_on_streak_successes:", self.done_streak_succ_spin)
 
         # done_on_streak_length
         self.done_streak_len_spin = QSpinBox(conv_group)
         self.done_streak_len_spin.setMinimum(1)
         self.done_streak_len_spin.setMaximum(1000)
         self.done_streak_len_spin.setValue(int(orch.done_on_streak_length))
-        conv_layout.addRow("done_on_streak_length:", self.done_streak_len_spin)
 
         # damping factor λ
         self.lambda_spin = QDoubleSpinBox(conv_group)
-        self.lambda_spin.setDecimals(6)
+        self.lambda_spin.setDecimals(2)
         self.lambda_spin.setRange(0.0, 10.0)
         self.lambda_spin.setSingleStep(0.1)
         self.lambda_spin.setValue(float(orch.λ))
-        conv_layout.addRow("damping factor (λ):", self.lambda_spin)
+
+        # --- Rows as you requested ---
+
+        # Row 1: radius_mm, min_spacing_mm, damping factor (λ)
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("radius_mm:", conv_group))
+        row1.addWidget(self.radius_spin)
+        row1.addSpacing(10)
+        row1.addWidget(QLabel("min_spacing_mm:", conv_group))
+        row1.addWidget(self.min_spacing_spin)
+        row1.addSpacing(10)
+        row1.addWidget(QLabel("damping factor (λ):", conv_group))
+        row1.addWidget(self.lambda_spin)
+        row1.addStretch(1)
+        conv_layout.addRow(row1)
+
+        # Row 2: N_conv, recurring_tol, median_rel_tol
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("N_conv:", conv_group))
+        row2.addWidget(self.N_conv_spin)
+        row2.addSpacing(10)
+        row2.addWidget(QLabel("recurring_tol:", conv_group))
+        row2.addWidget(self.recurring_tol_spin)
+        row2.addSpacing(10)
+        row2.addWidget(QLabel("median_rel_tol:", conv_group))
+        row2.addWidget(self.median_rel_tol_spin)
+        row2.addStretch(1)
+        conv_layout.addRow(row2)
+
+        # Row 3: noimprove_N, noimprove_eps
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("noimprove_N:", conv_group))
+        row3.addWidget(self.noimprove_N_spin)
+        row3.addSpacing(10)
+        row3.addWidget(QLabel("noimprove_eps:", conv_group))
+        row3.addWidget(self.noimprove_eps_spin)
+        row3.addStretch(1)
+        conv_layout.addRow(row3)
+
+        # Row 4: stability_N, stability_std
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel("stability_N:", conv_group))
+        row4.addWidget(self.stability_N_spin)
+        row4.addSpacing(10)
+        row4.addWidget(QLabel("stability_std:", conv_group))
+        row4.addWidget(self.stability_std_spin)
+        row4.addStretch(1)
+        conv_layout.addRow(row4)
+
+        # Row 5: done_on_streak_successes, done_on_streak_length
+        row5 = QHBoxLayout()
+        row5.addWidget(QLabel("done_on_streak_successes:", conv_group))
+        row5.addWidget(self.done_streak_succ_spin)
+        row5.addSpacing(10)
+        row5.addWidget(QLabel("done_on_streak_length:", conv_group))
+        row5.addWidget(self.done_streak_len_spin)
+        row5.addStretch(1)
+        conv_layout.addRow(row5)
 
         main_layout.addWidget(conv_group)
 
@@ -290,7 +354,7 @@ class OrchestratorMainWindow(QMainWindow):
         # Free text, pre-filled from DEFAULT_FLAGS
         self.flags_edit.setPlainText(" ".join(orch.DEFAULT_FLAGS))
 
-        flags_layout.addWidget(QLabel("Flags passed to --flags (free text):", flags_group))
+        flags_layout.addWidget(QLabel("Flags passed to indexamajig (free text and must include --peaks, --indexing=xgandalf, --no-half-pixel-shift):", flags_group))
         flags_layout.addWidget(self.flags_edit)
 
         main_layout.addWidget(flags_group)
@@ -310,9 +374,9 @@ class OrchestratorMainWindow(QMainWindow):
         main_layout.addLayout(bottom_layout)
 
         # ---------- Progress bar + explanation ----------
-        
         self.progress_label = QLabel(
-            "Progress (run_sh.py indexing events; only updates while run_sh.py is running):",
+            # "Progress (run_sh.py indexing events; only updates while run_sh.py is running):",
+            "Progress (updates with processed indexing events):",
             container,
         )
         main_layout.addWidget(self.progress_label)
@@ -333,6 +397,80 @@ class OrchestratorMainWindow(QMainWindow):
         self.log_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.log_edit.setMinimumHeight(300)  # make it bigger by default
         main_layout.addWidget(self.log_edit, stretch=1)
+
+        # ---------- Tooltips for parameters ----------
+        self.max_iters_spin.setToolTip(
+            "Maximum number of iterations of the orchestration loop."
+        )
+        self.jobs_spin.setToolTip(
+            "Number of parallel jobs (default is os.cpu_count(), i.e. all available CPUs)."
+        )
+
+        self.radius_spin.setToolTip(
+            "Search radius in mm for propose-next-shift (default: 0.05 mm)."
+        )
+        self.min_spacing_spin.setToolTip(
+            "Minimum spacing in mm between proposed shifts (default: 5e-4 mm)."
+        )
+
+        self.N_conv_spin.setToolTip(
+            "Minimum number of events required to consider convergence (default: 3)."
+        )
+        self.recurring_tol_spin.setToolTip(
+            "Tolerance for recurring shifts; 0.1 = 10% relative difference allowed."
+        )
+        self.median_rel_tol_spin.setToolTip(
+            "Median relative tolerance for convergence; 0.1 = 10% relative change threshold."
+        )
+
+        self.noimprove_N_spin.setToolTip(
+            "Number of iterations with no improvement required to trigger 'no-improve' convergence (default: 2)."
+        )
+        self.noimprove_eps_spin.setToolTip(
+            "Minimum relative improvement considered significant; 0.02 = 2% (below this counts as 'no improvement')."
+        )
+
+        self.stability_N_spin.setToolTip(
+            "Number of iterations over which stability is evaluated (default: 3)."
+        )
+        self.stability_std_spin.setToolTip(
+            "Standard deviation threshold for stability; 0.05 = 5% spread allowed in shifts."
+        )
+
+        self.done_streak_succ_spin.setToolTip(
+            "Number of successful iterations within an unindexed streak required to consider the run 'done' (default: 2)."
+        )
+        self.done_streak_len_spin.setToolTip(
+            "Length of the unindexed streak used together with done_on_streak_successes to mark the run as done (default: 5)."
+        )
+
+        self.lambda_spin.setToolTip(
+            "Damping factor λ for refined shift updates (0 = full damping, 1 = no damping; default: 0.8)."
+        )
+
+        # ---------- Align spin box contents to the left ----------
+        int_spin_boxes = [
+            self.max_iters_spin,
+            self.jobs_spin,
+            self.N_conv_spin,
+            self.noimprove_N_spin,
+            self.stability_N_spin,
+            self.done_streak_succ_spin,
+            self.done_streak_len_spin,
+        ]
+
+        double_spin_boxes = [
+            self.radius_spin,
+            self.min_spacing_spin,
+            self.recurring_tol_spin,
+            self.median_rel_tol_spin,
+            self.noimprove_eps_spin,
+            self.stability_std_spin,
+            self.lambda_spin,
+        ]
+
+        for sb in int_spin_boxes + double_spin_boxes:
+            sb.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
     # ---------- Path normalization helper ----------
 
@@ -572,7 +710,6 @@ class OrchestratorMainWindow(QMainWindow):
         else:
             return f"{m:02d}m {s:02d}s"
 
-
     # ---------- Progress bar slots ----------
 
     def on_progress_init(self, total: int):
@@ -585,7 +722,7 @@ class OrchestratorMainWindow(QMainWindow):
         self.progress_bar.setFormat("%p%")  # keep bar text simple
 
         self.progress_label.setText(
-            f"[run_sh] Indexing: 0% (0 / {total} events), ETA estimating..."
+            f"Indexing: 0% (0 / {total} events), ETA estimating..."
         )
 
     def on_progress_step(self, step: int):
@@ -610,7 +747,7 @@ class OrchestratorMainWindow(QMainWindow):
             eta_str = "estimating..."
 
         self.progress_label.setText(
-            f"[run_sh] Indexing: {percent:5.1f}% ({done} / {total} events), ETA {eta_str}"
+            f"Indexing: {percent:5.1f}% ({done} / {total} events), ETA {eta_str}"
         )
 
     def on_progress_done(self):
@@ -625,18 +762,6 @@ class OrchestratorMainWindow(QMainWindow):
             self.progress_label.setText("Progress (last run_sh.py finished)")
         self.progress_start_time = None
 
-
-    # def build_argv(self):
-    #     """
-    #     Build a CLI-style argv list for orch.main from the GUI state.
-    #     Instead of passing --flags on the CLI (which is awkward because
-    #     the flags themselves begin with "-"), we override orch.DEFAULT_FLAGS
-    #     directly based on the free-text field.
-    #     """
-    #     run_root = self.run_root_edit.text().strip()
-    #     geom = self.geom_edit.text().strip()
-    #     cell = self.cell_edit.text().strip()
-    
     def build_argv(self):
         """
         Build a CLI-style argv list for orch.main from the GUI state.
@@ -647,7 +772,6 @@ class OrchestratorMainWindow(QMainWindow):
         run_root = self._normalize_path(self.run_root_edit.text().strip())
         geom     = self._normalize_path(self.geom_edit.text().strip())
         cell     = self._normalize_path(self.cell_edit.text().strip())
-
 
         if not run_root:
             QMessageBox.critical(self, "Missing run root", "Please specify a run root directory.")
@@ -660,12 +784,6 @@ class OrchestratorMainWindow(QMainWindow):
             return None
 
         # HDF5 sources: one per non-empty line
-        # h5_lines = [line.strip() for line in self.h5_edit.toPlainText().splitlines() if line.strip()]
-        # if not h5_lines:
-        #     # If empty, fall back to orchestrator default
-        #     h5_lines = list(orch.DEFAULT_H5)
-
-
         raw_h5_lines = [line.strip() for line in self.h5_edit.toPlainText().splitlines() if line.strip()]
         if not raw_h5_lines:
             raw_h5_lines = list(orch.DEFAULT_H5)

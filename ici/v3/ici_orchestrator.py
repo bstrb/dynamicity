@@ -22,6 +22,11 @@ import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
+DEFAULT_ROOT = ""
+DEFAULT_GEOM = ""
+DEFAULT_CELL = ""
+DEFAULT_H5   = ""
+DEFAULT_NUM_CPU = None
 
 # Default paths
 # DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
@@ -31,15 +36,16 @@ from typing import List, Tuple
 #                 DEFAULT_ROOT + "/sim2.h5",
 #                 DEFAULT_ROOT + "/sim3.h5"]
 
-DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
-                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
-                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
-                
-DEFAULT_MAX_ITERS = 20          # maximum number of iterations
-DEFAULT_NUM_CPU   = 24           # default number of parallel jobs set to os.cpu_count() for max
+
+# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
+# DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
+#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
+#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
+
+DEFAULT_MAX_ITERS = 20           # maximum number of iterations
+# DEFAULT_NUM_CPU   = 24           # default number of parallel jobs set to os.cpu_count() for max
 
 # Default propose next shift parameters
 radius_mm        = 0.05          # search radius 
@@ -53,20 +59,20 @@ stability_N      = 3            # number of iterations to consider for stability
 stability_std    = 0.05         # standard deviation threshold for stability (0.05 = 5%)
 done_on_streak_successes = 2    # number of  successes to consider done after unindexed streak
 done_on_streak_length   = 5     # length of streak to consider done when at least done_on_streak_successes
-λ                = 0.8          # damping factor for refinded shift updates
+λ                = 0.8          # damping factor for refined det shift updates
 
 # Default indexamajig / xgandalf / integration flags
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    "--peaks=cxi",
-    # "--peaks=peakfinder9",
-    # "--min-snr-biggest-pix=1",
-    # "--min-snr-peak-pix=6",
-    # "--min-snr=1",
-    # "--min-sig=11",
-    # "--min-peak-over-neighbour=-inf",
-    # "--local-bg-radius=3",
+    # "--peaks=cxi",
+    "--peaks=peakfinder9",
+    "--min-snr-biggest-pix=1",
+    "--min-snr-peak-pix=6",
+    "--min-snr=1",
+    "--min-sig=11",
+    "--min-peak-over-neighbour=-inf",
+    "--local-bg-radius=3",
     # Other
     "-j", "1",
     "--min-peaks=15",
@@ -223,9 +229,6 @@ def run_py(script: str, args: List[str], check: bool = True) -> int:
                     pbar.update(1)
                 continue
 
-            # BEFORE:
-            # print(line, end="")
-            # AFTER:
             print(line, end="", flush=True)
 
             m = event_re.search(line)
@@ -234,7 +237,8 @@ def run_py(script: str, args: List[str], check: bool = True) -> int:
                 real_stdout = getattr(sys, "__stdout__", sys.stdout)
                 pbar = tqdm(
                     total=total_events,
-                    desc="[run_sh] Indexing",
+                    # desc="[run_sh] Indexing",
+                    desc="Indexing",
                     unit="evt",
                     ncols=80,
                     ascii=True,
