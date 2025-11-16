@@ -2,6 +2,4 @@ TODO:
 stream with only done events
 handle eventual bottle necks memory and processing for larger data sets
 mark why done
-
-gui
-remove one of overlay to original(json or tsv(the larger))
+remove one of overlay to original(json or tsv)
