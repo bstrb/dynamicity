@@ -3,18 +3,25 @@
 """
 Filter + sample in ONE pass.
 
-Keeps frames with /entry/data/nPeaks >= MIN_PEAKS, then randomly samples N (without replacement)
+Keeps frames with /entry/data/nPeaks >= MIN_PEAKS, then (optionally) randomly samples N (without replacement)
 from those kept, and writes an output HDF5 that preserves per-frame alignment and dataset
 compression/chunking/attributes.
 
 Usage:
+  # Filter + sample:
   python3 filter_and_sample.py input.h5 --count 5000 \
       [--min-peaks 15] [--seed 1337] \
       [--images-path /entry/data/images] [--npeaks-path /entry/data/nPeaks] \
       [--out /path/to/output.h5]
 
+  # Filter only (keep all frames passing nPeaks filter, no sampling):
+  python3 filter_and_sample.py input.h5 \
+      [--min-peaks 15] [--images-path /entry/data/images] [--npeaks-path /entry/data/nPeaks] \
+      [--out /path/to/output.h5]
+
 If --out is omitted, the filename is:
-  <original_basename>_min_<MIN>peaks_<COUNT>.h5
+  With sampling: <original_basename>_min_<MIN>peaks_<COUNT>.h5
+  Without sampling (no --count): <original_basename>_min_<MIN>peaks_all.h5
 """
 
 import argparse, os, sys
@@ -130,9 +137,15 @@ def recursive_copy_sampled(src_group, dst_group, n_frames, sampled_idx_sorted):
 # ---------- main ----------
 
 def main():
-    ap = argparse.ArgumentParser(description="Filter by nPeaks then sample N frames in one pass.")
+    ap = argparse.ArgumentParser(description="Filter by nPeaks then optionally sample N frames in one pass.")
     ap.add_argument("input_h5")
-    ap.add_argument("--count", type=int, required=True, help="Number of frames to sample (without replacement)")
+    ap.add_argument(
+        "--count",
+        type=int,
+        required=False,
+        default=None,
+        help="Number of frames to sample (without replacement). If omitted, all filtered frames are kept (no sampling).",
+    )
     ap.add_argument("--min-peaks", type=int, default=15)
     ap.add_argument("--seed", type=int, default=1337)
     ap.add_argument("--images-path", default="/entry/data/images")
@@ -161,20 +174,38 @@ def main():
         kept = kept_idx.size
         if kept == 0:
             raise RuntimeError(f"No frames satisfy nPeaks >= {args.min_peaks}")
-        if args.count <= 0 or args.count > kept:
-            raise ValueError(f"--count must be in [1, {kept}] (kept after filtering)")
 
-        # Sample WITHOUT replacement from kept frames
-        rng = np.random.default_rng(args.seed)
-        sampled = rng.choice(kept_idx, size=args.count, replace=False)
-        sampled.sort()  # ascending for better I/O
+        # Decide sampling behaviour
+        if args.count is None:
+            # No sampling: keep all filtered frames
+            sampled = kept_idx.copy()
+            sampled.sort()  # should already be sorted, but be explicit
+            sampled_count = kept
+        else:
+            # Validate count and sample WITHOUT replacement from kept frames
+            if args.count <= 0 or args.count > kept:
+                raise ValueError(f"--count must be in [1, {kept}] (kept after filtering)")
+            rng = np.random.default_rng(args.seed)
+            sampled = rng.choice(kept_idx, size=args.count, replace=False)
+            sampled.sort()  # ascending for better I/O
+            sampled_count = int(args.count)
 
         # Output name
         base = os.path.splitext(os.path.basename(in_path))[0]
-        out_path = args.out or os.path.join(
-            os.path.dirname(in_path),
-            f"{base}_min_{int(args.min_peaks)}peaks_{int(args.count)}.h5"
-        )
+        if args.out:
+            out_path = args.out
+        else:
+            if args.count is None:
+                # Filter-only case: no sampling
+                out_path = os.path.join(
+                    os.path.dirname(in_path),
+                    f"{base}_min_{int(args.min_peaks)}peaks_all.h5"
+                )
+            else:
+                out_path = os.path.join(
+                    os.path.dirname(in_path),
+                    f"{base}_min_{int(args.min_peaks)}peaks_{int(args.count)}.h5"
+                )
 
         with h5py.File(out_path, "w") as f_out:
             # File-level attrs & provenance
@@ -182,8 +213,12 @@ def main():
             f_out.attrs["_source_file"] = in_path
             f_out.attrs["_min_peaks"] = int(args.min_peaks)
             f_out.attrs["_kept_frames_after_filter"] = int(kept)
-            f_out.attrs["_sampled_count"] = int(args.count)
-            f_out.attrs["_sample_seed"] = int(args.seed)
+            f_out.attrs["_sampled_count"] = int(sampled_count)
+            if args.count is None:
+                f_out.attrs["_sampling_mode"] = "all_filtered"
+            else:
+                f_out.attrs["_sampling_mode"] = "random_sample"
+                f_out.attrs["_sample_seed"] = int(args.seed)
 
             # Store indices used (to allow tracing back)
             # write these first (creates /entry and /entry/data ahead of recursion)
@@ -194,7 +229,7 @@ def main():
             # Mirror hierarchy and copy data, sampling per-frame datasets
             recursive_copy_sampled(f_in, f_out, n_frames, sampled)
 
-    print(f"[filter_and_sample] Filtered kept={kept}, sampled={args.count}")
+    print(f"[filter_and_sample] Filtered kept={kept}, sampled={sampled_count}")
     print(f"[filter_and_sample] Wrote: {out_path}")
 
 if __name__ == "__main__":
