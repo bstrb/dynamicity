@@ -29,20 +29,20 @@ DEFAULT_H5   = ""
 DEFAULT_NUM_CPU = None
 
 # Default paths
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
-                DEFAULT_ROOT + "/sim2.h5",
-                DEFAULT_ROOT + "/sim3.h5"]
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+# DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
+#                 DEFAULT_ROOT + "/sim2.h5",
+#                 DEFAULT_ROOT + "/sim3.h5"]
 
 
-# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
-#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
-#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
+DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
+DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
 
 DEFAULT_MAX_ITERS = 20           # maximum number of iterations
 # DEFAULT_NUM_CPU   = 24           # default number of parallel jobs set to os.cpu_count() for max
@@ -65,14 +65,14 @@ done_on_streak_length   = 5     # length of streak to consider done when at leas
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    # "--peaks=cxi",
-    "--peaks=peakfinder9",
-    "--min-snr-biggest-pix=1",
-    "--min-snr-peak-pix=6",
-    "--min-snr=1",
-    "--min-sig=11",
-    "--min-peak-over-neighbour=-inf",
-    "--local-bg-radius=3",
+    "--peaks=cxi",
+    # "--peaks=peakfinder9",
+    # "--min-snr-biggest-pix=1",
+    # "--min-snr-peak-pix=6",
+    # "--min-snr=1",
+    # "--min-sig=11",
+    # "--min-peak-over-neighbour=-inf",
+    # "--local-bg-radius=3",
     # Other
     "-j", "1",
     "--min-peaks=15",
@@ -204,33 +204,40 @@ def latest_run(run_root: str) -> Tuple[int, str]:
     return (nums[-1], os.path.join(runs_dir(run_root), f"run_{nums[-1]:03d}")) if nums else (-1, "")
 
 def run_py(script: str, args: List[str], check: bool = True) -> int:
-    import subprocess, sys
+    import subprocess
     from tqdm import tqdm
 
     is_run_sh = (script == "run_sh.py")
 
     if is_run_sh:
-        # force unbuffered stdout from the child
+        # force unbuffered stdout from the child for progress markers
         cmd = ["python3", "-u", script, *args]
     else:
         cmd = ["python3", script, *args]
 
     # Normal behavior for all scripts except run_sh.py
-    is_run_sh = (script == "run_sh.py")
-
     if not is_run_sh:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except FileNotFoundError as e:
+            print(f"[ERR] Failed to launch {script}: {e}", file=sys.stderr)
+            if check:
+                raise SystemExit(2)
+            return 2
+
         try:
             for line in proc.stdout:
                 print(line, end="", flush=True)
         finally:
-            proc.stdout.close()
+            if proc.stdout is not None:
+                proc.stdout.close()
+
         rc = proc.wait()
         if check and rc != 0:
             raise SystemExit(f"[ERR] {script} exited with {rc}")
@@ -240,13 +247,19 @@ def run_py(script: str, args: List[str], check: bool = True) -> int:
     total_events = None
     event_re = re.compile(r"\brunning\s+(\d+)\s+event\b", re.I)
 
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError as e:
+        print(f"[ERR] Failed to launch {script}: {e}", file=sys.stderr)
+        if check:
+            raise SystemExit(2)
+        return 2
 
     pbar = None
     try:
@@ -277,15 +290,13 @@ def run_py(script: str, args: List[str], check: bool = True) -> int:
     finally:
         if pbar is not None:
             pbar.close()
-        proc.stdout.close()
-
+        if proc.stdout is not None:
+            proc.stdout.close()
 
     rc = proc.wait()
-
     if check and rc != 0:
         raise SystemExit(f"[ERR] {script} exited with {rc}")
     return rc
-
 
 def detect_latest_run_from_log(log_path: str) -> int:
     try:
@@ -446,10 +457,14 @@ def main(argv=None):
     ap.add_argument("--run-root", default=DEFAULT_ROOT, help="Experiment root that contains 'runs/'.")
     ap.add_argument("--geom", default=DEFAULT_GEOM, help="Geometry file for initialization.")
     ap.add_argument("--cell", default=DEFAULT_CELL, help="Cell file for initialization.")
-    ap.add_argument("--h5", nargs="+", default=DEFAULT_H5, help="One or more HDF5 sources or globs (e.g., sim_001.h5 sim_002.h5 or sim_*.h5)")
-    ap.add_argument("--flags", nargs="*", default=DEFAULT_FLAGS, help="Additional indexamajig / xgandalf / integration flags for initialization.")
-    ap.add_argument("--max-iters", type=int, default=DEFAULT_MAX_ITERS, help="Maximum number of iterations before stopping.")
-    ap.add_argument("--jobs", type=str, default=DEFAULT_NUM_CPU, help="Number of parallel jobs for indexamajig/xgandalf.")
+    ap.add_argument("--h5", nargs="+", default=DEFAULT_H5,
+                    help="One or more HDF5 sources or globs (e.g., sim_001.h5 sim_002.h5 or sim_*.h5)")
+    ap.add_argument("--flags", nargs="*", default=DEFAULT_FLAGS,
+                    help="Additional indexamajig / xgandalf / integration flags for initialization.")
+    ap.add_argument("--max-iters", type=int, default=DEFAULT_MAX_ITERS,
+                    help="Maximum number of iterations before stopping.")
+    ap.add_argument("--jobs", type=str, default=DEFAULT_NUM_CPU,
+                    help="Number of parallel jobs for indexamajig/xgandalf (integer or 'auto').")
 
     ap.add_argument("--radius-mm", type=float, default=radius_mm)
     ap.add_argument("--min-spacing-mm", type=float, default=min_spacing_mm)
@@ -466,25 +481,101 @@ def main(argv=None):
 
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
+    # ---------- basic input validation (fail fast, nice messages) ----------
 
+    # jobs: allow "auto" / empty / None → use all cores
+    if args.jobs in (None, "", "auto", "AUTO", "Auto"):
+        jobs = os.cpu_count() or 1
+    else:
+        try:
+            jobs = int(args.jobs)
+        except ValueError:
+            print(f"[ERR] --jobs must be an integer or 'auto' (got {args.jobs!r}).", file=sys.stderr)
+            return 2
+        if jobs <= 0:
+            print("[ERR] --jobs must be a positive integer.", file=sys.stderr)
+            return 2
+
+    # max iterations
+    if args.max_iters <= 0:
+        print("[ERR] --max-iters must be at least 1.", file=sys.stderr)
+        return 2
+
+    # experiment root: may not exist yet; parent must exist and be writable
     exp_root = os.path.abspath(os.path.expanduser(args.run_root))
+    parent = os.path.dirname(exp_root) or "."
+    if not os.path.isdir(parent):
+        print(f"[ERR] Parent directory of run-root does not exist: {parent}", file=sys.stderr)
+        return 2
+    if not os.access(parent, os.W_OK):
+        print(f"[ERR] Parent directory of run-root is not writable: {parent}", file=sys.stderr)
+        return 2
 
-    # one timestamp per orchestration
+    # geometry / cell files must exist
+    geom = os.path.abspath(os.path.expanduser(args.geom))
+    cell = os.path.abspath(os.path.expanduser(args.cell))
+
+    if not geom or not os.path.isfile(geom):
+        print(f"[ERR] Geometry file not found: {geom}", file=sys.stderr)
+        print("      Please provide a valid --geom path to a CrystFEL .geom file.", file=sys.stderr)
+        return 2
+
+    if not cell or not os.path.isfile(cell):
+        print(f"[ERR] Cell file not found: {cell}", file=sys.stderr)
+        print("      Please provide a valid --cell path to a CrystFEL .cell file.", file=sys.stderr)
+        return 2
+
+    # HDF5 sources must be non-empty and at least one pattern must match
+    h5_sources = args.h5 if isinstance(args.h5, (list, tuple)) else [args.h5]
+    h5_sources = [s for s in h5_sources if s]
+
+    if not h5_sources:
+        print(
+            "[ERR] No HDF5 sources provided. Use --h5 file1.h5 file2.h5 or patterns like sim_*.h5",
+            file=sys.stderr,
+        )
+        return 2
+
+    matched_any = False
+    unmatched_patterns = []
+    for s in h5_sources:
+        pattern = os.path.abspath(os.path.expanduser(s))
+        if glob(pattern):
+            matched_any = True
+        else:
+            unmatched_patterns.append(s)
+
+    if not matched_any:
+        print("[ERR] None of the provided --h5 patterns matched any files on disk.", file=sys.stderr)
+        print("      Patterns checked:", file=sys.stderr)
+        for s in h5_sources:
+            print(f"        {s}", file=sys.stderr)
+        return 2
+
+    if unmatched_patterns:
+        print("[WARN] Some --h5 patterns did not match any files (they may be ignored downstream):",
+              file=sys.stderr)
+        for s in unmatched_patterns:
+            print(f"        {s}", file=sys.stderr)
+
+    # ---------- create session directory ----------
+
+    # one timestamped subfolder per orchestration
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     sess = os.path.join(exp_root, f"runs_{ts}")
     os.makedirs(runs_dir(sess), exist_ok=True)
 
-    # --- begin: wrap whole orchestration with logger (Change #2) ---
+    # ---------- run orchestration with logging ----------
+
     with OrchestratorRunLogger(runs_dir(sess)):
         # If no runs, initialize run_000 first
         if not list_run_numbers(sess):
-            # do_init_sequence(run_root)
-            do_init_sequence(sess, args.geom, args.cell, args.h5, jobs=args.jobs)
+            do_init_sequence(sess, geom, cell, h5_sources, jobs=jobs)
 
         # Iterate until all next_* == done
-        iterate_until_done(sess, max_iters=args.max_iters, jobs=args.jobs)
+        iterate_until_done(sess, max_iters=args.max_iters, jobs=jobs)
 
-    # --- end: wrap whole orchestration with logger ------------------
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())
