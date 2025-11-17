@@ -1,4 +1,0 @@
-PyQt6>=6.5
-numpy>=1.23
-matplotlib>=3.8          # 3-D canvas (FigureCanvasQTAgg)
-pyqtgraph>=0.13          # optional GPU/OpenGL canvas – see visualisation_pg.py
