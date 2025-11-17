@@ -8,7 +8,7 @@ propose_next_shifts.py — Step-1 (HillMap) exploration; Step-2 can be:
 """
 from __future__ import annotations
 import argparse, os, sys, math, hashlib
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional
 import numpy as np
 import h5py
 
@@ -106,20 +106,6 @@ def _recent_unindexed_streak(trials: List[Tuple[int,float,float,int,Optional[flo
             break
     return s
 
-def _block_latest_status(block_lines: List[str]) -> Optional[Tuple[str, str]]:
-    """
-    Look at the last data line in a block and return (next_dx, next_dy).
-    Used for cheap early-out: if it's ('done','done'), we skip this event entirely.
-    """
-    for ln in reversed(block_lines):
-        if (not ln) or ln.startswith("#") or ln.strip().startswith("run_n"):
-            continue
-        parts = [p.strip() for p in ln.rstrip("\n").split(",")]
-        if len(parts) < 7:
-            parts += [""] * (7 - len(parts))
-        return parts[5], parts[6]
-    return None
-
 # ------------------------- Convergence checks ------------------------
 
 def wrmsd_recurring_convergence(successes_w, N=5, tol=0.1):
@@ -161,7 +147,7 @@ def wrmsd_median_convergence(successes_w, N=5, rel_tol=0.05):
 
 def wrmsd_no_improvement(successes_w, N=5, eps=0.01):
     """
-    successes_w: list[(dx, dy, wrmsd)] with wrmsd for indexed frames
+    successes_w: list[(run, dx, wrmsd)] with wrmsd for indexed frames
     Returns True if best wRMSD over the last N successes has not improved
     by at least eps relative to the best before that window.
     """
@@ -172,6 +158,7 @@ def wrmsd_no_improvement(successes_w, N=5, eps=0.01):
     recent_best = min(wr[-N:])
     rel_gain = (prev_best - recent_best) / max(prev_best, 1e-9)
     return rel_gain < eps
+
 
 def wrmsd_stability(successes_w, N=6, rel_std_tol=0.02):
     """
@@ -189,8 +176,8 @@ def wrmsd_stability(successes_w, N=6, rel_std_tol=0.02):
     rel_std = sd / mu
     return rel_std <= rel_std_tol
 
-# ------------------------ Main proposer ------------------------
 
+# ------------------------ Main proposer ------------------------
 def propose_event(
     step2algo: str,
     trials_sorted: List[Tuple[int,float,float,int,Optional[float]]],
@@ -234,22 +221,20 @@ def propose_event(
             failures.append((dx, dy))
     tried = np.array(tried, float) if tried else np.empty((0, 2), float)
 
-    # --- Global "done" checks that use the full history ---
-
-    # 1) mark done if we already have enough successes AND a long unindexed streak
+    # --- NEW: mark done if we already have enough successes AND a long unindexed streak
     s_streak = _recent_unindexed_streak(trials_sorted)
     if len(successes_w) >= done_on_streak_successes and s_streak >= done_on_streak_length:
         return None, None, f"done_unindexed_streak(k={s_streak}, succ={len(successes_w)})"
 
-    # 2) mark done if best wRMSD hasn’t improved by ≥ eps over last N successes
+    # --- NEW: mark done if best wRMSD hasn’t improved by ≥ eps over last N successes
     if wrmsd_no_improvement(successes_w, N=noimprove_N, eps=noimprove_eps):
         return None, None, f"done_no_improve(N={noimprove_N}, eps={noimprove_eps:g})"
-
-    # 3) mark done if recent wRMSD is statistically stable (low relative std)
+    
+    # --- NEW: mark done if recent wRMSD is statistically stable (low relative std)
     if wrmsd_stability(successes_w, N=stability_N, rel_std_tol=stability_std):
         return None, None, f"done_stable_wrmsd(N={stability_N}, relstd≤{stability_std:g})"
 
-    # ------------------- Step-2 (dxdy) zone -------------------
+    # Gate for Step-2
     if s_streak < back_to_step1_streak:
 
         if step2algo == "dxdy":
@@ -319,8 +304,10 @@ def propose_event(
 
             if already_applied:
                 if last_idx == 1:
-                    # --- Convergence of reindexing shifts using run history ---
+                    # --- New: check convergence of reindexing shifts using run history ---
+                    # Need at least 2 runs to have two applied refinements to compare
                     if len(trials_sorted) >= 2:
+                        # Extract the last two *applied* shifts (i.e. centers we actually used)
                         prev_shift = np.array([trials_sorted[-2][1], trials_sorted[-2][2]], float)
                         last_shift = np.array([trials_sorted[-1][1], trials_sorted[-1][2]], float)
                         shift_delta = np.linalg.norm(last_shift - prev_shift)
@@ -329,12 +316,14 @@ def propose_event(
                         conv_recur, _ = wrmsd_recurring_convergence(successes_w, N=N_conv, tol=recurring_tol)
 
                         # Also apply the global convergence checks here
+                        # Also apply the global convergence checks here
                         noimp = wrmsd_no_improvement(successes_w, N=noimprove_N, eps=noimprove_eps)
                         stable = wrmsd_stability(successes_w, N=stability_N, rel_std_tol=stability_std)
                         if noimp or stable:
                             return None, None, (
                                 f"done_dxdy_converged(global: noimp={noimp}, stable={stable})"
                             )
+
 
                         if shift_delta <= eps or conv_median or conv_recur:
                             return None, None, (
@@ -381,14 +370,13 @@ def propose_event(
                         return None, None, "done_after_dxdy_fail_step1"
                     x, y = res.proposal_xy_mm
                     return float(x), float(y), "step1_after_dxdy_fail"
-
-            # Default dxdy step with damping
+                
             return (last_dx - λ * float(ndx)), (last_dy - λ * float(ndy)), f"dxdy_damped_refine(lambda={λ:.2f})"
 
         elif step2algo == "none":
             return None, None, "done_step2_disabled"
 
-    # ------------------- Step-1 exploration (HillMap) -------------------
+    # --- Step-1 exploration (HillMap) ---
     first_center = (trials_sorted[0][1], trials_sorted[0][2])
     # Convert prior trials to the LOCAL frame (relative to first_center)
     s1_trials = [
@@ -423,6 +411,7 @@ def propose_event(
     else:
         x, y = res.proposal_xy_mm
         return float(x), float(y), res.reason
+
 
 # ------------------------ CLI runner ------------------------
 
@@ -459,18 +448,16 @@ def main(argv=None) -> int:
                     help="Relative tolerance for median wRMSD convergence check.")
     ap.add_argument("--damping-factor", type=float, default=0.8,
                     help="Damping factor λ for dxdy refined shifts; 1.0 = no damping.")
-    ap.add_argument("--done-on-streak-successes", type=int, default=2,
-                    help="Require at least this many indexed successes for an event before a long unindexed streak can mark it done.")
-    ap.add_argument("--done-on-streak-length", type=int, default=5,
-                    help="If we have >= --done-on-streak-successes successes and observe this many consecutive unindexed results, mark event done.")
+    ap.add_argument("--done-on-streak-successes", type=int, default=2, help="Require at least this many indexed successes for an event before a long unindexed streak can mark it done.")
+    ap.add_argument("--done-on-streak-length", type=int, default=5, help="If we have >= --done-on-streak-successes successes and observe this many consecutive unindexed results, mark event done.")
     ap.add_argument("--noimprove-N", type=int, default=2,
                     help="Window size (count of successful results) for no-improvement check.")
-    ap.add_argument("--noimprove-eps", type=float, default=0.02,
-                    help="Minimum relative improvement (e.g., 0.05 = 5%) in best wRMSD over the last --noimprove-N successes; otherwise mark done.")
+    ap.add_argument("--noimprove-eps", type=float, default=0.02, help="Minimum relative improvement (e.g., 0.05 = 5%) in best wRMSD over the last --noimprove-N successes; otherwise mark done.")
     ap.add_argument("--stability-N", type=int, default=3,
                     help="Number of most recent successful results used for wRMSD stability check.")
     ap.add_argument("--stability-std", type=float, default=0.05,
                     help="Relative std threshold for stability: std(wRMSD_recent)/mean(wRMSD_recent) ≤ threshold ⇒ done.")
+
 
     ap.add_argument(
         "--step2-algorithm",
@@ -496,44 +483,12 @@ def main(argv=None) -> int:
     new_lines: List[str] = []
     n_new, n_done = 0, 0
 
-    # --- NEW: cache per-HDF5 det_shift arrays so we don't reopen files per event ---
-    det_shift_cache: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
-
-    def get_seed_shift(h5_path: str, event_id: int) -> Tuple[float, float]:
-        """
-        Read (det_shift_x_mm, det_shift_y_mm) for a given event from a HDF5 file,
-        but cache the arrays per file so we only hit disk once per HDF5.
-        """
-        h5_path_abs = os.path.abspath(h5_path)
-        if h5_path_abs not in det_shift_cache:
-            try:
-                with h5py.File(h5_path_abs, "r") as f:
-                    dx_arr = np.array(f["/entry/data/det_shift_x_mm"], dtype=float)
-                    dy_arr = np.array(f["/entry/data/det_shift_y_mm"], dtype=float)
-                det_shift_cache[h5_path_abs] = (dx_arr, dy_arr)
-            except KeyError as e:
-                raise KeyError(f"Missing det shift datasets in {h5_path_abs}: {e}")
-            except Exception as e:
-                raise RuntimeError(f"Failed reading det shifts from {h5_path_abs}: {e}")
-        dx_arr, dy_arr = det_shift_cache[h5_path_abs]
-        return float(dx_arr[event_id]), float(dy_arr[event_id])
-
     for header, block in blocks:
         h5_path, event_id = _parse_event_header(header if header else "#/unknown event -1")
         # Skip non-event blocks (preamble or malformed)
         if event_id < 0:
             new_lines.extend(block)  # pass through unchanged
             continue
-
-        # --- NEW: cheap early-out for events already marked done ---
-        latest_status = _block_latest_status(block)
-        if latest_status is not None:
-            nx, ny = latest_status
-            if str(nx).lower() == "done" and str(ny).lower() == "done":
-                # This event is already finalized; keep block unchanged.
-                new_lines.extend(block)
-                n_done += 1
-                continue
 
         # Parse rows of the block into (rn, dx, dy, idx, wr)
         rows: List[Tuple[int, float, float, int, Optional[float]]] = []
@@ -562,12 +517,18 @@ def main(argv=None) -> int:
             rows.append((rn, dx, dy, idx, wr))
 
         trials_sorted = sorted(rows, key=lambda t: t[0])
-
         # --- Ensure the event has a first attempted center in the log ---
         # If the block has no rows yet for this event, synthesize the first trial
         # from the per-frame det shifts in the source HDF5 (never (0,0)).
         if not trials_sorted:
-            seed_dx, seed_dy = get_seed_shift(h5_path, int(event_id))
+            try:
+                with h5py.File(h5_path, "r") as f:
+                    seed_dx = float(f["/entry/data/det_shift_x_mm"][int(event_id)])
+                    seed_dy = float(f["/entry/data/det_shift_y_mm"][int(event_id)])
+            except KeyError as e:
+                raise KeyError(f"Missing det shift datasets in {h5_path}: {e}")
+            except Exception as e:
+                raise RuntimeError(f"Failed reading seed for {h5_path} event {event_id}: {e}")
 
             # Append one data line to this block so trials_sorted[0] exists.
             # Columns: run_n, dx, dy, idx, wrmsd, next_dx, next_dy
@@ -576,7 +537,8 @@ def main(argv=None) -> int:
             rows.append((latest_run, seed_dx, seed_dy, 0, None))
             trials_sorted = sorted(rows, key=lambda t: t[0])
 
-        # Stable per-event RNG
+
+        # Stable per-event RNG (unchanged)
         key_seed = int(
             hashlib.blake2s(f"{h5_path}::{event_id}::{int(args.seed)}".encode(), digest_size=8).hexdigest(),
             16,
@@ -630,7 +592,8 @@ def main(argv=None) -> int:
         new_lines.extend(updated)
 
     write_log(log_path, new_lines)
-    print(f"[propose] {n_new} new proposals, {n_done} marked done/skipped")
+    print(f"[propose] {n_new} new proposals, {n_done} marked done")
+    # print(f"[propose] Updated {log_path} for run_{latest_run:03d}")
     return 0
 
 

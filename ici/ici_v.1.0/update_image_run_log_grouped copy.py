@@ -33,9 +33,8 @@ IMAGES_DS = "/entry/data/images"
 CSV_HEADER = "run_n,det_shift_x_mm,det_shift_y_mm,indexed,wrmsd,next_dx_mm,next_dy_mm\n"
 SECTION_RE = re.compile(r"^#(?P<path>/.*)\s+event\s+(?P<ev>\d+)\s*$")
 
-
 def resolve_real_source(h5_path: str) -> str:
-    """Return the real HDF5 path if images dataset is an ExternalLink; else the input path."""
+    # \"\"\"Return the real HDF5 path if images dataset is an ExternalLink; else the input path.\"\"\"
     ap = os.path.abspath(h5_path)
     try:
         with h5py.File(ap, "r") as f:
@@ -46,7 +45,6 @@ def resolve_real_source(h5_path: str) -> str:
         pass
     return ap
 
-
 def _src_from_image_col(img: str) -> str:
     s = img.strip()
     if "//" in s:
@@ -54,11 +52,9 @@ def _src_from_image_col(img: str) -> str:
         return h5.strip()
     return s
 
-
 def _read_csv_rows(path: str) -> List[Dict[str, str]]:
     with open(path, "r", encoding="utf-8") as f:
         return list(csv.DictReader(f))
-
 
 def _find_latest_run_dir(runs_dir: str) -> Tuple[int, str]:
     last_n, last_dir = -1, ""
@@ -73,7 +69,6 @@ def _find_latest_run_dir(runs_dir: str) -> Tuple[int, str]:
                 last_dir = os.path.join(runs_dir, name)
     return last_n, last_dir
 
-
 def _parse_log_into_sections(lines: List[str]) -> Tuple[str, "OD[Tuple[str,int], List[str]]"]:
     """
     Parse existing log lines into:
@@ -82,6 +77,7 @@ def _parse_log_into_sections(lines: List[str]) -> Tuple[str, "OD[Tuple[str,int],
         (includes the section header line as the first element).
     Any non-section lines appearing before the first section (besides header) are preserved after header.
     """
+    
     sections: "OD[Tuple[str,int], List[str]]" = OD()
     i = 0
     top_header = CSV_HEADER
@@ -126,14 +122,12 @@ def _parse_log_into_sections(lines: List[str]) -> Tuple[str, "OD[Tuple[str,int],
 
     return top_header, sections
 
-
 def _ensure_section(sections: "OD[Tuple[str,int], List[str]]", key: Tuple[str,int]) -> None:
     if key not in sections:
         sections[key] = [f"#{key[0]} event {key[1]}\n"]
 
-
 def _existing_run_lines_in_section(section_lines: List[str]) -> set:
-    """Return set of run lines (string after header) present in this section, to avoid duplicates."""
+    # \"\"\"Return set of run lines (string after header) present in this section, to avoid duplicates.\"\"\"
     existing = set()
     for ln in section_lines:
         if ln.startswith("#"):
@@ -142,7 +136,6 @@ def _existing_run_lines_in_section(section_lines: List[str]) -> set:
         if s:  # non-empty CSV line
             existing.add(s)
     return existing
-
 
 def _section_latest_status(section_lines: List[str]) -> Optional[Tuple[str, str]]:
     """
@@ -164,7 +157,6 @@ def _section_latest_status(section_lines: List[str]) -> Optional[Tuple[str, str]
         if nx or ny:
             return nx, ny
     return None
-
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
@@ -212,34 +204,13 @@ def main(argv=None) -> int:
 
     appended_rows = 0
 
-    # --- NEW: caches to avoid repeated expensive work ---
-    resolve_cache: Dict[str, str] = {}
-    existing_cache: Dict[Tuple[str, int], set] = {}
-
-    def resolve_real_source_cached(h5_path: str) -> str:
-        """
-        Cached wrapper for resolve_real_source() so each HDF5 path
-        is only opened/resolved once per run.
-        """
-        ap = os.path.abspath(h5_path)
-        if ap in resolve_cache:
-            return resolve_cache[ap]
-        real = resolve_real_source(ap)
-        resolve_cache[ap] = real
-        return real
-
-    # ----------------------------------------------------------------------
-    # Main ingestion loop
-    # ----------------------------------------------------------------------
     for row in latest_rows:
         img = (row.get("image") or "").strip()
         evs = (row.get("event") or "").strip()
         if not evs.isdigit():
             continue
         ev = int(evs)
-
-        # Use cached resolver to avoid reopening the same HDF5 file repeatedly
-        real = resolve_real_source_cached(_src_from_image_col(img))
+        real = resolve_real_source(_src_from_image_col(img))
         key = (real, ev)
 
         # Prepare CSV row fields
@@ -266,13 +237,12 @@ def main(argv=None) -> int:
             pass
 
         csv_line = f"{last_n},{dx:.6f},{dy:.6f},{indexed},{wr_out},,\n"
-        line_stripped = csv_line.strip()
 
         # Create section if missing
         if key not in sections:
             _ensure_section(sections, key)
             new_section_order.append(key)
-
+            
         # If the latest status row in this section is 'done,done', skip appending
         latest_status = _section_latest_status(sections[key])
         if latest_status is not None:
@@ -282,16 +252,12 @@ def main(argv=None) -> int:
                 # (keeps the latest row as 'done,done' so downstream summary is correct)
                 continue
 
-        # Avoid duplicates within the section using a cached set
-        existing_set = existing_cache.get(key)
-        if existing_set is None:
-            existing_set = _existing_run_lines_in_section(sections[key])
-            existing_cache[key] = existing_set
-
-        if line_stripped not in existing_set:
+        # Avoid duplicates within the section
+        existing_set = _existing_run_lines_in_section(sections[key])
+        if csv_line.strip() not in existing_set:
             sections[key].append(csv_line)
-            existing_set.add(line_stripped)
             appended_rows += 1
+
 
     # Reassemble file with preserved order:
     # 1) header
@@ -316,17 +282,19 @@ def main(argv=None) -> int:
     # but we keep this logic in case someone modifies insertion behavior above.)
     for key in new_section_order:
         if key in sections:
+            # Ensure it's already in out_lines; if not, append
+            # (Check by identity of the section header)
             header = f"#{key[0]} event {key[1]}\n"
+            # Only append if the header isn't already present
             if header not in out_lines:
                 out_lines.extend(sections[key])
-
+ 
     # Write back
     with open(log_path, "w", encoding="utf-8") as f:
         f.writelines(out_lines)
 
     print(f"[log] Appended {appended_rows} new rows into grouped sections in {log_path}")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -329,7 +329,7 @@ def main(argv=None):
             w.writerow([r.image, r.event, f"{r.det_dx_mm:.6f}" if r.det_dx_mm is not None else "",
                         f"{r.det_dy_mm:.6f}" if r.det_dy_mm is not None else "",
                         r.indexed, f"{r.wrmsd:.6f}" if r.wrmsd is not None else "", r.n_matches, r.n_kept, r.reason])
-    print(f"Wrote: {csv_path}")
+    print(f"[evaluate] Wrote: {csv_path}")
 
     # Summary
     n_chunks = len(rows)

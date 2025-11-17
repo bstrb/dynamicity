@@ -7,7 +7,7 @@ import shlex
 import traceback
 import subprocess
 import re
-import time
+import time, datetime
 
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
@@ -34,6 +34,14 @@ from PyQt6.QtWidgets import (
 
 import ici_orchestrator as orch
 
+# def _print_with_timestamp(line: str):
+#     """
+#     Print a line with a wall-clock timestamp prefix.
+#     Assumes 'line' already ends with a newline.
+#     """
+#     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#     # line already has its own newline, so keep end=""
+#     print(f"[{ts}] {line}", end="", flush=True)
 
 class GuiStream:
     """
@@ -574,6 +582,7 @@ class OrchestratorMainWindow(QMainWindow):
                 try:
                     for line in proc.stdout:
                         print(line, end="", flush=True)
+                        
                         if window._stop_requested:
                             proc.terminate()
                             break
@@ -603,6 +612,7 @@ class OrchestratorMainWindow(QMainWindow):
 
                     # Normal line output
                     print(line, end="", flush=True)
+                    
 
                     if window._stop_requested:
                         proc.terminate()
@@ -649,8 +659,7 @@ class OrchestratorMainWindow(QMainWindow):
             return
 
         self.log_edit.clear()
-        self.append_text("[GUI] Starting orchestration with arguments:\n")
-        self.append_text(" ".join(["ici_orchestrator.py"] + argv) + "\n\n")
+        self.append_text(f"[GUI] Starting orchestration with output in: {argv[1]}\n")
 
         self._running = True
         self._stop_requested = False

@@ -185,6 +185,16 @@ def runs_dir(run_root: str) -> str:
     # run_root is already the timestamped runs folder
     return os.path.abspath(os.path.expanduser(run_root))
 
+# def _print_with_timestamp(line: str):
+#     """
+#     Print a line with a wall-clock timestamp prefix.
+#     Assumes 'line' already ends with a newline.
+#     """
+#     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#     # line already has its own newline, so keep end=""
+#     print(f"[{ts}] {line}", end="", flush=True)
+
+
 def list_run_numbers(run_root: str) -> List[int]:
     rd = runs_dir(run_root)
     if not os.path.isdir(rd):
@@ -207,6 +217,8 @@ def run_py(script: str, args: List[str], check: bool = True) -> int:
     import subprocess, sys
     from tqdm import tqdm
 
+    # cmd = ["python3", script, *args]
+    # print(f"[RUN] {' '.join(cmd)}", flush=True)
     is_run_sh = (script == "run_sh.py")
 
     if is_run_sh:
@@ -214,6 +226,8 @@ def run_py(script: str, args: List[str], check: bool = True) -> int:
         cmd = ["python3", "-u", script, *args]
     else:
         cmd = ["python3", script, *args]
+
+    # print(f"[RUN] {' '.join(cmd)}", flush=True)
 
     # Normal behavior for all scripts except run_sh.py
     is_run_sh = (script == "run_sh.py")
@@ -229,6 +243,8 @@ def run_py(script: str, args: List[str], check: bool = True) -> int:
         try:
             for line in proc.stdout:
                 print(line, end="", flush=True)
+
+                
         finally:
             proc.stdout.close()
         rc = proc.wait()

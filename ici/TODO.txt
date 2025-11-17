@@ -1,5 +1,8 @@
 TODO:
 stream with only done events
-handle eventual bottle necks memory and processing for larger data sets
+handle eventual bottle necks memory and processing for larger data sets:
+propose next shift
+update log
+log summary
 mark why done
 remove one of overlay to original(json or tsv)
