@@ -22,28 +22,30 @@ import argparse, os, re, subprocess, sys
 import time, datetime, threading
 from typing import List, Tuple
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# DEFAULT_ROOT = ""
-# DEFAULT_GEOM = ""
-# DEFAULT_CELL = ""
-# DEFAULT_H5 = []
+DEFAULT_ROOT = ""
+DEFAULT_GEOM = ""
+DEFAULT_CELL = ""
+DEFAULT_H5   = ""
+DEFAULT_NUM_CPU = None
+
 # Default paths
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
-                DEFAULT_ROOT + "/sim2.h5",
-                DEFAULT_ROOT + "/sim3.h5"]
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+# DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
+#                 DEFAULT_ROOT + "/sim2.h5",
+#                 DEFAULT_ROOT + "/sim3.h5"]
 
-# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
-#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
-#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
 
-DEFAULT_MAX_ITERS = 20
-DEFAULT_NUM_CPU = os.cpu_count()
+DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
+DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
+
+DEFAULT_MAX_ITERS = 20           # maximum number of iterations
+# DEFAULT_NUM_CPU   = 24           # default number of parallel jobs set to os.cpu_count() for max
 
 # Default propose next shift parameters
 radius_mm        = 0.05          # search radius 
@@ -63,14 +65,14 @@ done_on_streak_length   = 5     # length of streak to consider done when at leas
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    # "--peaks=cxi",
-    "--peaks=peakfinder9",
-    "--min-snr-biggest-pix=1",
-    "--min-snr-peak-pix=6",
-    "--min-snr=1",
-    "--min-sig=11",
-    "--min-peak-over-neighbour=-inf",
-    "--local-bg-radius=3",
+    "--peaks=cxi",
+    # "--peaks=peakfinder9",
+    # "--min-snr-biggest-pix=1",
+    # "--min-snr-peak-pix=6",
+    # "--min-snr=1",
+    # "--min-sig=11",
+    # "--min-peak-over-neighbour=-inf",
+    # "--local-bg-radius=3",
     # Other
     "-j", "1",
     "--min-peaks=15",
@@ -103,7 +105,6 @@ class _Tee:
         with self._lock:
             self.real.flush()
             self.fh.flush()
-
 class TimestampingStream:
     """
     Wraps a stream and prefixes each full line with a wall-clock timestamp.
@@ -208,12 +209,11 @@ def run_py(script: str, args: List[str], check: bool = True) -> int:
 
     is_run_sh = (script == "run_sh.py")
 
-    script_path = os.path.join(SCRIPT_DIR, script)
     if is_run_sh:
         # force unbuffered stdout from the child for progress markers
-        cmd = ["python3", "-u", script_path, *args]
+        cmd = ["python3", "-u", script, *args]
     else:
-        cmd = ["python3", script_path, *args]
+        cmd = ["python3", script, *args]
 
     # Normal behavior for all scripts except run_sh.py
     if not is_run_sh:
@@ -337,43 +337,7 @@ def all_next_done_for_latest(log_path: str, latest: int) -> bool:
     except FileNotFoundError:
         return False
 
-# def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list, jobs=os.cpu_count()):
-def do_init_sequence(
-    run_root: str,
-    geom: str,
-    cell: str,
-    h5_sources: list,
-    flags: List[str],
-    params: dict | None = None,
-    jobs=os.cpu_count()
-):
-    params = params or {}
-    required_keys = [
-        "radius_mm", "min_spacing_mm", "N_conv",
-        "recurring_tol", "median_rel_tol",
-        "noimprove_N", "noimprove_eps",
-        "stability_N", "stability_std",
-        "done_on_streak_successes", "done_on_streak_length",
-        "damping_factor",
-    ]
-
-    for k in required_keys:
-        if k not in params:
-            raise SystemExit(f"[ERR] Missing required parameter '{k}' in params dict.")
-
-    radius_mm        = params["radius_mm"]          # search radius
-    min_spacing_mm   = params["min_spacing_mm"]     # minimum spacing between shifts
-    N_conv           = params["N_conv"]             # minimum number o events to consider convergence
-    recurring_tol    = params["recurring_tol"]      # tolerance for recurring shifts (0.1 = 10%)
-    median_rel_tol   = params["median_rel_tol"]     # median relative tolerance for convergence (0.1 = 10%)
-    noimprove_N      = params["noimprove_N"]        # number of iterations with no improvement to consider convergence
-    noimprove_eps    = params["noimprove_eps"]      # minimum improvement for noimprove trigger (0.02 = 2%)
-    stability_N      = params["stability_N"]        # number of iterations to consider for stability
-    stability_std    = params["stability_std"]      # standard deviation threshold for stability (0.05 = 5%)
-    done_on_streak_successes = params["done_on_streak_successes"]  # number of successful streaks to consider done
-    done_on_streak_length = params["done_on_streak_length"]  # length of streak to consider done
-    λ = params["damping_factor"]                    # damping factor (λ) for refined det shift updates     
-
+def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list, jobs=os.cpu_count()):
     print("[phase] Initializing first run (run_000)...")
     sources = []
     for s in h5_sources:
@@ -384,7 +348,7 @@ def do_init_sequence(
     print(f"[init] Geometry file: {geom}")
     print(f"[init] Cell file: {cell}")
     print(f"[init] CrystFEL indexamajig flags:")
-    print(f"{' '.join(flags)}")
+    print(f"{' '.join(DEFAULT_FLAGS)}")
     
     # Print convergence parameters once at initialization
     print("[init] Convergence parameters:")
@@ -401,7 +365,7 @@ def do_init_sequence(
         )
     run_py("create_run_sh.py", ["--run-root", run_root, "--geom", geom, "--cell", cell, "--run", "000",
         "--",  # everything after this is passed directly into indexamajig
-        *flags,], check=False)
+        *DEFAULT_FLAGS,], check=False)
     run_py("run_sh.py", ["--run-root", run_root, "--run", "000", "--jobs", str(jobs)], check=False)
     run_py("evaluate_stream.py", ["--run-root", run_root, "--run", "000"], check=False)
     run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
@@ -409,43 +373,7 @@ def do_init_sequence(
     run_py("build_early_break_from_log.py", ["--run-root", run_root])
     print("[done] Initialization cycle complete. Proceeding to loop...")
 
-# def iterate_until_done(run_root, max_iters=10, jobs=os.cpu_count()):
-def iterate_until_done(
-    run_root: str,
-    geom: str,
-    cell: str,
-    max_iters: int,
-    flags: List[str],
-    params: dict | None = None,
-    jobs=os.cpu_count()
-):
-    params = params or {}
-    required_keys = [
-        "radius_mm", "min_spacing_mm", "N_conv",
-        "recurring_tol", "median_rel_tol",
-        "noimprove_N", "noimprove_eps",
-        "stability_N", "stability_std",
-        "done_on_streak_successes", "done_on_streak_length",
-        "damping_factor",
-    ]
-
-    for k in required_keys:
-        if k not in params:
-            raise SystemExit(f"[ERR] Missing required parameter '{k}' in params dict.")
-
-    radius_mm        = params["radius_mm"]          # search radius
-    min_spacing_mm   = params["min_spacing_mm"]     # minimum spacing between shifts
-    N_conv           = params["N_conv"]             # minimum number o events to consider convergence
-    recurring_tol    = params["recurring_tol"]      # tolerance for recurring shifts (0.1 = 10%)
-    median_rel_tol   = params["median_rel_tol"]     # median relative tolerance for convergence (0.1 = 10%)
-    noimprove_N      = params["noimprove_N"]        # number of iterations with no improvement to consider convergence
-    noimprove_eps    = params["noimprove_eps"]      # minimum improvement for noimprove trigger (0.02 = 2%)
-    stability_N      = params["stability_N"]        # number of iterations to consider for stability
-    stability_std    = params["stability_std"]      # standard deviation threshold for stability (0.05 = 5%)
-    done_on_streak_successes = params["done_on_streak_successes"]  # number of successful streaks to consider done
-    done_on_streak_length = params["done_on_streak_length"]  # length of streak to consider done
-    λ = params["damping_factor"]                    # damping factor (λ) for refined det shift updates     
-
+def iterate_until_done(run_root, max_iters=10, jobs=os.cpu_count()):
     rd = runs_dir(run_root)
     it = 0
     while it < max_iters:
@@ -510,16 +438,10 @@ def iterate_until_done(
         run_str = f"{latest_num:03d}"
 
         # run_py("copy_next_run_sh.py", ["--run-root", run_root, "--run", run_str], check=False)
-        run_py("create_run_sh.py", ["--run-root", run_root, "--geom", geom, "--cell", cell, "--run", run_str,
+        run_py("create_run_sh.py", ["--run-root", run_root, "--geom", DEFAULT_GEOM, "--cell", DEFAULT_CELL, "--run", run_str,
         "--",  # everything after this is passed directly into indexamajig
-        *flags], check=False)
+        *DEFAULT_FLAGS], check=False)
         run_py("run_sh.py", ["--run-root", run_root, "--run", run_str, "--jobs", str(jobs)], check=False)
-        # NEW: if no stream file exists, stop cleanly instead of crashing downstream
-        stream_candidate = os.path.join(latest_dir, f"stream_{run_str}.stream")
-        if not os.path.exists(stream_candidate):
-            print(f"[warn] No per-event streams found for run_{run_str}: {stream_candidate} not found.")
-            print("[stop] No successful indexing in latest iteration; stopping orchestration.")
-            break
         _ = run_py("fix_stream_paths.py", ["--run-dir", latest_dir, "--run", run_str, "--inplace"], check=False)
         run_py("evaluate_stream.py", ["--run-root", run_root, "--run", run_str], check=False)
         run_py("update_image_run_log_grouped.py", ["--run-root", run_root])
@@ -532,17 +454,17 @@ def iterate_until_done(
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Orchestrate SerialED iterative runs using provided helper scripts.")
-    ap.add_argument("--run-root", default=None, help="Experiment root that contains 'runs/'.")
-    ap.add_argument("--geom", default=None, help="Geometry file for initialization.")
-    ap.add_argument("--cell", default=None, help="Cell file for initialization.")
-    ap.add_argument("--h5", nargs="+", default=None,
+    ap.add_argument("--run-root", default=DEFAULT_ROOT, help="Experiment root that contains 'runs/'.")
+    ap.add_argument("--geom", default=DEFAULT_GEOM, help="Geometry file for initialization.")
+    ap.add_argument("--cell", default=DEFAULT_CELL, help="Cell file for initialization.")
+    ap.add_argument("--h5", nargs="+", default=DEFAULT_H5,
                     help="One or more HDF5 sources or globs (e.g., sim_001.h5 sim_002.h5 or sim_*.h5)")
     ap.add_argument("--flags", nargs="*", default=DEFAULT_FLAGS,
                     help="Additional indexamajig / xgandalf / integration flags for initialization.")
-    ap.add_argument("--max-iters", type=int, default=20,
+    ap.add_argument("--max-iters", type=int, default=DEFAULT_MAX_ITERS,
                     help="Maximum number of iterations before stopping.")
-    ap.add_argument("--jobs", type=int, default=os.cpu_count(),
-                    help="Number of parallel jobs during indexing and refinement.")
+    ap.add_argument("--jobs", type=str, default=DEFAULT_NUM_CPU,
+                    help="Number of parallel jobs for indexamajig/xgandalf (integer or 'auto').")
 
     ap.add_argument("--radius-mm", type=float, default=radius_mm)
     ap.add_argument("--min-spacing-mm", type=float, default=min_spacing_mm)
@@ -558,22 +480,21 @@ def main(argv=None):
     ap.add_argument("--damping-factor", type=float, default=λ)
 
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
-    params = {
-        "radius_mm": args.radius_mm,
-        "min_spacing_mm": args.min_spacing_mm,
-        "N_conv": args.N_conv,
-        "recurring_tol": args.recurring_tol,
-        "median_rel_tol": args.median_rel_tol,
-        "noimprove_N": args.noimprove_N,
-        "noimprove_eps": args.noimprove_eps,
-        "stability_N": args.stability_N,
-        "stability_std": args.stability_std,
-        "done_on_streak_successes": args.done_on_streak_successes,
-        "done_on_streak_length": args.done_on_streak_length,
-        "damping_factor": args.damping_factor,
-    }
 
     # ---------- basic input validation (fail fast, nice messages) ----------
+
+    # jobs: allow "auto" / empty / None → use all cores
+    if args.jobs in (None, "", "auto", "AUTO", "Auto"):
+        jobs = os.cpu_count() or 1
+    else:
+        try:
+            jobs = int(args.jobs)
+        except ValueError:
+            print(f"[ERR] --jobs must be an integer or 'auto' (got {args.jobs!r}).", file=sys.stderr)
+            return 2
+        if jobs <= 0:
+            print("[ERR] --jobs must be a positive integer.", file=sys.stderr)
+            return 2
 
     # max iterations
     if args.max_iters <= 0:
@@ -647,11 +568,12 @@ def main(argv=None):
     # ---------- run orchestration with logging ----------
 
     with OrchestratorRunLogger(runs_dir(sess)):
+        # If no runs, initialize run_000 first
         if not list_run_numbers(sess):
-            do_init_sequence(sess, geom, cell, h5_sources, flags=args.flags, params=params, jobs=args.jobs)
+            do_init_sequence(sess, geom, cell, h5_sources, jobs=jobs)
 
-        iterate_until_done(sess, geom, cell, max_iters=args.max_iters, flags=args.flags, params=params, jobs=args.jobs)
-
+        # Iterate until all next_* == done
+        iterate_until_done(sess, max_iters=args.max_iters, jobs=jobs)
 
     return 0
 

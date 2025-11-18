@@ -5,12 +5,9 @@ propose_next_shifts.py — Step-1 (HillMap) exploration; Step-2 can be:
   - dxdy: apply refined det shifts from per_frame_dx_dy.csv of the latest successful run (one-shot reindex at refined center, then done)
   - meanshift: local mean-shift optimization (optional)
   - bayes: Bayesian optimization (optional)
-
-This version uses a JSON sidecar (image_run_state.json) to cache per-event
-trial history, so each invocation only parses *new* log rows per event.
 """
 from __future__ import annotations
-import argparse, os, sys, math, hashlib, json
+import argparse, os, sys, math, hashlib
 from typing import List, Tuple, Optional, Dict
 import numpy as np
 import h5py
@@ -58,59 +55,36 @@ def write_log(path: str, lines: List[str]) -> None:
     os.replace(tmp, path)
 
 def parse_blocks(lines: List[str]) -> Tuple[List[Tuple[str, List[str]]], int]:
-    """
-    Group into (header, block_lines) and detect latest run_n by scanning from the end.
-    Avoids re-splitting every line purely for latest_run.
-    """
     blocks = _group_blocks(lines)
-
     latest_run = -1
-    for ln in reversed(lines):
-        s = ln.strip()
-        if (not s) or s.startswith("#") or s.startswith("run_n"):
-            continue
-        # only need the first field
-        try:
-            first_field = s.split(",", 1)[0].strip()
-            rn = int(first_field)
-            latest_run = rn
-            break
-        except Exception:
-            continue
-
+    for _, block in blocks:
+        for ln in block:
+            if (not ln) or ln.startswith("#") or ln.strip().startswith("run_n"):
+                continue
+            try:
+                rn = int(ln.split(",")[0].strip())
+                latest_run = max(latest_run, rn)
+            except Exception:
+                pass
     return blocks, latest_run
 
-def update_block_latest_run(
-    block_lines: List[str],
-    latest_run: int,
-    new_dx: Optional[float],
-    new_dy: Optional[float],
-) -> List[str]:
-    """
-    Update the row with run_n == latest_run in this block:
-      - if new_dx/new_dy is None => mark as done,done
-      - else write numeric next_dx,next_dy
-    """
+def update_block_latest_run(block_lines: List[str], latest_run: int, new_dx: Optional[float], new_dy: Optional[float]) -> List[str]:
     out = []
     for ln in block_lines:
         if (not ln) or ln.startswith("#") or ln.strip().startswith("run_n"):
-            out.append(ln)
-            continue
+            out.append(ln); continue
         parts = [p.strip() for p in ln.rstrip("\n").split(",")]
         if len(parts) < 7:
             parts += [""] * (7 - len(parts))
         try:
             rn = int(parts[0])
         except Exception:
-            out.append(ln)
-            continue
+            out.append(ln); continue
         if rn == latest_run:
             if new_dx is None and new_dy is None:
-                parts[5] = "done"
-                parts[6] = "done"
+                parts[5] = "done"; parts[6] = "done"
             else:
-                parts[5] = _fmt6(float(new_dx))
-                parts[6] = _fmt6(float(new_dy))
+                parts[5] = _fmt6(float(new_dx)); parts[6] = _fmt6(float(new_dy))
             ln = ",".join(parts) + "\n"
         out.append(ln)
     return out
@@ -132,6 +106,20 @@ def _recent_unindexed_streak(trials: List[Tuple[int,float,float,int,Optional[flo
             break
     return s
 
+def _block_latest_status(block_lines: List[str]) -> Optional[Tuple[str, str]]:
+    """
+    Look at the last data line in a block and return (next_dx, next_dy).
+    Used for cheap early-out: if it's ('done','done'), we skip this event entirely.
+    """
+    for ln in reversed(block_lines):
+        if (not ln) or ln.startswith("#") or ln.strip().startswith("run_n"):
+            continue
+        parts = [p.strip() for p in ln.rstrip("\n").split(",")]
+        if len(parts) < 7:
+            parts += [""] * (7 - len(parts))
+        return parts[5], parts[6]
+    return None
+
 # ------------------------- Convergence checks ------------------------
 
 def wrmsd_recurring_convergence(successes_w, N=5, tol=0.1):
@@ -139,7 +127,7 @@ def wrmsd_recurring_convergence(successes_w, N=5, tol=0.1):
     Detects convergence when the best wRMSD is repeatedly reached.
     tol: allowed relative difference (e.g., 0.1 = 10%)
     """
-    wr = [w for _, _, w in successes_w if w is not None]
+    wr = [w for _,_,w in successes_w if w is not None]
     if len(wr) < N:
         return False, {}
 
@@ -163,11 +151,11 @@ def wrmsd_median_convergence(successes_w, N=5, rel_tol=0.05):
     Detects convergence when median wRMSD stops changing significantly.
     Compares medians of two consecutive N-length windows; converged if relative change < rel_tol.
     """
-    wr = [w for _, _, w in successes_w if w is not None]
-    if len(wr) < N * 2:
+    wr = [w for _,_,w in successes_w if w is not None]
+    if len(wr) < N*2:
         return False
     med1 = np.median(wr[-N:])
-    med2 = np.median(wr[-2 * N:-N])
+    med2 = np.median(wr[-2*N:-N])
     rel = abs(med1 - med2) / max(med2, 1e-9)
     return rel < rel_tol
 
@@ -436,38 +424,6 @@ def propose_event(
         x, y = res.proposal_xy_mm
         return float(x), float(y), res.reason
 
-# ------------------------ Sidecar state helpers ------------------------
-
-def _default_event_state() -> Dict:
-    return {
-        "trials": [],            # list of [run, dx, dy, idx, wr]
-        "latest_status": ["", ""],
-        "last_run": -1,
-    }
-
-def load_state(state_path: str) -> Dict:
-    try:
-        with open(state_path, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        if not isinstance(state, dict):
-            raise ValueError("state not a dict")
-        if "events" not in state:
-            state["events"] = {}
-        if "last_global_run" not in state:
-            state["last_global_run"] = -1
-        return state
-    except FileNotFoundError:
-        return {"last_global_run": -1, "events": {}}
-    except Exception:
-        # If corrupted, start fresh
-        return {"last_global_run": -1, "events": {}}
-
-def save_state(state_path: str, state: Dict) -> None:
-    tmp = state_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-    os.replace(tmp, state_path)
-
 # ------------------------ CLI runner ------------------------
 
 def main(argv=None) -> int:
@@ -537,19 +493,10 @@ def main(argv=None) -> int:
         print("ERROR: Could not determine latest run_n in CSV.", file=sys.stderr)
         return 2
 
-    state_path = os.path.join(args.run_root, "image_run_state.json")
-    state = load_state(state_path)
-
-    # If the log got truncated or reset, drop the sidecar and rebuild.
-    if state.get("last_global_run", -1) > latest_run:
-        state = {"last_global_run": -1, "events": {}}
-
-    events_state: Dict[str, Dict] = state.setdefault("events", {})
-
-    n_new, n_done = 0, 0
     new_lines: List[str] = []
+    n_new, n_done = 0, 0
 
-    # --- Cache per-HDF5 det_shift arrays so we don't reopen files per event ---
+    # --- NEW: cache per-HDF5 det_shift arrays so we don't reopen files per event ---
     det_shift_cache: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
 
     def get_seed_shift(h5_path: str, event_id: int) -> Tuple[float, float]:
@@ -573,27 +520,23 @@ def main(argv=None) -> int:
 
     for header, block in blocks:
         h5_path, event_id = _parse_event_header(header if header else "#/unknown event -1")
-
-        # Non-event or malformed blocks: pass through unchanged
+        # Skip non-event blocks (preamble or malformed)
         if event_id < 0:
-            new_lines.extend(block)
+            new_lines.extend(block)  # pass through unchanged
             continue
 
-        key = f"{os.path.abspath(h5_path)}::{int(event_id)}"
-        ev_state = events_state.get(key)
-        if ev_state is None:
-            ev_state = _default_event_state()
-            events_state[key] = ev_state
+        # --- NEW: cheap early-out for events already marked done ---
+        latest_status = _block_latest_status(block)
+        if latest_status is not None:
+            nx, ny = latest_status
+            if str(nx).lower() == "done" and str(ny).lower() == "done":
+                # This event is already finalized; keep block unchanged.
+                new_lines.extend(block)
+                n_done += 1
+                continue
 
-        # Ensure expected keys exist
-        ev_state.setdefault("trials", [])
-        ev_state.setdefault("latest_status", ["", ""])
-        ev_state.setdefault("last_run", -1)
-
-        last_run_ev: int = int(ev_state.get("last_run", -1))
-        latest_status = ev_state.get("latest_status", ["", ""])
-
-        # --- Parse only *new* rows for this event (rn > last_run_ev) ---
+        # Parse rows of the block into (rn, dx, dy, idx, wr)
+        rows: List[Tuple[int, float, float, int, Optional[float]]] = []
         for ln in block:
             s = ln.strip()
             if (not s) or s.startswith("#") or s.startswith("run_n"):
@@ -605,13 +548,8 @@ def main(argv=None) -> int:
                 rn = int(parts[0])
             except Exception:
                 continue
-            if rn <= last_run_ev:
-                # already in state; skip
-                continue
-
             try:
-                dx = float(parts[1])
-                dy = float(parts[2])
+                dx = float(parts[1]); dy = float(parts[2])
             except Exception:
                 dx, dy = 0.0, 0.0
             idx = 1 if parts[3] == "1" else 0
@@ -621,39 +559,22 @@ def main(argv=None) -> int:
                 wr = float(wrs) if wrs not in ("", "nan", "None", "none") else None
             except Exception:
                 wr = None
+            rows.append((rn, dx, dy, idx, wr))
 
-            ev_state["trials"].append([rn, dx, dy, idx, wr])
-            ev_state["last_run"] = rn
-            ev_state["latest_status"] = [parts[5], parts[6]]
-            last_run_ev = rn
-            latest_status = ev_state["latest_status"]
+        trials_sorted = sorted(rows, key=lambda t: t[0])
 
-        # If we have no trials at all yet, synthesize from HDF5
-        if not ev_state["trials"]:
+        # --- Ensure the event has a first attempted center in the log ---
+        # If the block has no rows yet for this event, synthesize the first trial
+        # from the per-frame det shifts in the source HDF5 (never (0,0)).
+        if not trials_sorted:
             seed_dx, seed_dy = get_seed_shift(h5_path, int(event_id))
+
+            # Append one data line to this block so trials_sorted[0] exists.
+            # Columns: run_n, dx, dy, idx, wrmsd, next_dx, next_dy
             first_line = f"{latest_run},{seed_dx:.6f},{seed_dy:.6f},0,,,\n"
             block.append(first_line)
-            ev_state["trials"].append([latest_run, seed_dx, seed_dy, 0, None])
-            ev_state["last_run"] = latest_run
-            ev_state["latest_status"] = ["", ""]
-            last_run_ev = latest_run
-            latest_status = ev_state["latest_status"]
-
-        # If the event is already marked done in the *latest* line, skip proposing
-        nx_raw, ny_raw = latest_status
-        if str(nx_raw).lower() == "done" and str(ny_raw).lower() == "done":
-            new_lines.extend(block)
-            n_done += 1
-            continue
-
-        # Build trials_sorted for logic (unchanged logic)
-        trials_sorted = sorted(
-            [
-                (int(rn), float(dx), float(dy), int(idx), (float(wr) if wr is not None else None))
-                for (rn, dx, dy, idx, wr) in ev_state["trials"]
-            ],
-            key=lambda t: t[0],
-        )
+            rows.append((latest_run, seed_dx, seed_dy, 0, None))
+            trials_sorted = sorted(rows, key=lambda t: t[0])
 
         # Stable per-event RNG
         key_seed = int(
@@ -701,26 +622,14 @@ def main(argv=None) -> int:
             event_abs_path=event_dir_for_dxdy,
         )
 
-        updated = update_block_latest_run(
-            block_lines=block,
-            latest_run=latest_run,
-            new_dx=ndx,
-            new_dy=ndy,
-        )
-
+        updated = update_block_latest_run(block_lines=block, latest_run=latest_run, new_dx=ndx, new_dy=ndy)
         if ndx is None and ndy is None:
             n_done += 1
-            ev_state["latest_status"] = ["done", "done"]
         else:
             n_new += 1
-            ev_state["latest_status"] = [_fmt6(float(ndx)), _fmt6(float(ndy))]
-
         new_lines.extend(updated)
 
     write_log(log_path, new_lines)
-    state["last_global_run"] = latest_run
-    save_state(state_path, state)
-
     print(f"[propose] {n_new} new proposals, {n_done} marked done/skipped")
     return 0
 
