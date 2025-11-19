@@ -30,20 +30,20 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # DEFAULT_H5 = []
 # Default paths
 
-DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5"]
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+# DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5"]
 # DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
 #                 DEFAULT_ROOT + "/sim2.h5",
 #                 DEFAULT_ROOT + "/sim3.h5"]
 
-# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
-#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
-#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
+DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
+DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
+                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
 
 # DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038"
 # DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
@@ -71,14 +71,14 @@ done_on_streak_length   = 5     # length of streak to consider done when at leas
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    # "--peaks=cxi",
-    "--peaks=peakfinder9",
-    "--min-snr-biggest-pix=1",
-    "--min-snr-peak-pix=6",
-    "--min-snr=1",
-    "--min-sig=11",
-    "--min-peak-over-neighbour=-inf",
-    "--local-bg-radius=3",
+    "--peaks=cxi",
+    # "--peaks=peakfinder9",
+    # "--min-snr-biggest-pix=1",
+    # "--min-snr-peak-pix=6",
+    # "--min-snr=1",
+    # "--min-sig=11",
+    # "--min-peak-over-neighbour=-inf",
+    # "--local-bg-radius=3",
     # Other
     "-j", "1",
     "--min-peaks=15",
