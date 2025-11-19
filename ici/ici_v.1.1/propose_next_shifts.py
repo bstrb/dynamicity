@@ -79,41 +79,56 @@ def parse_blocks(lines: List[str]) -> Tuple[List[Tuple[str, List[str]]], int]:
             continue
 
     return blocks, latest_run
+def update_block_latest_run(block_lines: List[str],
+                            new_dx: Optional[float],
+                            new_dy: Optional[float]) -> List[str]:
+    """
+    Update the *last data row* in this block with the new proposal.
 
-def update_block_latest_run(
-    block_lines: List[str],
-    latest_run: int,
-    new_dx: Optional[float],
-    new_dy: Optional[float],
-) -> List[str]:
+    - If (new_dx, new_dy) is None → mark that row as done ('done','done').
+    - Else → write numeric next_dx/next_dy for that row.
     """
-    Update the row with run_n == latest_run in this block:
-      - if new_dx/new_dy is None => mark as done,done
-      - else write numeric next_dx,next_dy
-    """
-    out = []
-    for ln in block_lines:
+    out: List[str] = []
+    data_indices = []
+    parsed_parts = []
+
+    for i, ln in enumerate(block_lines):
         if (not ln) or ln.startswith("#") or ln.strip().startswith("run_n"):
-            out.append(ln)
+            parsed_parts.append(None)
             continue
         parts = [p.strip() for p in ln.rstrip("\n").split(",")]
         if len(parts) < 7:
             parts += [""] * (7 - len(parts))
         try:
-            rn = int(parts[0])
+            int(parts[0])  # run number
         except Exception:
+            parsed_parts.append(None)
+            continue
+        parsed_parts.append(parts)
+        data_indices.append(i)
+
+    if not data_indices:
+        return block_lines  # no rows to update
+
+    last_idx = data_indices[-1]
+
+    for i, ln in enumerate(block_lines):
+        parts = parsed_parts[i]
+        if i != last_idx or parts is None:
             out.append(ln)
             continue
-        if rn == latest_run:
-            if new_dx is None and new_dy is None:
-                parts[5] = "done"
-                parts[6] = "done"
-            else:
-                parts[5] = _fmt6(float(new_dx))
-                parts[6] = _fmt6(float(new_dy))
-            ln = ",".join(parts) + "\n"
-        out.append(ln)
+
+        if new_dx is None and new_dy is None:
+            parts[5] = "done"
+            parts[6] = "done"
+        else:
+            parts[5] = _fmt6(float(new_dx))
+            parts[6] = _fmt6(float(new_dy))
+
+        out.append(",".join(parts) + "\n")
+
     return out
+
 
 # ------------------------ Small utils ------------------------
 
@@ -701,12 +716,18 @@ def main(argv=None) -> int:
             event_abs_path=event_dir_for_dxdy,
         )
 
+        # updated = update_block_latest_run(
+        #     block_lines=block,
+        #     latest_run=latest_run,
+        #     new_dx=ndx,
+        #     new_dy=ndy,
+        # )
         updated = update_block_latest_run(
             block_lines=block,
-            latest_run=latest_run,
             new_dx=ndx,
             new_dy=ndy,
         )
+
 
         if ndx is None and ndy is None:
             n_done += 1
