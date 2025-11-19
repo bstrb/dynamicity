@@ -1,129 +1,86 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-build_early_break_from_log.py  —  MP (per-run workers, no per-chunk temp explosion)
+build_early_break_from_log.py
 
-Policy (incremental, improvement-only):
-  - For each (image,event) group, consider the latest row in image_run_log.csv.
-  - If latest finite wRMSD < best prior finite wRMSD: REPLACE that group's chunk.
-  - If no prior finite wRMSD and latest is finite: APPEND that group's chunk.
-  - Otherwise: NO CHANGE for that group.
-If nothing changes, the output file is left untouched.
+New implementation using the sidecar image_run_state.json created
+by propose_next_shifts.py.
 
-Multiprocessing (safe & efficient):
-  - Group work by RUN number.
-  - Each worker opens **one** stream file (stream_RRR.stream), builds an index,
-    extracts **all** requested chunks for that run, and returns a mapping
-    {key: chunk_text}.
-  - Avoids thousands of temp files and repeated re-reading of the same stream.
+Builds two streams:
 
-CLI:
-  --run-root   path to 'runs/' directory (containing image_run_log.csv and run_*/)
-  --log-name   name of csv (default: image_run_log.csv)
-  --out-name   output stream name (default: early_break.stream)
-  --workers    number of worker processes (default: os.cpu_count())
-  --spill-to-disk  (optional) if set, workers write ONE temp file per run and return its path,
-                   further reducing RAM use while keeping temp files bounded by #runs.
+  1) early_break.stream
+     - For every (image,event) with at least one finite wRMSD, pick the run
+       where that event reached its BEST (minimum) wRMSD.
+     - Extract the corresponding chunk from stream_RRR.stream and write it.
+     - This is what the orchestrator later renames to done.stream.
 
-Example:
-  python build_early_break_from_log.py --run-root /data/exp/runs --workers 8
+  2) only_done_events.stream
+     - Same best-wRMSD rule, but only for events whose latest_status
+       == ('done','done') in the sidecar.
+
+Notes:
+  - image_run_log.csv is no longer parsed; state comes from image_run_state.json.
+  - If the sidecar is missing or empty, nothing is built and any existing
+    stream files are left untouched.
 """
 
 from __future__ import annotations
 
 import argparse
-import math
+import json
 import multiprocessing
 import os
-import re
-import shutil
 import sys
-import tempfile
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 from typing import Dict, Tuple, List, Optional
 
-HeaderKey = Tuple[str, int]  # (abs_image_path, event)
-EPS = 1e-12
+HeaderKey = Tuple[str, int]  # (abs_image_path, event_id)
 
-DEFAULT_LOG_NAME = "image_run_log.csv"
-DEFAULT_OUT_NAME = "early_break.stream"
+DEFAULT_LOG_NAME = "image_run_log.csv"     # kept for CLI compatibility (unused)
+DEFAULT_OUT_NAME = "early_break.stream"    # name used by orchestrator
+STATE_NAME = "image_run_state.json"
+ONLY_DONE_NAME = "only_done_events.stream"
 
 # ----------------------------- Helpers -----------------------------
 
 def _abs(s: str) -> str:
     return os.path.abspath(os.path.expanduser(s.strip()))
 
-def _flt(s: str) -> Optional[float]:
-    try:
-        v = float(s)
-        return v if math.isfinite(v) else None
-    except Exception:
-        return None
-
 def run_stream_path(run_root: str, run_n: int) -> str:
     return os.path.join(run_root, f"run_{run_n:03d}", f"stream_{run_n:03d}.stream")
 
-# ------------------------- Log Parsing ----------------------------
-
-def parse_image_run_log(log_path: str) -> Dict[HeaderKey, List[dict]]:
-    groups: Dict[HeaderKey, List[dict]] = {}
-    cur: Optional[HeaderKey] = None
-
-    with open(log_path, "r", encoding="utf-8") as f:
-        for raw in f:
-            ln = raw.strip()
-            if not ln:
-                continue
-
-            if ln.startswith("#/"):
-                m = re.match(r"#(?P<path>/.+?)\s+event\s+(?P<ev>\d+)\s*$", ln)
-                if m:
-                    cur = (_abs(m.group("path")), int(m.group("ev")))
-                    groups.setdefault(cur, [])
-                else:
-                    cur = None
-                continue
-
-            if cur is None or ln.startswith("run_n,"):
-                continue
-
-            parts = [p.strip() for p in ln.split(",")]
-            if len(parts) < 7:
-                continue
-
-            wr = _flt(parts[4])
-            try:
-                rn = int(parts[0])
-            except Exception:
-                rn = int(re.sub(r"\D+", "", parts[0]) or 0)
-
-            groups[cur].append({"run_n": rn, "wrmsd": wr})
-
-    return groups
-
-def decide_updates(groups: Dict[HeaderKey, List[dict]]) -> Dict[HeaderKey, int]:
-    out: Dict[HeaderKey, int] = {}
-    for key, rows in groups.items():
-        if not rows:
-            continue
-        latest = rows[-1]
-        w_latest = latest["wrmsd"]
-        if w_latest is None:
-            continue
-
-        prior = [r["wrmsd"] for r in rows[:-1] if r["wrmsd"] is not None]
-        if not prior:
-            out[key] = latest["run_n"]
-            continue
-        min_prior = min(prior)
-        if w_latest < (min_prior - EPS):
-            out[key] = latest["run_n"]
-    return out
-
+def load_state(state_path: str) -> Dict:
+    """
+    Load image_run_state.json as produced by propose_next_shifts.py.
+    Falls back to an empty state if missing or corrupted.
+    """
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        if not isinstance(state, dict):
+            raise ValueError("state not a dict")
+        if "events" not in state:
+            state["events"] = {}
+        if "last_global_run" not in state:
+            state["last_global_run"] = -1
+        return state
+    except FileNotFoundError:
+        print(f"[early-break] WARNING: no sidecar at {state_path}, nothing to build.")
+        return {"last_global_run": -1, "events": {}}
+    except Exception as e:
+        print(f"[early-break] WARNING: could not read {state_path} ({e}), treating as empty.")
+        return {"last_global_run": -1, "events": {}}
 
 # --------------------- Stream Parsing / Indexing -------------------
 
 def parse_stream_chunks(stream_path: str):
+    """
+    Return (bounds, lines, header) for a CrystFEL .stream file.
+
+    bounds: list[(start_idx, end_idx)] for each chunk
+    lines:  list of all lines in the file
+    header: lines before the first "Begin chunk"
+    """
     with open(stream_path, "r", encoding="utf-8", errors="ignore") as f:
         lines = f.readlines()
 
@@ -146,6 +103,9 @@ def parse_stream_chunks(stream_path: str):
     return bounds, lines, header
 
 def chunk_key_from_slice(lines_slice: List[str]) -> Optional[HeaderKey]:
+    """
+    Derive (abs_image_path, event_id) from a chunk's lines.
+    """
     img_path = None
     ev = None
     for ln in lines_slice:
@@ -163,8 +123,10 @@ def chunk_key_from_slice(lines_slice: List[str]) -> Optional[HeaderKey]:
         return None
     return (_abs(img_path), int(ev))
 
-
 def map_chunk_ids_by_image_event(lines: List[str], bounds: List[Tuple[int, int]]) -> Dict[HeaderKey, int]:
+    """
+    Build mapping from (abs_path,event) to chunk index.
+    """
     mapping: Dict[HeaderKey, int] = {}
     for cid, (a, b) in enumerate(bounds):
         key = chunk_key_from_slice(lines[a:b])
@@ -172,8 +134,7 @@ def map_chunk_ids_by_image_event(lines: List[str], bounds: List[Tuple[int, int]]
             mapping[key] = cid
     return mapping
 
-
-def extract_chunks_for_run(run_root: str, rn: int, keys: List[HeaderKey]):
+def extract_chunks_for_run(run_root: str, rn: int, keys: List[HeaderKey]) -> Dict[HeaderKey, str]:
     """
     Worker: open stream_{rn}.stream once, build index, and return {key: chunk_text}.
     """
@@ -191,184 +152,139 @@ def extract_chunks_for_run(run_root: str, rn: int, keys: List[HeaderKey]):
             out[key] = "".join(lines[a:b])
     return out
 
+# --------------------------- Plan building -------------------------
 
-def extract_chunks_for_run_spill(run_root: str, rn: int, keys: List[HeaderKey], temp_dir: str):
+def build_plans_from_state(events_state: Dict[str, Dict]) -> Tuple[Dict[HeaderKey,int], Dict[HeaderKey,int]]:
     """
-    Worker variant: write a single temp file per RUN (not per chunk), and return
-    a manifest {key: (tmp_path, offset, length)}. Main process concatenates from these.
+    From image_run_state["events"], build:
+      - plans_all:  {HeaderKey -> best_run_n} for all events with ≥1 finite wRMSD
+      - plans_done: {HeaderKey -> best_run_n} but only for events whose
+                    latest_status == ('done','done')
+
+    Here:
+      - state key is "abs_path::event_id"
+      - trials: [ [run, dx, dy, idx, wr], ... ]
     """
-    stream_path = run_stream_path(run_root, rn)
-    if not os.path.isfile(stream_path):
-        return {}
+    plans_all: Dict[HeaderKey, int] = {}
+    plans_done: Dict[HeaderKey, int] = {}
 
-    bounds, lines, _ = parse_stream_chunks(stream_path)
-    index = map_chunk_ids_by_image_event(lines, bounds)
+    for k_str, ev_state in events_state.items():
+        trials = ev_state.get("trials", [])
+        latest_status = ev_state.get("latest_status", ["", ""])
 
-    tmp_path = os.path.join(temp_dir, f"run_{rn:03d}.chunks")
-    with open(tmp_path, "wb") as wf:
-        manifest = {}
-        pos = 0
-        for key in keys:
-            cid = index.get(key)
-            if cid is None:
-                continue
-            a, b = bounds[cid]
-            data = "".join(lines[a:b]).encode("utf-8")
-            wf.write(data)
-            manifest[key] = (tmp_path, pos, len(data))
-            pos += len(data)
-    return manifest
+        if not trials:
+            continue
 
+        # state key → HeaderKey (abs_path, event_id)
+        try:
+            path_str, ev_str = k_str.rsplit("::", 1)
+            img_path = _abs(path_str)
+            ev_id = int(ev_str)
+        except Exception:
+            continue
+        key: HeaderKey = (img_path, ev_id)
 
-# --------------------------- Main Builder -------------------------
+        # collect finite wRMSDs
+        finite = [(rn, wr) for (rn, _dx, _dy, _idx, wr) in trials if wr is not None]
+        if not finite:
+            continue
 
-def build_early_break_incremental(
+        # find best (minimum) wRMSD and its run
+        best_run, best_wr = min(finite, key=lambda t: t[1])
+
+        # record in all-plans
+        plans_all[key] = int(best_run)
+
+        # done-only?
+        nx, ny = latest_status
+        if str(nx).lower() == "done" and str(ny).lower() == "done":
+            plans_done[key] = int(best_run)
+
+    return plans_all, plans_done
+
+# --------------------------- Stream builder ------------------------
+
+def build_stream_for_plans(
     run_root: str,
-    log_name: str = DEFAULT_LOG_NAME,
-    out_name: str = DEFAULT_OUT_NAME,
-    workers: Optional[int] = None,
-    spill_to_disk: bool = False,
+    plans: Dict[HeaderKey, int],
+    out_path: str,
+    workers: int,
+    label: str,
 ) -> str:
+    """
+    Given plans {HeaderKey -> best_run_n}, build a new stream file at out_path
+    containing:
+      - header cloned from any contributing run's stream file
+      - one chunk for each HeaderKey (from the selected run)
 
-    run_root = _abs(run_root)
-    log_path = os.path.join(run_root, log_name)
-    out_path = os.path.join(run_root, out_name)
+    The file is rebuilt from scratch.
+    """
+    out_path = _abs(out_path)
     out_tmp = out_path + ".tmp"
 
-    if not os.path.isfile(log_path):
-        raise SystemExit(f"[ERR] No log at {log_path}")
-
-    groups = parse_image_run_log(log_path)
-    plans = decide_updates(groups)  # {key -> latest_run}
-
-    if not os.path.isfile(out_path) and not plans:
-        print("[early-break] No updates and no existing file; nothing to do.")
-        return out_path
-
-    # Parse existing early_break (if present)
-    existing_bounds, existing_lines, existing_header = [], [], []
-    if os.path.isfile(out_path):
-        try:
-            existing_bounds, existing_lines, existing_header = parse_stream_chunks(out_path)
-        except Exception as e:
-            print(f"[WARN] Could not parse existing {out_path}: {e}")
-
-    existing_map: Dict[HeaderKey, Tuple[int,int]] = {}
-    for (a, b) in existing_bounds:
-        k = chunk_key_from_slice(existing_lines[a:b])
-        if k is not None:
-            existing_map[k] = (a, b)
+    if not plans:
+        if os.path.isfile(out_path):
+            print(f"[early-break] No events to write for {label}; leaving existing {os.path.basename(out_path)}.")
+            return out_path
+        else:
+            print(f"[early-break] No events to write for {label}; nothing created.")
+            return out_path
 
     # Group planned updates by run number
     plans_by_run: Dict[int, List[HeaderKey]] = {}
     for key, rn in plans.items():
-        plans_by_run.setdefault(rn, []).append(key)
+        plans_by_run.setdefault(int(rn), []).append(key)
 
-    # Resolve new/updated chunks in parallel per-run
     if workers is None or workers <= 0:
         workers = max(1, multiprocessing.cpu_count())
     w = min(workers, max(1, len(plans_by_run)))
-    if plans_by_run:
-        print(f"[multi] Using {w} workers for {sum(len(v) for v in plans_by_run.values())} chunk(s) across {len(plans_by_run)} run(s)")
+    print(f"[multi] Building {os.path.basename(out_path)} ({label}) with {w} workers "
+          f"for {len(plans)} event(s) across {len(plans_by_run)} run(s).")
 
-    new_chunks_text: Dict[HeaderKey, str] = {}        # default in-memory
-    new_chunks_manifest: Dict[HeaderKey, Tuple[str,int,int]] = {}  # when spill_to_disk=True
+    new_chunks_text: Dict[HeaderKey, str] = {}
 
-    temp_dir = tempfile.mkdtemp(prefix="early_break_", dir=run_root) if spill_to_disk else None
-    try:
-        if plans_by_run:
-            with ProcessPoolExecutor(max_workers=w) as ex:
-                futs = []
-                if spill_to_disk:
-                    for rn, keys in plans_by_run.items():
-                        futs.append(ex.submit(extract_chunks_for_run_spill, run_root, rn, keys, temp_dir))
-                else:
-                    for rn, keys in plans_by_run.items():
-                        futs.append(ex.submit(extract_chunks_for_run, run_root, rn, keys))
+    # --- parallel extraction per run ---
+    with ProcessPoolExecutor(max_workers=w) as ex:
+        futs = []
+        for rn, keys in plans_by_run.items():
+            futs.append(ex.submit(extract_chunks_for_run, run_root, rn, keys))
 
-                for fut, (rn, keys) in zip(futs, plans_by_run.items()):
-                    try:
-                        res = fut.result()
-                        if spill_to_disk:
-                            # res: {key: (tmp_path, offset, length)}
-                            new_chunks_manifest.update(res)
-                        else:
-                            # res: {key: text}
-                            new_chunks_text.update(res)
-                    except Exception as e:
-                        print(f"[WARN] Worker failed for run_{rn:03d}: {e}")
-
-        # Nothing to change?
-        if not new_chunks_text and not new_chunks_manifest:
-            print("[early-break] No improvements or first-success rows detected; leaving file unchanged.")
-            return out_path
-
-        # Decide header
-        header_to_write = existing_header
-        if not header_to_write:
-            # Borrow header from any contributing stream
+        for fut, (rn, keys) in zip(futs, plans_by_run.items()):
             try:
-                any_rn = next(iter(plans_by_run.keys()))
-                sp = run_stream_path(run_root, any_rn)
-                _, _, hdr = parse_stream_chunks(sp)
-                if hdr:
-                    header_to_write = hdr
-            except Exception:
-                pass
+                res = fut.result()
+                new_chunks_text.update(res)
+            except Exception as e:
+                print(f"[WARN] Worker failed for run_{rn:03d}: {e}")
 
-        replaced = 0
-        appended = 0
-        total_chunks = 0
+    # Borrow header from any contributing stream
+    header_to_write: List[str] = []
+    try:
+        any_rn = next(iter(plans_by_run.keys()))
+        sp = run_stream_path(run_root, any_rn)
+        _, _, hdr = parse_stream_chunks(sp)
+        if hdr:
+            header_to_write = hdr
+    except Exception as e:
+        print(f"[WARN] Could not borrow header from run streams ({e}); writing chunks only.")
 
-        with open(out_tmp, "w", encoding="utf-8") as wf:
-            if header_to_write:
-                wf.writelines(header_to_write)
+    # Now write new stream file from scratch
+    total_chunks = 0
+    with open(out_tmp, "w", encoding="utf-8") as wf:
+        if header_to_write:
+            wf.writelines(header_to_write)
 
-            # 1) existing chunks (replace where needed)
-            if existing_bounds and existing_lines:
-                for (a, b) in existing_bounds:
-                    key = chunk_key_from_slice(existing_lines[a:b])
-                    if key is None:
-                        wf.writelines(existing_lines[a:b])
-                        total_chunks += 1
-                        continue
+        # sort keys for deterministic ordering
+        pending_keys = list(plans.keys())
+        for key in sorted(pending_keys, key=lambda t: (t[0], t[1])):
+            text = new_chunks_text.get(key)
+            if text is None:
+                continue
+            wf.write(text)
+            total_chunks += 1
 
-                    if spill_to_disk and key in new_chunks_manifest:
-                        path, off, ln = new_chunks_manifest.pop(key)
-                        with open(path, "rb") as rf:
-                            rf.seek(off)
-                            wf.write(rf.read(ln).decode("utf-8"))
-                        replaced += 1
-                    elif (not spill_to_disk) and key in new_chunks_text:
-                        wf.write(new_chunks_text.pop(key))
-                        replaced += 1
-                    else:
-                        wf.writelines(existing_lines[a:b])
-                    total_chunks += 1
-
-            # 2) append remaining new chunks (first successes)
-            pending_keys = list(new_chunks_manifest.keys()) if spill_to_disk else list(new_chunks_text.keys())
-            for key in sorted(pending_keys, key=lambda t: (t[0], t[1])):
-                if spill_to_disk:
-                    path, off, ln = new_chunks_manifest[key]
-                    with open(path, "rb") as rf:
-                        rf.seek(off)
-                        wf.write(rf.read(ln).decode("utf-8"))
-                else:
-                    wf.write(new_chunks_text[key])
-                appended += 1
-                total_chunks += 1
-
-        os.replace(out_tmp, out_path)
-        print(f"[early-break] Merge complete: wrote {total_chunks} chunk(s) to {out_path} "
-              f"(replaced {replaced}, appended {appended}).")
-        return out_path
-
-    finally:
-        if temp_dir:
-            try: shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception: pass
-
+    os.replace(out_tmp, out_path)
+    print(f"[early-break] Wrote {total_chunks} chunk(s) to {out_path} ({label})")
+    return out_path
 
 # ------------------------------ CLI --------------------------------
 
@@ -377,23 +293,41 @@ def main(argv=None):
         argv = sys.argv[1:]
 
     ap = argparse.ArgumentParser(
-        description="Incrementally update early_break.stream (improvement-only) with parallel per-run extraction."
+        description=(
+            "Build early_break.stream (best wRMSD per event, all events)\n"
+            "and only_done_events.stream (best per event, done events only)\n"
+            "from image_run_state.json."
+        )
     )
     ap.add_argument("--run-root", required=True,
-                    help="Path to 'runs/' containing image_run_log.csv and run_*/")
+                    help="Path to 'runs/' containing run_*/ and image_run_state.json")
     ap.add_argument("--log-name", default=DEFAULT_LOG_NAME,
-                    help=f"Log filename (default: {DEFAULT_LOG_NAME})")
+                    help=f"Kept for compatibility; ignored (default: {DEFAULT_LOG_NAME})")
     ap.add_argument("--out-name", default=DEFAULT_OUT_NAME,
-                    help=f"Output stream filename (default: {DEFAULT_OUT_NAME})")
+                    help=f"Output name for ALL-best stream (default: {DEFAULT_OUT_NAME})")
     ap.add_argument("--workers", type=int, default=multiprocessing.cpu_count(),
                     help="Number of worker processes (default: all cores)")
-    ap.add_argument("--spill-to-disk", action="store_true",
-                    help="Use ONE temp file per run (instead of RAM) to hold extracted chunks")
     args = ap.parse_args(argv)
 
     run_root = _abs(args.run_root)
-    build_early_break_incremental(run_root, args.log_name, args.out_name,
-                                  workers=args.workers, spill_to_disk=args.spill_to_disk)
+    state_path = os.path.join(run_root, STATE_NAME)
+    state = load_state(state_path)
+    events_state = state.get("events", {})
+
+    if not events_state:
+        print("[early-break] No events in state; nothing to build.")
+        return 0
+
+    plans_all, plans_done = build_plans_from_state(events_state)
+
+    # early_break.stream (all events, best wrmsd per event)
+    all_path = os.path.join(run_root, args.out_name)
+    build_stream_for_plans(run_root, plans_all, all_path, workers=args.workers, label="all events")
+
+    # only_done_events.stream (subset for done events)
+    done_only_path = os.path.join(run_root, ONLY_DONE_NAME)
+    build_stream_for_plans(run_root, plans_done, done_only_path, workers=args.workers, label="done-only")
+
     return 0
 
 
