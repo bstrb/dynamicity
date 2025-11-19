@@ -480,8 +480,9 @@ def iterate_until_done(
 
         import datetime
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print("================================================", flush=True)
-        print(f"[loop] Iteration {it} started at {ts}", flush=True)
+        # print("================================================", flush=True)
+        # print(f"[loop] Iteration {it} started at {ts}", flush=True)
+        print(f"==================== Iteration {it} started ====================", flush=True)
 
         # evaluate stop condition based on latest run in the *log*
         log_path = os.path.join(rd, "image_run_log.csv")
