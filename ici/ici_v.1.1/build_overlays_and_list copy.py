@@ -26,7 +26,8 @@ from __future__ import annotations
 import argparse, os, sys, math, json, hashlib
 from pathlib import Path
 
-DEFAULT_ROOT = ""
+# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
+DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 
 try:
     from overlay_elink import create_overlay, write_shifts_mm
@@ -34,39 +35,6 @@ except Exception:
     print("ERROR: Could not import overlay_elink.py (create_overlay, write_shifts_mm). "
           "Place overlay_elink.py next to this script or add it to PYTHONPATH.", file=sys.stderr)
     raise
-def load_state(state_path: str) -> dict:
-    """
-    Load the JSON sidecar produced by propose_next_shifts.py.
-
-    Expected structure:
-      {
-        "last_global_run": int,
-        "events": {
-            "<abs_h5_path>::<event_id>": {
-                "trials": [...],
-                "latest_status": [next_dx_str, next_dy_str],
-                "last_run": int
-            },
-            ...
-        }
-      }
-    """
-    try:
-        with open(state_path, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        if not isinstance(state, dict):
-            raise ValueError("state not a dict")
-        if "events" not in state:
-            state["events"] = {}
-        if "last_global_run" not in state:
-            state["last_global_run"] = -1
-        return state
-    except FileNotFoundError:
-        # No state yet
-        return {"last_global_run": -1, "events": {}}
-    except Exception:
-        # Corrupt state → fall back to empty
-        return {"last_global_run": -1, "events": {}}
 
 def _abs(p: str) -> str:
     return os.path.abspath(os.path.expanduser(p))
@@ -236,66 +204,31 @@ def write_overlay_mapping(run_dir: str, overlay_paths: dict) -> str:
         for ov, src in sorted(overlay_to_src.items()):
             f.write(f"{ov}\t{src}\n")
     return map_json
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description=(
-            "Create run-named overlays and unique per-(source,event) lst folders "
-            "from latest proposals stored in image_run_state.json. Also writes "
-            "overlay→original mapping files."
-        )
+        description="Create run-named overlays and unique per-(source,event) lst folders from latest proposals. Also writes overlay→original mapping files."
     )
     ap.add_argument("--run-root", default=None,
                     help="Path to run root that contains 'runs/'. Defaults to DEFAULT_ROOT if omitted.")
     args = ap.parse_args(argv)
 
     run_root = _abs(args.run_root or DEFAULT_ROOT)
+    log_path = os.path.join(run_root, "image_run_log.csv")
+    if not os.path.isfile(log_path):
+        print("ERROR: missing image_run_log.csv", file=sys.stderr)
+        return 2
 
-    # --- Pull latest proposals from sidecar state rather than scanning CSV ---
-    state_path = os.path.join(run_root, "image_run_state.json")
-    state = load_state(state_path)
-    events_state = state.get("events", {})
-    latest_run = int(state.get("last_global_run", -1))
+    entries, latest_run = parse_log(log_path)
+    if latest_run < 0:
+        print("ERROR: no data rows found in image_run_log.csv", file=sys.stderr)
+        return 2
 
-    if latest_run < 0 or not events_state:
-        print("[overlay] No state or no runs found in image_run_state.json; nothing to do.")
-        return 0
-
-    # Build mapping: src_path -> { event_idx: (ndx, ndy) } using latest_status
-    proposals_by_src: dict[str, dict[int, tuple[float, float]]] = {}
-    for key, ev_state in events_state.items():
-        # key format: "<abs_h5_path>::<event_id>"
-        try:
-            src_path, ev_str = key.rsplit("::", 1)
-            ev = int(ev_str)
-        except Exception:
-            continue
-
-        latest_status = ev_state.get("latest_status", ["", ""])
-        if not isinstance(latest_status, (list, tuple)) or len(latest_status) < 2:
-            continue
-        ndx_s, ndy_s = latest_status
-
-        # Skip events that are explicitly done or have no numeric proposal
-        if (not ndx_s) or (not ndy_s):
-            continue
-        if str(ndx_s).lower() == "done" or str(ndy_s).lower() == "done":
-            continue
-
-        try:
-            ndx = float(ndx_s)
-            ndy = float(ndy_s)
-            if not (math.isfinite(ndx) and math.isfinite(ndy)):
-                continue
-        except Exception:
-            continue
-
-        proposals_by_src.setdefault(_abs(src_path), {})[int(ev)] = (ndx, ndy)
-
+    proposals_by_src = collect_latest_numeric_proposals(entries, latest_run)
     if not proposals_by_src:
-        print(f"[overlay] No numeric proposals for latest run={latest_run} in state; nothing to do.")
+        print(f"[overlay] No numeric proposals in run_{latest_run:03d} (all 'done' or missing). Nothing to do.")
         return 0
 
-    # Next run index is latest_run + 1
     next_run = latest_run + 1
     next_run_dir = os.path.join(run_root, f"run_{next_run:03d}")
     os.makedirs(next_run_dir, exist_ok=True)
@@ -310,7 +243,6 @@ def main(argv=None) -> int:
     _ = write_overlay_mapping(next_run_dir, overlay_paths)
 
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

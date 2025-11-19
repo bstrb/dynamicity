@@ -484,7 +484,6 @@ def save_state(state_path: str, state: Dict) -> None:
     os.replace(tmp, state_path)
 
 # ------------------------ CLI runner ------------------------
-
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -546,6 +545,7 @@ def main(argv=None) -> int:
         print(f"ERROR: not found: {log_path}", file=sys.stderr)
         return 2
 
+    # Read full log once (needed to see all sections and new rows)
     lines = read_log(log_path)
     blocks, latest_run = parse_blocks(lines)
     if latest_run < 0:
@@ -562,7 +562,6 @@ def main(argv=None) -> int:
     events_state: Dict[str, Dict] = state.setdefault("events", {})
 
     n_new, n_done = 0, 0
-    new_lines: List[str] = []
 
     # --- Cache per-HDF5 det_shift arrays so we don't reopen files per event ---
     det_shift_cache: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
@@ -586,12 +585,12 @@ def main(argv=None) -> int:
         dx_arr, dy_arr = det_shift_cache[h5_path_abs]
         return float(dx_arr[event_id]), float(dy_arr[event_id])
 
+    # --- Process each event block, updating only the JSON sidecar ---
     for header, block in blocks:
         h5_path, event_id = _parse_event_header(header if header else "#/unknown event -1")
 
-        # Non-event or malformed blocks: pass through unchanged
+        # Non-event or malformed blocks: we still ignore them (log is left unchanged)
         if event_id < 0:
-            new_lines.extend(block)
             continue
 
         key = f"{os.path.abspath(h5_path)}::{int(event_id)}"
@@ -646,18 +645,16 @@ def main(argv=None) -> int:
         # If we have no trials at all yet, synthesize from HDF5
         if not ev_state["trials"]:
             seed_dx, seed_dy = get_seed_shift(h5_path, int(event_id))
-            first_line = f"{latest_run},{seed_dx:.6f},{seed_dy:.6f},0,,,\n"
-            block.append(first_line)
+            # NOTE: we do *not* write this synthetic row into the CSV, only into state
             ev_state["trials"].append([latest_run, seed_dx, seed_dy, 0, None])
             ev_state["last_run"] = latest_run
             ev_state["latest_status"] = ["", ""]
             last_run_ev = latest_run
             latest_status = ev_state["latest_status"]
 
-        # If the event is already marked done in the *latest* line, skip proposing
+        # If the event is already marked done in the state, skip proposing
         nx_raw, ny_raw = latest_status
         if str(nx_raw).lower() == "done" and str(ny_raw).lower() == "done":
-            new_lines.extend(block)
             n_done += 1
             continue
 
@@ -716,19 +713,6 @@ def main(argv=None) -> int:
             event_abs_path=event_dir_for_dxdy,
         )
 
-        # updated = update_block_latest_run(
-        #     block_lines=block,
-        #     latest_run=latest_run,
-        #     new_dx=ndx,
-        #     new_dy=ndy,
-        # )
-        updated = update_block_latest_run(
-            block_lines=block,
-            new_dx=ndx,
-            new_dy=ndy,
-        )
-
-
         if ndx is None and ndy is None:
             n_done += 1
             ev_state["latest_status"] = ["done", "done"]
@@ -736,14 +720,13 @@ def main(argv=None) -> int:
             n_new += 1
             ev_state["latest_status"] = [_fmt6(float(ndx)), _fmt6(float(ndy))]
 
-        new_lines.extend(updated)
-
-    write_log(log_path, new_lines)
+    # No rewrite of image_run_log.csv: only update sidecar
     state["last_global_run"] = latest_run
     save_state(state_path, state)
 
     print(f"[propose] {n_new} new proposals, {n_done} marked done/skipped")
     return 0
+
 
 
 if __name__ == "__main__":
