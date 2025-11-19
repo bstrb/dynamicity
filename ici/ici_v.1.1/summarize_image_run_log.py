@@ -3,325 +3,339 @@
 """
 summarize_image_run_log.py
 
-Reads runs/image_run_log.csv (your grouped log with event headers) and prints:
-- first run and current indexed percent, plus increase from first and from previous run
-- first run and current mean/median wRMSD, plus change from first and from previous run
-- number of proposed next steps due to unindexed frames (ring) and due to local optimization (BO)
-- number of done events and their internal mean/median wRMSD
+Summarize per-run indexing performance from image_run_log.csv and
+current proposal/done status from image_run_state.json (sidecar).
 
-Optional: write a CSV/JSON summary artifact.
+Outputs lines like:
 
-Usage:
-  python3 summarize_image_run_log.py --run-root <root> [--out-csv summary.csv] [--out-json summary.json]
+  [summary] Runs: first=0, current=2, previous=1
+  [summary] Index rate: first=92.308%, previous=95.604%, current=98.901%, Δ(first→curr)=6.593, Δ(prev→curr)=3.297
+  [summary] wRMSD mean: first=0.112, previous=0.121, current=0.135, Δ(first→curr)=0.023, Δ(prev→curr)=0.014
+  [summary] wRMSD median: ...
+  [summary] Proposals: due to unindexed (Hillmap search) = N1
+  [summary] Proposals: due to local optimization (CrystFEL Refine or wRMSD-Boltzmann-weighted Hillmap search) = N2
+  [summary] Done events: count=Ndone, wRMSD mean=..., median=...
 """
-import argparse, os, math, json, statistics as stats
-from collections import defaultdict
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import sys
+from typing import Dict, List, Tuple, Optional
+
+import numpy as np
 
 
-def parse_log(log_path):
-    rows = []
-    current_event = None
+def _fmt_pct(x: Optional[float]) -> str:
+    if x is None or (isinstance(x, float) and (not math.isfinite(x))):
+        return "—"
+    return f"{x:.3f}%"
+
+
+def _fmt_float(x: Optional[float]) -> str:
+    if x is None or (isinstance(x, float) and (not math.isfinite(x))):
+        return "—"
+    return f"{x:.3f}"
+
+
+def _finite(x) -> bool:
+    try:
+        return math.isfinite(float(x))
+    except Exception:
+        return False
+
+
+def parse_log(log_path: str):
+    """
+    Parse image_run_log.csv into per-run statistics.
+
+    Assumes columns:
+      run_n, dx_mm, dy_mm, indexed(0/1), wrmsd, next_dx, next_dy
+    Comments start with '#'.
+    """
+    if not os.path.isfile(log_path):
+        print(f"[summary] No log at {log_path}", file=sys.stderr)
+        return {}, []
+
+    per_run: Dict[int, Dict[str, object]] = {}
     with open(log_path, "r", encoding="utf-8") as f:
-        for ln in f:
-            ln = ln.rstrip("\n")
-            if ln.startswith("#/"):
-                # header line: "#/abs/path event <num>"
-                try:
-                    left, evs = ln[1:].rsplit(" event ", 1)
-                    src = os.path.abspath(left.strip())
-                    ev  = int(evs.strip())
-                    current_event = (src, ev)
-                except Exception:
-                    current_event = None
+        header_seen = False
+        for raw in f:
+            ln = raw.strip()
+            if not ln:
                 continue
-
+            if ln.startswith("#"):
+                continue
+            if not header_seen:
+                # header line
+                header_seen = True
+                continue
             parts = [p.strip() for p in ln.split(",")]
-            if len(parts) < 7 or not parts[0].isdigit():
+            if len(parts) < 5:
                 continue
-
-            run = int(parts[0])
-
-            def _f(s):
+            try:
+                rn = int(parts[0])
+            except Exception:
+                continue
+            try:
+                idx = int(parts[3])
+            except Exception:
+                idx = 0
+            wr = None
+            if parts[4] not in ("", "nan", "NaN", "None", "none"):
                 try:
-                    return float(s) if s != "" else None
+                    wv = float(parts[4])
+                    if math.isfinite(wv):
+                        wr = wv
                 except Exception:
-                    return None
+                    wr = None
 
-            det_dx = _f(parts[1]); det_dy = _f(parts[2])
-            indexed = int(parts[3]) if parts[3] else 0
-            wr = _f(parts[4])
-            next_dx_raw, next_dy_raw = parts[5], parts[6]
+            d = per_run.setdefault(rn, {"rows": 0, "indexed": 0, "wr": []})
+            d["rows"] = int(d["rows"]) + 1
+            if idx == 1:
+                d["indexed"] = int(d["indexed"]) + 1
+                if wr is not None:
+                    d["wr"].append(wr)
 
-            def _f_next(s):
-                if s in ("", "done"):
-                    return None
-                try:
-                    return float(s)
-                except Exception:
-                    return None
-
-            next_dx = _f_next(next_dx_raw)
-            next_dy = _f_next(next_dy_raw)
-
-            src, ev = (current_event if current_event else (None, None))
-            rows.append({
-                "src": src,
-                "event": ev,
-                "sec": (src, ev),  # <-- unique section key
-                "run": run,
-                "det_dx": det_dx, "det_dy": det_dy,
-                "indexed": indexed, "wrmsd": wr,
-                "next_dx": next_dx, "next_dy": next_dy,
-                "next_dx_raw": next_dx_raw, "next_dy_raw": next_dy_raw
-            })
-    return rows
+    runs = sorted(per_run.keys())
+    return per_run, runs
 
 
-def mean_safe(vals):
-    vals = [v for v in vals if v is not None and not math.isnan(v)]
-    return (sum(vals) / len(vals)) if vals else None
+def metrics_for_run(per_run: Dict[int, Dict[str, object]], rn: int):
+    d = per_run.get(rn)
+    if not d:
+        return None, None, None
+    rows = int(d["rows"])
+    idx = int(d["indexed"])
+    wr_list: List[float] = d["wr"]  # type: ignore
+
+    if rows <= 0:
+        rate = None
+    else:
+        rate = 100.0 * idx / rows
+
+    if not wr_list:
+        mean = None
+        med = None
+    else:
+        mean = float(np.mean(wr_list))
+        med = float(np.median(wr_list))
+
+    return rate, mean, med
 
 
-def median_safe(vals):
-    vals = [v for v in vals if v is not None and not math.isnan(v)]
-    return (stats.median(vals) if vals else None)
-
-
-def group_rows_by_section(rows):
+def summarize_state(run_root: str):
     """
-    Returns:
-      by_sec: {sec: [rows sorted by run]}
-      runs:   sorted unique run numbers
+    Read sidecar image_run_state.json and compute:
+      - number of events currently 'done'
+      - mean/median of best wRMSD over done events
+      - count of proposals due to unindexed vs local optimization
     """
-    by_sec = defaultdict(list)
-    runs = set()
-    for r in rows:
-        by_sec[r["sec"]].append(r)
-        runs.add(r["run"])
-    for sec in by_sec:
-        by_sec[sec].sort(key=lambda x: x["run"])
-    return by_sec, sorted(runs)
+    state_path = os.path.join(run_root, "image_run_state.json")
+    if not os.path.isfile(state_path):
+        # Fallback: no sidecar; print zeros but keep layout
+        print("[summary] Proposals: due to unindexed (Hillmap search) = 0")
+        print(
+            "[summary] Proposals: due to local optimization "
+            "(CrystFEL Refine or wRMSD-Boltzmann-weighted Hillmap search) = 0"
+        )
+        print("[summary] Done events: count=0, wRMSD mean=—, median=—")
+        return
 
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception as e:
+        print(f"[summary] WARNING: failed to read {state_path}: {e}", file=sys.stderr)
+        print("[summary] Proposals: due to unindexed (Hillmap search) = 0")
+        print(
+            "[summary] Proposals: due to local optimization "
+            "(CrystFEL Refine or wRMSD-Boltzmann-weighted Hillmap search) = 0"
+        )
+        print("[summary] Done events: count=0, wRMSD mean=—, median=—")
+        return
 
-def run_stats_cumulative_grouped(by_sec, run_cutoff: int):
-    """
-    Cumulative-as-of-run stats using pre-grouped rows:
-      - events_present: sections that have appeared up to run_cutoff
-      - success_count: sections with ≥1 success up to run_cutoff
-      - wrmsd_mean/median: mean/median of per-section BEST (min) wRMSD up to run_cutoff
-    """
-    upto_secs = []
-    best_wr_by_sec = {}
+    events = state.get("events", {})
+    if not isinstance(events, dict):
+        events = {}
 
-    for sec, g in by_sec.items():
-        seen = False
-        best_wr = None
-        for r in g:
-            if r["run"] > run_cutoff:
-                break
-            seen = True
-            if r["indexed"] == 1 and (r["wrmsd"] is not None) and not math.isnan(r["wrmsd"]):
-                if best_wr is None or r["wrmsd"] < best_wr:
-                    best_wr = r["wrmsd"]
+    n_prop_unindexed = 0
+    n_prop_local = 0
+    done_wr: List[float] = []
+    done_count = 0
 
-        if seen:
-            upto_secs.append(sec)
-            if best_wr is not None:
-                best_wr_by_sec[sec] = best_wr
-
-    events_present = len(upto_secs)
-    success_count = len(best_wr_by_sec)
-    idx_pct = (success_count / events_present * 100.0) if events_present else None
-
-    wr_values = list(best_wr_by_sec.values())
-    wr_mean = (sum(wr_values) / len(wr_values)) if wr_values else None
-    wr_median = (stats.median(wr_values) if wr_values else None)
-
-    return {
-        "events_present": events_present,
-        "success_count": success_count,
-        "index_percent": idx_pct,
-        "wrmsd_mean": wr_mean,
-        "wrmsd_median": wr_median,
-    }
-
-
-def proposal_breakdown_current_grouped(by_sec, run_cutoff: int):
-    """
-    Returns (ring_props, bo_props) counting SECTIONS (src,event):
-      - If section is done at/before run_cutoff -> not counted
-      - Else if section has any success up to run_cutoff -> counts toward BO
-      - Else -> counts toward ring
-    """
-    ring_props = 0
-    bo_props = 0
-
-    for sec, g in by_sec.items():
-        # g is sorted by run; consider only rows up to cutoff
-        g_upto = [r for r in g if r["run"] <= run_cutoff]
-        if not g_upto:
+    for ev_key, ev_state in events.items():
+        if not isinstance(ev_state, dict):
+            continue
+        trials = ev_state.get("trials", [])
+        if not isinstance(trials, list) or not trials:
             continue
 
-        last = g_upto[-1]
-        is_done = (last["next_dx_raw"] == "done") and (last["next_dy_raw"] == "done")
-        if is_done:
+        # Each trial: [run, dx, dy, idx, wr]
+        try:
+            trials_sorted = sorted(
+                [
+                    (int(rn), float(dx), float(dy), int(idx), (float(wr) if _finite(wr) else None))
+                    for rn, dx, dy, idx, wr in trials
+                ],
+                key=lambda t: t[0],
+            )
+        except Exception:
             continue
 
-        has_success = any(
-            (row["indexed"] == 1) and (row["wrmsd"] is not None) and (not math.isnan(row["wrmsd"]))
-            for row in g_upto
+        latest_status = ev_state.get("latest_status", ["", ""])
+        if not isinstance(latest_status, list) or len(latest_status) < 2:
+            latest_status = ["", ""]
+
+        is_done = (
+            str(latest_status[0]).lower() == "done"
+            and str(latest_status[1]).lower() == "done"
         )
 
-        if has_success:
-            bo_props += 1
+        # Collect best wRMSD over successes for this event
+        wr_success = [wr for (_rn, _dx, _dy, idx, wr) in trials_sorted if idx == 1 and wr is not None]
+        best_wr = min(wr_success) if wr_success else None
+
+        if is_done:
+            done_count += 1
+            if best_wr is not None and _finite(best_wr):
+                done_wr.append(float(best_wr))
+            continue
+
+        # Still active → classify proposal reason based on last trial
+        last_rn, last_dx, last_dy, last_idx, last_wr = trials_sorted[-1]
+        if last_idx == 0 or (last_wr is None):
+            n_prop_unindexed += 1
         else:
-            ring_props += 1
+            n_prop_local += 1
 
-    return ring_props, bo_props
+    print(f"[summary] Proposals: due to unindexed (Hillmap search) = {n_prop_unindexed}")
+    print(
+        "[summary] Proposals: due to local optimization "
+        f"(CrystFEL Refine or wRMSD-Boltzmann-weighted Hillmap search) = {n_prop_local}"
+    )
 
-
-def done_events_summary_grouped(by_sec):
-    done_wrmsd = []
-
-    for sec, g in by_sec.items():
-        last = g[-1]
-        if last["next_dx_raw"] == "done" and last["next_dy_raw"] == "done":
-            wrs = [
-                r["wrmsd"] for r in g
-                if r["indexed"] == 1 and r["wrmsd"] is not None and not math.isnan(r["wrmsd"])
-            ]
-            if wrs:
-                done_wrmsd.append(min(wrs))
-
-    n_done = len(done_wrmsd)
-    return n_done, mean_safe(done_wrmsd), median_safe(done_wrmsd)
-
-
-def fmt(x, pct=False, nd=3):
-    if x is None or (isinstance(x, float) and math.isnan(x)):
-        return "—"
-    return f"{x:.{nd}f}" + ("%" if pct else "")
+    if done_count == 0 or not done_wr:
+        print("[summary] Done events: count=0, wRMSD mean=—, median=—")
+    else:
+        mean_wr = float(np.mean(done_wr))
+        med_wr = float(np.median(done_wr))
+        print(
+            "[summary] Done events: count={cnt}, wRMSD mean={m}, median={md}".format(
+                cnt=done_count,
+                m=_fmt_float(mean_wr),
+                md=_fmt_float(med_wr),
+            )
+        )
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--run-root", required=True, help="Experiment root that contains runs/image_run_log.csv")
-    ap.add_argument("--log", default=None, help="Optional explicit path to image_run_log.csv")
-    ap.add_argument("--out-csv", default=None, help="Optional path to write a one-row summary CSV")
-    ap.add_argument("--out-json", default=None, help="Optional path to write a JSON summary")
-    args = ap.parse_args()
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(
+        description="Summarize image_run_log.csv + image_run_state.json for indexing quality and proposal/done status."
+    )
+    ap.add_argument("--run-root", required=True, help="Path to runs_YYYYMMDD_HHMMSS folder.")
+    args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
-    runs_dir = os.path.abspath(os.path.expanduser(args.run_root))
-    log_path = args.log or os.path.join(runs_dir, "image_run_log.csv")
-    if not os.path.isfile(log_path):
-        print(f"[summary] ERROR: missing {log_path}")
-        return 2
+    run_root = os.path.abspath(os.path.expanduser(args.run_root))
+    log_path = os.path.join(run_root, "image_run_log.csv")
 
-    rows = parse_log(log_path)
-    if not rows:
-        print(f"[summary] ERROR: no data rows in {log_path}")
-        return 2
+    per_run, runs = parse_log(log_path)
+    if not runs:
+        print("[summary] No data rows found in image_run_log.csv")
+        # still try to show done/proposals from state (if present)
+        summarize_state(run_root)
+        return 0
 
-    by_sec, all_runs = group_rows_by_section(rows)
-    first_run = all_runs[0]
-    current_run = all_runs[-1]
-    prev_run = all_runs[-2] if len(all_runs) > 1 else None
+    first = runs[0]
+    curr = runs[-1]
+    prev = runs[-2] if len(runs) >= 2 else None
 
-    first = run_stats_cumulative_grouped(by_sec, first_run)
-    curr  = run_stats_cumulative_grouped(by_sec, current_run)
-    prev  = run_stats_cumulative_grouped(by_sec, prev_run) if prev_run is not None else None
+    # Compute metrics
+    rate_first, mean_first, med_first = metrics_for_run(per_run, first)
+    rate_curr, mean_curr, med_curr = metrics_for_run(per_run, curr)
+    if prev is not None:
+        rate_prev, mean_prev, med_prev = metrics_for_run(per_run, prev)
+    else:
+        rate_prev = mean_prev = med_prev = None
 
-    # deltas
-    def delta(a, b):
-        if a is None or b is None or any(isinstance(v, float) and math.isnan(v) for v in (a, b)):
-            return None
-        return b - a
+    # Print run indices
+    if prev is not None:
+        print(f"[summary] Runs: first={first}, current={curr}, previous={prev}")
+    else:
+        print(f"[summary] Runs: first={first}, current={curr}")
 
-    idx_inc_first_to_curr = delta(first["index_percent"], curr["index_percent"])
-    idx_inc_prev_to_curr  = delta(prev["index_percent"],  curr["index_percent"]) if prev else None
+    # Index rates
+    if rate_first is None or rate_curr is None:
+        d_first_curr = None
+    else:
+        d_first_curr = rate_curr - rate_first
 
-    wr_mean_delta_first_to_curr   = delta(first["wrmsd_mean"],   curr["wrmsd_mean"])
-    wr_mean_delta_prev_to_curr    = delta(prev["wrmsd_mean"],    curr["wrmsd_mean"]) if prev else None
-    wr_median_delta_first_to_curr = delta(first["wrmsd_median"], curr["wrmsd_median"])
-    wr_median_delta_prev_to_curr  = delta(prev["wrmsd_median"],  curr["wrmsd_median"]) if prev else None
+    if rate_prev is None or rate_curr is None:
+        d_prev_curr = None
+    else:
+        d_prev_curr = rate_curr - rate_prev
 
-    ring_props, bo_props = proposal_breakdown_current_grouped(by_sec, current_run)
-    n_done, wr_done_mean, wr_done_median = done_events_summary_grouped(by_sec)
+    print(
+        "[summary] Index rate: first={rf}, previous={rp}, current={rc}, "
+        "Δ(first→curr)={df}, Δ(prev→curr)={dp}".format(
+            rf=_fmt_pct(rate_first),
+            rp=_fmt_pct(rate_prev),
+            rc=_fmt_pct(rate_curr),
+            df=_fmt_float(d_first_curr),
+            dp=_fmt_float(d_prev_curr),
+        )
+    )
 
-    summary = {
-        "first_run": first_run,
-        "current_run": current_run,
-        "previous_run": prev_run,
-        "index_percent_first": first["index_percent"],
-        "index_percent_current": curr["index_percent"],
-        "delta_index_pct_first_to_current": idx_inc_first_to_curr,
-        "delta_index_pct_prev_to_current": idx_inc_prev_to_curr,
-        "wrmsd_mean_first": first["wrmsd_mean"],
-        "wrmsd_mean_current": curr["wrmsd_mean"],
-        "delta_wrmsd_mean_first_to_current": wr_mean_delta_first_to_curr,
-        "delta_wrmsd_mean_prev_to_current": wr_mean_delta_prev_to_curr,
-        "wrmsd_median_first": first["wrmsd_median"],
-        "wrmsd_median_current": curr["wrmsd_median"],
-        "delta_wrmsd_median_first_to_current": wr_median_delta_first_to_curr,
-        "delta_wrmsd_median_prev_to_current": wr_median_delta_prev_to_curr,
-        "proposals_unindexed_ring": ring_props,
-        "proposals_local_bo": bo_props,
-        "done_events_count": n_done,
-        "done_events_wrmsd_mean": wr_done_mean,
-        "done_events_wrmsd_median": wr_done_median,
-    }
+    # wRMSD mean
+    if mean_first is None or mean_curr is None:
+        d_first_curr_mean = None
+    else:
+        d_first_curr_mean = mean_curr - mean_first
 
-    # pretty print
-    print("[summary] Runs: first={}, current={}{}".format(
-        first_run, current_run, f", previous={prev_run}" if prev_run is not None else ""))
+    if mean_prev is None or mean_curr is None:
+        d_prev_curr_mean = None
+    else:
+        d_prev_curr_mean = mean_curr - mean_prev
 
-    print("[summary] Index rate: first={}, previous={}, current={}, Δ(first→curr)={}, Δ(prev→curr)={}".format(
-        fmt(first["index_percent"], pct=True),
-        fmt(prev["index_percent"], pct=True) if prev_run is not None else "—",
-        fmt(curr["index_percent"], pct=True),
-        fmt(idx_inc_first_to_curr, pct=False),
-        fmt(idx_inc_prev_to_curr, pct=False) if prev_run is not None else "—",
-    ))
+    print(
+        "[summary] wRMSD mean: first={mf}, previous={mp}, current={mc}, "
+        "Δ(first→curr)={df}, Δ(prev→curr)={dp}".format(
+            mf=_fmt_float(mean_first),
+            mp=_fmt_float(mean_prev),
+            mc=_fmt_float(mean_curr),
+            df=_fmt_float(d_first_curr_mean),
+            dp=_fmt_float(d_prev_curr_mean),
+        )
+    )
 
-    print("[summary] wRMSD mean: first={}, previous={}, current={}, Δ(first→curr)={}, Δ(prev→curr)={}".format(
-        fmt(first["wrmsd_mean"]),
-        fmt(prev["wrmsd_mean"]) if prev_run is not None else "—",
-        fmt(curr["wrmsd_mean"]),
-        fmt(wr_mean_delta_first_to_curr),
-        fmt(wr_mean_delta_prev_to_curr) if prev_run is not None else "—",
-    ))
+    # wRMSD median
+    if med_first is None or med_curr is None:
+        d_first_curr_med = None
+    else:
+        d_first_curr_med = med_curr - med_first
 
-    print("[summary] wRMSD median: first={}, previous={}, current={}, Δ(first→curr)={}, Δ(prev→curr)={}".format(
-        fmt(first["wrmsd_median"]),
-        fmt(prev["wrmsd_median"]) if prev_run is not None else "—",
-        fmt(curr["wrmsd_median"]),
-        fmt(wr_median_delta_first_to_curr),
-        fmt(wr_median_delta_prev_to_curr) if prev_run is not None else "—",
-    ))
+    if med_prev is None or med_curr is None:
+        d_prev_curr_med = None
+    else:
+        d_prev_curr_med = med_curr - med_prev
 
-    print("[summary] Proposals: due to unindexed (Hillmap search) = {}".format(
-        ring_props))
-    print("[summary] Proposals: due to local optimization (CrystFEL Refine or wRMSD-Boltzmann-weighted Hillmap search) = {}".format(
-        bo_props))
+    print(
+        "[summary] wRMSD median: first={mf}, previous={mp}, current={mc}, "
+        "Δ(first→curr)={df}, Δ(prev→curr)={dp}".format(
+            mf=_fmt_float(med_first),
+            mp=_fmt_float(med_prev),
+            mc=_fmt_float(med_curr),
+            df=_fmt_float(d_first_curr_med),
+            dp=_fmt_float(d_prev_curr_med),
+        )
+    )
 
-    print("[summary] Done events: count={}, wRMSD mean={}, median={}".format(
-        n_done, fmt(wr_done_mean), fmt(wr_done_median)))
-
-    # optional artifacts
-    if args.out_csv:
-        import csv
-        with open(args.out_csv, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=list(summary.keys()))
-            w.writeheader(); w.writerow(summary)
-        print(f"[summary] wrote {args.out_csv}")
-
-    if args.out_json:
-        with open(args.out_json, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
-        print(f"[summary] wrote {args.out_json}")
+    # Proposals + done from sidecar
+    summarize_state(run_root)
 
     return 0
 
-
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
