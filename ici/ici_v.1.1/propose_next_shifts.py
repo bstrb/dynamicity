@@ -541,8 +541,6 @@ def main(argv=None) -> int:
 
     args = ap.parse_args(argv)
 
-    print(f"[propose] Proposing next shifts...")
-
     log_path = os.path.join(args.run_root, "image_run_log.csv")
     if not os.path.isfile(log_path):
         print(f"ERROR: not found: {log_path}", file=sys.stderr)

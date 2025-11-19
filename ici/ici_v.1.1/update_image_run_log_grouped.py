@@ -325,6 +325,7 @@ def main(argv=None) -> int:
         f.writelines(out_lines)
 
     print(f"[log] Appended {appended_rows} new rows into grouped sections in {log_path}")
+    print(f"[propose] Proposing next shifts...")
     return 0
 
 
