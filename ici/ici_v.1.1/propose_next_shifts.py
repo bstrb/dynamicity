@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse, os, sys, math, hashlib, json
 from typing import List, Tuple, Optional, Dict
 import numpy as np
-import h5py
+import h5py, re
 
 from step1_hillmap_wrmsd import Trial as Step1Trial, Step1Params, propose_step1
 from step2_dxdy import propose_step2_dxdy, Step2DxDyConfig
@@ -38,6 +38,67 @@ def _group_blocks(lines: List[str]) -> List[Tuple[str, List[str]]]:
     if cur:
         blocks.append((cur_header, cur))
     return blocks
+
+def update_csv_with_proposals(log_path, proposals):
+    """
+    Modify the last row for each (h5,event) section and fill in:
+        next_dx_mm, next_dy_mm, reason
+    proposals[(h5_path, ev)] = (next_dx, next_dy, reason)
+    """
+    # Read whole file
+    with open(log_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    out = []
+    current_key = None
+
+    for i, line in enumerate(lines):
+        m = re.match(r"^#(?P<path>/.*)\s+event\s+(?P<ev>\d+)", line)
+        if m:
+            # Enter new section
+            h5_path = os.path.abspath(m.group("path"))
+            ev = int(m.group("ev"))
+            current_key = (h5_path, ev)
+            out.append(line)
+            continue
+
+        if current_key and not line.startswith("#") and line.strip():
+            # This is a CSV line inside a section
+            # Look ahead to see if it is the *last* CSV row in this section
+            is_last = False
+            for j in range(i + 1, len(lines)):
+                ln2 = lines[j]
+                # if re.match(r"^#/", ln2):   # next section starts
+                if re.match(r"^#(?P<path>/.*)\s+event\s+\d+", ln2):
+
+                    is_last = True
+                    break
+                if ln2.strip():  # another CSV line -> this is not last
+                    is_last = False
+                    break
+            else:
+                # end of file -> last row of last section
+                is_last = True
+
+            if is_last and current_key in proposals:
+                # Rewrite CSV row
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) < 7:
+                    parts += [""] * (7 - len(parts))
+
+                next_dx, next_dy, reason = proposals[current_key]
+                parts[5] = str(next_dx)
+                parts[6] = str(next_dy)
+
+                # Append reason as a comment for debugging
+                out.append(",".join(parts) + f"  # {reason}\n")
+                continue
+
+        out.append(line)
+
+    # Write back
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.writelines(out)
 
 def _parse_event_header(header_line: str) -> Tuple[str, int]:
     """Returns (hdf5_path, event_id)."""
@@ -79,56 +140,6 @@ def parse_blocks(lines: List[str]) -> Tuple[List[Tuple[str, List[str]]], int]:
             continue
 
     return blocks, latest_run
-def update_block_latest_run(block_lines: List[str],
-                            new_dx: Optional[float],
-                            new_dy: Optional[float]) -> List[str]:
-    """
-    Update the *last data row* in this block with the new proposal.
-
-    - If (new_dx, new_dy) is None → mark that row as done ('done','done').
-    - Else → write numeric next_dx/next_dy for that row.
-    """
-    out: List[str] = []
-    data_indices = []
-    parsed_parts = []
-
-    for i, ln in enumerate(block_lines):
-        if (not ln) or ln.startswith("#") or ln.strip().startswith("run_n"):
-            parsed_parts.append(None)
-            continue
-        parts = [p.strip() for p in ln.rstrip("\n").split(",")]
-        if len(parts) < 7:
-            parts += [""] * (7 - len(parts))
-        try:
-            int(parts[0])  # run number
-        except Exception:
-            parsed_parts.append(None)
-            continue
-        parsed_parts.append(parts)
-        data_indices.append(i)
-
-    if not data_indices:
-        return block_lines  # no rows to update
-
-    last_idx = data_indices[-1]
-
-    for i, ln in enumerate(block_lines):
-        parts = parsed_parts[i]
-        if i != last_idx or parts is None:
-            out.append(ln)
-            continue
-
-        if new_dx is None and new_dy is None:
-            parts[5] = "done"
-            parts[6] = "done"
-        else:
-            parts[5] = _fmt6(float(new_dx))
-            parts[6] = _fmt6(float(new_dy))
-
-        out.append(",".join(parts) + "\n")
-
-    return out
-
 
 # ------------------------ Small utils ------------------------
 
@@ -455,7 +466,8 @@ def propose_event(
 
 def _default_event_state() -> Dict:
     return {
-        "trials": [],            # list of [run, dx, dy, idx, wr]
+        "trials": [],              # list of [run, dx, dy, idx, wr]
+        "proposal_history": [],    # NEW: list of [run, next_dx, next_dy, reason]
         "latest_status": ["", ""],
         "last_run": -1,
     }
@@ -603,6 +615,8 @@ def main(argv=None) -> int:
         ev_state.setdefault("trials", [])
         ev_state.setdefault("latest_status", ["", ""])
         ev_state.setdefault("last_run", -1)
+        ev_state.setdefault("proposal_history", [])
+
 
         last_run_ev: int = int(ev_state.get("last_run", -1))
         latest_status = ev_state.get("latest_status", ["", ""])
@@ -719,8 +733,39 @@ def main(argv=None) -> int:
         else:
             n_new += 1
             ev_state["latest_status"] = [_fmt6(float(ndx)), _fmt6(float(ndy))]
+            
+        # ---------------- RECORD PROPOSAL HISTORY ----------------
+        run_number = latest_run + 1  # the proposal belongs to the NEXT run
+        if ndx is None and ndy is None:
+            ev_state["proposal_history"].append([run_number, "done", "done", reason])
+        else:
+            ev_state["proposal_history"].append([
+                run_number,
+                _fmt6(float(ndx)),
+                _fmt6(float(ndy)),
+                reason,
+            ])
 
-    # No rewrite of image_run_log.csv: only update sidecar
+    # ---------------------------------------------------------
+    # Apply proposals into the actual CSV
+    # ---------------------------------------------------------
+    log_path = os.path.join(args.run_root, "image_run_log.csv")
+
+    # Build proposals dict: {(abs_path, event): (next_dx, next_dy, reason)}
+    proposals_dict = {}
+    for key, ev_state in state["events"].items():
+        if not ev_state["proposal_history"]:
+            continue
+        # last proposal for this event
+        run_n, ndx, ndy, reason = ev_state["proposal_history"][-1]
+
+        # Convert key string back into tuple for matching CSV blocks
+        h5_path, ev_id = key.split("::")
+        proposals_dict[(os.path.abspath(h5_path), int(ev_id))] = (ndx, ndy, reason)
+
+    update_csv_with_proposals(log_path, proposals_dict)
+
+    # Save updated JSON
     state["last_global_run"] = latest_run
     save_state(state_path, state)
 

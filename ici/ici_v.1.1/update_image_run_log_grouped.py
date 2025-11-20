@@ -23,7 +23,7 @@ Notes
 from __future__ import annotations
 import argparse, csv, math, os, re, sys
 from typing import Dict, List, Tuple, Optional, OrderedDict
-import h5py
+import h5py, json
 from collections import OrderedDict as OD
 
 # DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
@@ -34,6 +34,23 @@ CSV_HEADER = "run_n,det_shift_x_mm,det_shift_y_mm,indexed,wrmsd,next_dx_mm,next_
 SECTION_RE = re.compile(r"^#(?P<path>/.*)\s+event\s+(?P<ev>\d+)\s*$")
 
 
+def load_state(state_path: str) -> Dict:
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        if not isinstance(state, dict):
+            raise ValueError("state not a dict")
+        if "events" not in state:
+            state["events"] = {}
+        if "last_global_run" not in state:
+            state["last_global_run"] = -1
+        return state
+    except FileNotFoundError:
+        return {"last_global_run": -1, "events": {}}
+    except Exception:
+        # If corrupted, start fresh
+        return {"last_global_run": -1, "events": {}}
+    
 def resolve_real_source(h5_path: str) -> str:
     """Return the real HDF5 path if images dataset is an ExternalLink; else the input path."""
     ap = os.path.abspath(h5_path)
@@ -183,6 +200,9 @@ def main(argv=None) -> int:
     runs_dir = run_root
     os.makedirs(runs_dir, exist_ok=True)
 
+    state = load_state(os.path.join(runs_dir, "image_run_state.json"))
+    events_state = state.get("events", {})
+
     last_n, last_run_dir = _find_latest_run_dir(runs_dir)
     if last_n < 0 or not last_run_dir:
         print("ERROR: no run_* folders found", file=sys.stderr)
@@ -264,8 +284,19 @@ def main(argv=None) -> int:
                 wr_out = f"{wv:.6f}"
         except Exception:
             pass
+        
+        # Correct key into sidecar
+        sidecar_key = f"{real}::{ev}"
+        ev_state = events_state.get(sidecar_key, {})
 
-        csv_line = f"{last_n},{dx:.6f},{dy:.6f},{indexed},{wr_out},,\n"
+        # Pull proposed shifts (or blanks)
+        latest_status = ev_state.get("latest_status", ["", ""])
+        next_dx, next_dy = latest_status
+
+        # Use the correct run number
+        csv_line = f"{last_n},{dx},{dy},{indexed},{wr_out},{next_dx},{next_dy}\n"
+
+
         line_stripped = csv_line.strip()
 
         # Create section if missing

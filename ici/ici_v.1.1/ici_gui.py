@@ -34,15 +34,6 @@ from PyQt6.QtWidgets import (
 
 import ici_orchestrator as orch
 
-# def _print_with_timestamp(line: str):
-#     """
-#     Print a line with a wall-clock timestamp prefix.
-#     Assumes 'line' already ends with a newline.
-#     """
-#     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-#     # line already has its own newline, so keep end=""
-#     print(f"[{ts}] {line}", end="", flush=True)
-
 class GuiStream:
     """
     Simple stream object that forwards writes to a callback.
@@ -403,7 +394,7 @@ class OrchestratorMainWindow(QMainWindow):
         self.log_edit = QPlainTextEdit(container)
         self.log_edit.setReadOnly(True)
         self.log_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.log_edit.setMinimumHeight(300)  # make it bigger by default
+        self.log_edit.setMinimumHeight(500)  # make it bigger by default
         main_layout.addWidget(self.log_edit, stretch=1)
 
         # ---------- Tooltips for parameters ----------
