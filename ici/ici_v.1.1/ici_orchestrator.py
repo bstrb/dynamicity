@@ -35,17 +35,17 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 #                 DEFAULT_ROOT + "/sim2.h5",
 #                 DEFAULT_ROOT + "/sim3.h5"]
 
-DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
-                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
-                DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
-
-# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038"
+# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MP15_3x100"
 # DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
 # DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-# DEFAULT_H5 = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks.h5"]
+# DEFAULT_H5   = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1712_min_15peaks_100.h5",
+#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
+#                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
+
+DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
+DEFAULT_H5 = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks.h5"]
 
 DEFAULT_MAX_ITERS = 20
 DEFAULT_NUM_CPU = os.cpu_count()
