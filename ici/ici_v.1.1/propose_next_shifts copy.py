@@ -83,73 +83,61 @@ def _group_blocks(lines: List[str]) -> List[Tuple[str, List[str]]]:
         blocks.append((cur_header or "", cur))
     return blocks
 
-def update_csv_with_proposals(
-    log_path: str,
-    proposals: Dict[Tuple[str, int], Tuple[str, str, str]],
-) -> None:
+
+def update_csv_with_proposals(log_path: str, proposals: Dict[Tuple[str, int], Tuple[str, str, str]]) -> None:
     """
     Modify the last row for each (h5,event) section in image_run_log.csv and fill:
         next_dx_mm, next_dy_mm, next_reason
 
     proposals[(abs_h5_path, ev)] = (next_dx, next_dy, reason)
     where next_dx/next_dy are strings (either numeric or "done").
-
-    This version is O(N) in the number of lines in the log. It preserves
-    the exact line ordering of the input file.
     """
     with open(log_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     out: List[str] = []
-    section_header_re = re.compile(r"^#(?P<path>/.*)\s+event\s+(?P<ev>\d+)")
     current_key: Optional[Tuple[str, int]] = None
-    last_csv_idx: Optional[int] = None  # index in `out` of last CSV line for current section
 
-    def apply_proposal_at_index(idx: Optional[int], key: Optional[Tuple[str, int]]) -> None:
-        """
-        If idx points at a CSV line for an event that has a proposal,
-        patch out[idx] in place.
-        """
-        if idx is None or key not in proposals:
-            return
+    section_header_re = re.compile(r"^#(?P<path>/.*)\s+event\s+(?P<ev>\d+)")
 
-        line = out[idx]
-        parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 8:
-            parts += [""] * (8 - len(parts))
-        else:
-            parts = parts[:8]
-
-        ndx, ndy, reason = proposals[key]
-
-        parts[5] = ndx if ndx not in (None, "", "None") else "done"
-        parts[6] = ndy if ndy not in (None, "", "None") else "done"
-        parts[7] = reason or ""
-
-        out[idx] = ",".join(parts) + "\n"
-
-    for line in lines:
+    for i, line in enumerate(lines):
         m = section_header_re.match(line)
         if m:
-            # New section → finalize last CSV for previous section
-            apply_proposal_at_index(last_csv_idx, current_key)
-
+            # New section
             h5_path = os.path.abspath(m.group("path"))
             ev = int(m.group("ev"))
             current_key = (h5_path, ev)
-            last_csv_idx = None
-
             out.append(line)
             continue
 
-        # Inside a section: track the last non-empty, non-comment CSV line
         if current_key and not line.startswith("#") and line.strip():
-            last_csv_idx = len(out)
+            # CSV line within a section – check if this is the last CSV line
+            is_last = True
+            for j in range(i + 1, len(lines)):
+                ln2 = lines[j]
+                if section_header_re.match(ln2):
+                    break  # next section, so this is last CSV in current section
+                if ln2.strip() and not ln2.startswith("#"):
+                    is_last = False
+                    break
+
+            if is_last and current_key in proposals:
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) < 8:
+                    parts += [""] * (8 - len(parts))
+                else:
+                    parts = parts[:8]
+
+                ndx, ndy, reason = proposals[current_key]
+
+                parts[5] = ndx if ndx not in (None, "", "None") else "done"
+                parts[6] = ndy if ndy not in (None, "", "None") else "done"
+                parts[7] = reason or ""
+
+                out.append(",".join(parts) + "\n")
+                continue
 
         out.append(line)
-
-    # EOF: finalize last section
-    apply_proposal_at_index(last_csv_idx, current_key)
 
     with open(log_path, "w", encoding="utf-8") as f:
         f.writelines(out)

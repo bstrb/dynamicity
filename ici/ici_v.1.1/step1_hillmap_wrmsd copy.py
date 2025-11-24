@@ -99,95 +99,65 @@ def _filter_min_spacing(cands_xy, tried_xy, min_spacing):
 # ---------------------------------------------------------------------
 # Main hillmap with wRMSD-weighted probability
 # ---------------------------------------------------------------------
-def propose_step1(trials: List[Trial], params: Step1Params, beta: float = 10.0) -> Step1Result:
-    """
-    Hill-map proposal with wRMSD-weighted hills.
-
-    trials: list of Trial(x_mm, y_mm, indexed, wrmsd)
-    params: Step1Params(...)
-    beta: Boltzmann weight for wRMSD (larger = sharper preference for low wRMSD).
-    """
+def propose_step1(trials: List[Trial], params: Step1Params, beta = 10.0) -> Step1Result:
     rng = random.Random(params.rng_seed)
     R = params.radius_mm
     sigma = R / 2.0  # 2σ = R
     A0 = params.A0
     A_hill = params.hill_amp_frac * A0
     A_drop = -params.drop_amp_frac * A0
-
-    # Existing trial positions
-    tried_xy = (
-        np.array([[t.x_mm, t.y_mm] for t in trials], dtype=np.float64)
-        if trials
-        else np.empty((0, 2), float)
-    )
+    
+    tried_xy = np.array([[t.x_mm, t.y_mm] for t in trials], dtype=np.float64) if trials else np.empty((0, 2), float)
 
     # successes/failures based only on wrmsd
     successes = [(t.x_mm, t.y_mm, t.wrmsd) for t in trials if t.wrmsd is not None]
     failures = [(t.x_mm, t.y_mm) for t in trials if t.wrmsd is None]
 
-    # Sample candidate points uniformly in disk (uses the original RNG)
-    cand_xy = _sample_uniform_disk(params.n_candidates, R, rng)
+    # print("================================")
+    # for t in trials:
+    #     print(f"(dx,dy) = ({t.x_mm},{t.y_mm}), indexed = {t.indexed}, wrmsd = {t.wrmsd}")
 
-    # Enforce minimum spacing vs tried centers
+
+    # Sample candidate points uniformly in disk
+    cand_xy = _sample_uniform_disk(params.n_candidates, R, rng)
     keep = _filter_min_spacing(cand_xy, tried_xy, params.min_spacing_mm)
     if keep.size == 0:
         return Step1Result(True, None, "step1_done_exhausted_no_candidates")
 
     cand_xy = cand_xy[keep, :]
 
-    # Reference center (first attempt center in absolute coords)
+    # Reference center
     c0x, c0y = params.first_attempt_center_mm
 
-    # Base Gaussian field around reference center (vectorized)
-    dx0 = cand_xy[:, 0] - c0x
-    dy0 = cand_xy[:, 1] - c0y
-    g0 = np.exp(-0.5 * (dx0 * dx0 + dy0 * dy0) / (sigma * sigma))
+    # Base Gaussian field
+    w = np.zeros((cand_xy.shape[0],), float)
 
     n_succ = len(successes)
     if n_succ > 0:
-        # Gradually suppress base Gaussian as evidence accumulates
-        A0 = A0 / n_succ
+        A0 = A0 / n_succ   # gradually suppress base Gaussian as evidence accumulates
+        # A0 = A0 / n_succ**(1/3)    # gradually suppress base Gaussian as evidence accumulates
 
-    # Start with the base Gaussian contribution
-    w = A0 * g0
+    g0 = np.array([_gauss2d(x, y, c0x, c0y, sigma) for x, y in cand_xy], float)
+    w += A0 * g0
 
-    # --------------------------------------------------------------
-    # wRMSD-based hills from successful trials (vectorized)
-    # --------------------------------------------------------------
-    if n_succ > 0:
-        wr_vals = np.array([wr for (_, _, wr) in successes if wr is not None], dtype=np.float64)
-        if wr_vals.size > 0:
-            wmin = float(np.min(wr_vals))
-            # Boltzmann-style scores relative to current minimum
-            scores = np.exp(-beta * (wr_vals - wmin))
-            scores_sum = float(np.sum(scores))
-            if scores_sum > 0.0 and np.isfinite(scores_sum):
-                scores /= scores_sum  # normalize to keep total contribution balanced
+    # wRMSD-based weighting for successful trials (Boltzmann-style)
+    if successes:
+        wr_vals = np.array([wr for (_, _, wr) in successes if wr is not None], float)
+        wmin = float(np.min(wr_vals))
+        # exponential weighting relative to the current minimum
+        scores = np.exp(-beta * (wr_vals - wmin))
+        scores /= np.sum(scores)  # normalize so total contribution stays balanced
 
-                # success centers as array (n_succ, 2)
-                succ_xy = np.array([[cx, cy] for (cx, cy, _wr) in successes], dtype=np.float64)
+        for (cx, cy, wr), score in zip(successes, scores):
+            g = np.array([_gauss2d(x, y, cx, cy, sigma) for x, y in cand_xy], float)
+            w += A_hill * score * g
 
-                # diffs shape: (n_cand, n_succ, 2)
-                diffs = cand_xy[:, None, :] - succ_xy[None, :, :]
-                d2 = np.sum(diffs * diffs, axis=2)
-                g_succ = np.exp(-0.5 * d2 / (sigma * sigma))  # (n_cand, n_succ)
-
-                # Weighted sum over successes for each candidate
-                w += A_hill * (g_succ * scores[None, :]).sum(axis=1)
-
-    # --------------------------------------------------------------
-    # Penalties for failed attempts (vectorized)
-    # --------------------------------------------------------------
+    # Penalize failed attempts
     if failures:
-        fail_xy = np.array(failures, dtype=np.float64)  # (n_fail, 2)
-        diffs_f = cand_xy[:, None, :] - fail_xy[None, :, :]
-        d2_f = np.sum(diffs_f * diffs_f, axis=2)  # (n_cand, n_fail)
-        g_fail = np.exp(-0.5 * d2_f / (sigma * sigma))
-        w += A_drop * g_fail.sum(axis=1)
-
-    # --------------------------------------------------------------
-    # Normalize, enforce positivity, and sample
-    # --------------------------------------------------------------
+        for cx, cy in failures:
+            g = np.array([_gauss2d(x, y, cx, cy, sigma) for x, y in cand_xy], float)
+            w += A_drop * g
+    # Ensure positivity and normalize
     w = np.maximum(0.0, w) + params.explore_floor
     s = float(np.sum(w))
     if not np.isfinite(s) or s <= 0.0:
@@ -195,31 +165,33 @@ def propose_step1(trials: List[Trial], params: Step1Params, beta: float = 10.0) 
 
     p = w / s
 
-    # HARD rejection of any previously tried center (no duplicate (dx,dy))
+    # --------------------------------------------------------------
+    # NEW: HARD REJECTION OF ANY PREVIOUSLY TRIED CENTER
+    # This prevents duplicate (dx,dy) proposals.
     tried_set = {(float(t.x_mm), float(t.y_mm)) for t in trials}
 
-    # Candidates in absolute coordinates
+    # Convert candidate positions from local frame to absolute frame
     abs_cand_xy = np.column_stack([
         c0x + cand_xy[:, 0],
-        c0y + cand_xy[:, 1],
+        c0y + cand_xy[:, 1]
     ])
 
-    unique_mask = np.array(
-        [(cx, cy) not in tried_set for cx, cy in abs_cand_xy],
-        dtype=bool,
-    )
+    # Mask out any candidates that match a previously tried center
+    unique_mask = np.array([
+        (cx, cy) not in tried_set
+        for cx, cy in abs_cand_xy
+    ], dtype=bool)
 
     if not np.any(unique_mask):
         return Step1Result(True, None, "step1_done_no_unique_candidates")
 
-    # Restrict to unique candidates and renormalize probabilities
+    # Renormalize over remaining unique candidates
     cand_xy = cand_xy[unique_mask]
     p = p[unique_mask]
     p = p / np.sum(p)
+    # --------------------------------------------------------------
 
-    # Sampling still uses a NumPy RNG derived from the seed for reproducibility
     np_rng = np.random.default_rng(params.rng_seed ^ 0xA53E12B4)
     idx = int(np_rng.choice(np.arange(cand_xy.shape[0]), p=p))
     x_mm, y_mm = float(cand_xy[idx, 0]), float(cand_xy[idx, 1])
-
     return Step1Result(False, (c0x + x_mm, c0y + y_mm), "step1_hillmap_wrmsd_sample")
