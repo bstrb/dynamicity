@@ -113,9 +113,9 @@ def propose_step1(trials: List[Trial], params: Step1Params, beta = 10.0) -> Step
     successes = [(t.x_mm, t.y_mm, t.wrmsd) for t in trials if t.wrmsd is not None]
     failures = [(t.x_mm, t.y_mm) for t in trials if t.wrmsd is None]
 
-    print("================================")
-    for t in trials:
-        print(f"(dx,dy) = ({t.x_mm},{t.y_mm}), indexed = {t.indexed}, wrmsd = {t.wrmsd}")
+    # print("================================")
+    # for t in trials:
+    #     print(f"(dx,dy) = ({t.x_mm},{t.y_mm}), indexed = {t.indexed}, wrmsd = {t.wrmsd}")
 
 
     # Sample candidate points uniformly in disk
