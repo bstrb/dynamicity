@@ -2,20 +2,17 @@
 # -*- coding: utf-8 -*-
 """
 ici_orchestrator.py
+Orchestrate SerialED iterative runs using provided helper scripts.
+loop:
+    - create overlays and list for next iteration
+    - run indexamajig/xgandalf/integration
+    - evaluate streams
+    - update image_run_log.csv
+    - propose next det shifts
+    - summarize log
+    - build early_break_from_log (one with all best index per image/event and one with only done image/events)
+    until done or max iterations reached
 
-Strict orchestration per requested loop:
-When runs exist (including after first init), iterate:
-  1) propose_next_shifts.py
-  2) if all next_* == done for latest run -> break
-  3) else:
-       build_overlays_and_list.py
-       (re)detect latest run in folder
-       copy_next_run_sh.py on latest
-       run_sh.py on latest
-       fix_stream_paths.py on latest (inplace)
-       evaluate_stream.py on latest
-       update_image_run_log_grouped.py
-       build_early_break_from_log.py
 """
 from glob import glob
 import argparse, os, re, subprocess, sys
@@ -30,10 +27,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # DEFAULT_H5 = []
 # Default paths
 
-# DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
-# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
-# DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
-# DEFAULT_H5   = [DEFAULT_ROOT + "/sim2.h5"]
+DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_012"
+DEFAULT_GEOM = DEFAULT_ROOT + "/MFM300-VIII.geom"
+DEFAULT_CELL = DEFAULT_ROOT + "/MFM300-VIII.cell"
+DEFAULT_H5   = [DEFAULT_ROOT + "/sim2.h5"]
 # DEFAULT_H5   = [DEFAULT_ROOT + "/sim1.h5",
 #                 DEFAULT_ROOT + "/sim2.h5",
 #                 DEFAULT_ROOT + "/sim3.h5"]
@@ -45,10 +42,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 #                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_1822_min_15peaks_100.h5",
 #                 DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_100.h5"]
 
-DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038"
-DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
-DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
-DEFAULT_H5 = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks.h5"]
+# DEFAULT_ROOT = "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038"
+# DEFAULT_GEOM = DEFAULT_ROOT + "/MFM.geom"
+# DEFAULT_CELL = DEFAULT_ROOT + "/MFM.cell"
+# DEFAULT_H5 = [DEFAULT_ROOT + "/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks.h5"]
 
 DEFAULT_MAX_ITERS = 20
 DEFAULT_NUM_CPU = os.cpu_count()
@@ -71,14 +68,14 @@ done_on_streak_length   = 5     # length of streak to consider done when at leas
 
 DEFAULT_FLAGS = [
     # Peakfinding
-    "--peaks=cxi",
-    # "--peaks=peakfinder9",
-    # "--min-snr-biggest-pix=1",
-    # "--min-snr-peak-pix=6",
-    # "--min-snr=1",
-    # "--min-sig=11",
-    # "--min-peak-over-neighbour=-inf",
-    # "--local-bg-radius=3",
+    # "--peaks=cxi",
+    "--peaks=peakfinder9",
+    "--min-snr-biggest-pix=1",
+    "--min-snr-peak-pix=6",
+    "--min-snr=1",
+    "--min-sig=11",
+    "--min-peak-over-neighbour=-inf",
+    "--local-bg-radius=3",
     # Other
     "-j", "1",
     "--min-peaks=15",
@@ -322,14 +319,13 @@ def detect_latest_run_from_log(log_path: str) -> int:
         return latest
     except Exception:
         return -1
-
 def all_next_done_for_latest(log_path: str, latest: int) -> bool:
     if latest < 0:
         return False
     any_row = False
     try:
         with open(log_path, "r", encoding="utf-8") as f:
-            _ = f.readline()
+            _ = f.readline()  # skip header
             for ln in f:
                 if ln.startswith("#") or not ln.strip():
                     continue
@@ -339,11 +335,16 @@ def all_next_done_for_latest(log_path: str, latest: int) -> bool:
                 if int(parts[0]) != latest:
                     continue
                 any_row = True
-                if not (parts[-2] == "done" and parts[-1] == "done"):
+
+                # Explicitly look at *next_dx_mm* and *next_dy_mm* columns
+                next_dx = parts[5].lower()
+                next_dy = parts[6].lower()
+                if not (next_dx == "done" and next_dy == "done"):
                     return False
         return any_row
     except FileNotFoundError:
         return False
+
 
 # def do_init_sequence(run_root: str, geom: str, cell: str, h5_sources: list, jobs=os.cpu_count()):
 def do_init_sequence(
@@ -436,7 +437,6 @@ def do_init_sequence(
     run_py("build_early_break_from_log.py", ["--run-root", run_root])
     print("[done] Initialization cycle complete. Proceeding to loop...")
 
-# def iterate_until_done(run_root, max_iters=10, jobs=os.cpu_count()):
 def iterate_until_done(
     run_root: str,
     geom: str,
@@ -479,10 +479,9 @@ def iterate_until_done(
         it += 1
 
 
-        import datetime
-        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # print("================================================", flush=True)
-        # print(f"[loop] Iteration {it} started at {ts}", flush=True)
+        # import datetime
+        # ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
         print(f"==================== Iteration {it} started ====================", flush=True)
 
         # evaluate stop condition based on latest run in the *log*
@@ -504,16 +503,19 @@ def iterate_until_done(
                 print(f"[rename] {early_stream} → {done_stream}")
             break
 
-        # 3) else build overlays & list for next iteration
+        # # 3) else build overlays & list for next iteration
         run_py("build_overlays_and_list.py", ["--run-root", run_root])
 
-        # Re-detect LATEST RUN IN FOLDER (as requested)
-        latest_num, latest_dir = latest_run(run_root)
-        if latest_num < 0:
-            print("[err] No run folders found after overlays; aborting.")
+        # Decide next run index from the *log*, not by reusing the latest folder
+        latest_in_log = detect_latest_run_from_log(log_path)
+        if latest_in_log < 0:
+            print("[err] No runs found in image_run_log.csv; aborting.")
             break
 
-        run_str = f"{latest_num:03d}"
+        next_run_num = latest_in_log + 1
+        run_str = f"{next_run_num:03d}"
+        latest_dir = os.path.join(runs_dir(run_root), f"run_{run_str}")
+        os.makedirs(latest_dir, exist_ok=True)
 
         # run_py("copy_next_run_sh.py", ["--run-root", run_root, "--run", run_str], check=False)
         run_py("create_run_sh.py", ["--run-root", run_root, "--geom", geom, "--cell", cell, "--run", run_str,
@@ -552,7 +554,7 @@ def iterate_until_done(
         run_py("build_early_break_from_log.py", ["--run-root", run_root])
 
     else:
-        print(f"[stop] Reached max-iters={max_iters} without satisfying 'done'.")
+        print(f"[stop] Reached max-iters={max_iters-1} without satisfying 'done'.")
     print("[done] Orchestration complete.")
 
 def main(argv=None):

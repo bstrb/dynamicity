@@ -260,6 +260,5 @@ def main():
 
     return concat_streams(run_dir, run_str, ev_dirs)
 
-
 if __name__ == "__main__":
     sys.exit(main())

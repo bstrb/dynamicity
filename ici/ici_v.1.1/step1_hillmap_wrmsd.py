@@ -106,16 +106,21 @@ def propose_step1(trials: List[Trial], params: Step1Params, beta = 10.0) -> Step
     A0 = params.A0
     A_hill = params.hill_amp_frac * A0
     A_drop = -params.drop_amp_frac * A0
-
+    
     tried_xy = np.array([[t.x_mm, t.y_mm] for t in trials], dtype=np.float64) if trials else np.empty((0, 2), float)
-    successes = [(t.x_mm, t.y_mm, t.wrmsd) for t in trials if t.indexed == 1 and t.wrmsd is not None]
-    failures = [(t.x_mm, t.y_mm) for t in trials if t.indexed == 0]
+
+    # successes/failures based only on wrmsd
+    successes = [(t.x_mm, t.y_mm, t.wrmsd) for t in trials if t.wrmsd is not None]
+    failures = [(t.x_mm, t.y_mm) for t in trials if t.wrmsd is None]
+
+    print("================================")
+    for t in trials:
+        print(f"(dx,dy) = ({t.x_mm},{t.y_mm}), indexed = {t.indexed}, wrmsd = {t.wrmsd}")
+
 
     # Sample candidate points uniformly in disk
     cand_xy = _sample_uniform_disk(params.n_candidates, R, rng)
     keep = _filter_min_spacing(cand_xy, tried_xy, params.min_spacing_mm)
-    if keep.size == 0 and params.allow_spacing_relax:
-        keep = _filter_min_spacing(cand_xy, tried_xy, params.min_spacing_mm * 0.5)
     if keep.size == 0:
         return Step1Result(True, None, "step1_done_exhausted_no_candidates")
 
@@ -152,7 +157,6 @@ def propose_step1(trials: List[Trial], params: Step1Params, beta = 10.0) -> Step
         for cx, cy in failures:
             g = np.array([_gauss2d(x, y, cx, cy, sigma) for x, y in cand_xy], float)
             w += A_drop * g
-
     # Ensure positivity and normalize
     w = np.maximum(0.0, w) + params.explore_floor
     s = float(np.sum(w))
@@ -160,8 +164,34 @@ def propose_step1(trials: List[Trial], params: Step1Params, beta = 10.0) -> Step
         return Step1Result(True, None, "step1_done_degenerate_weights")
 
     p = w / s
+
+    # --------------------------------------------------------------
+    # NEW: HARD REJECTION OF ANY PREVIOUSLY TRIED CENTER
+    # This prevents duplicate (dx,dy) proposals.
+    tried_set = {(float(t.x_mm), float(t.y_mm)) for t in trials}
+
+    # Convert candidate positions from local frame to absolute frame
+    abs_cand_xy = np.column_stack([
+        c0x + cand_xy[:, 0],
+        c0y + cand_xy[:, 1]
+    ])
+
+    # Mask out any candidates that match a previously tried center
+    unique_mask = np.array([
+        (cx, cy) not in tried_set
+        for cx, cy in abs_cand_xy
+    ], dtype=bool)
+
+    if not np.any(unique_mask):
+        return Step1Result(True, None, "step1_done_no_unique_candidates")
+
+    # Renormalize over remaining unique candidates
+    cand_xy = cand_xy[unique_mask]
+    p = p[unique_mask]
+    p = p / np.sum(p)
+    # --------------------------------------------------------------
+
     np_rng = np.random.default_rng(params.rng_seed ^ 0xA53E12B4)
     idx = int(np_rng.choice(np.arange(cand_xy.shape[0]), p=p))
     x_mm, y_mm = float(cand_xy[idx, 0]), float(cand_xy[idx, 1])
-    # return Step1Result(False, (x_mm, y_mm), "step1_hillmap_wrmsd_sample")
     return Step1Result(False, (c0x + x_mm, c0y + y_mm), "step1_hillmap_wrmsd_sample")

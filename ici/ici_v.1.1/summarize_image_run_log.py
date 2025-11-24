@@ -352,10 +352,14 @@ def proposal_counts_for_run(events: EventsDict, run: int, sidecar):
     Count proposals for a given run, based on the *final* proposal recorded per event.
     Only the last proposal with rn == run is meaningful.
 
-    Classification:
-        - reason.startswith("step1") → Hillmap / unindexed
-        - reason.startswith("dxdy")  → refinement / Boltzmann
-        - reason.startswith("done")  → not a proposal
+    Classification (matching propose_next_shifts.py):
+        - reason.startswith("step1")
+              → Hillmap proposals (Step-1), including Boltzmann-weighted sampling
+                when the event has ever been indexed.
+        - reason.startswith("dxdy")
+              → local dx/dy refinement (Step-2) around an indexed solution.
+        - reason.startswith("done")
+              → not a proposal (convergence / finished).
     """
 
     ring = 0
@@ -505,10 +509,11 @@ def main(argv=None) -> int:
         _delta(first_wr_median, curr_wr_median),
         _delta(prev_wr_median, curr_wr_median),
     ))
-
-    print("[summary] Proposals: unindexed(Hillmap)={}, refine/Boltzmann={}".format(
+    
+    print("[summary] Proposals: Hillmap(step1/Boltzmann)={}, dxdy_refine(step2)={}".format(
         prop_never, prop_refine
     ))
+
 
     print("[summary] Done events: {}/{} ({:.1f}%),  wRMSD mean={}, median={}".format(
         curr_done_count,

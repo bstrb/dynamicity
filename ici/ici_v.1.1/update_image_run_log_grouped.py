@@ -13,6 +13,19 @@ If a section (image-event) doesn't exist yet, it is created at the end.
 
 Duplicates (identical run lines within a given section) are avoided.
 
+Ingest the latest chunk_metrics_###.csv from runs/run_### and append rows to
+runs/image_run_log.csv using the existing CSV schema:
+run_n,det_shift_x_mm,det_shift_y_mm,indexed,wrmsd,next_dx_mm,next_dy_mm,next_reason
+
+Here:
+  - indexed = *ever-indexed* sticky flag:
+      0 → this event has never had a successful indexing (finite wRMSD)
+      1 → at least one run for this event has had a finite wRMSD
+  - wrmsd  = per-run wRMSD value (blank if no wRMSD for that run)
+
+This version *groups* rows by image-event sections so that new run entries are
+inserted into the correct section rather than all being appended at the end.
+
 Notes
 -----
 - Section headers are lines of the form:
@@ -29,27 +42,8 @@ from collections import OrderedDict as OD
 # DEFAULT_ROOT = "/Users/xiaodong/Desktop/simulations/MFM300-VIII_tI/sim_004"
 DEFAULT_ROOT = "/home/bubl3932/files/ici_trials"
 IMAGES_DS = "/entry/data/images"
-
-CSV_HEADER = "run_n,det_shift_x_mm,det_shift_y_mm,indexed,wrmsd,next_dx_mm,next_dy_mm\n"
+CSV_HEADER = "run_n,det_shift_x_mm,det_shift_y_mm,indexed,wrmsd,next_dx_mm,next_dy_mm,next_reason\n"
 SECTION_RE = re.compile(r"^#(?P<path>/.*)\s+event\s+(?P<ev>\d+)\s*$")
-
-
-def load_state(state_path: str) -> Dict:
-    try:
-        with open(state_path, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        if not isinstance(state, dict):
-            raise ValueError("state not a dict")
-        if "events" not in state:
-            state["events"] = {}
-        if "last_global_run" not in state:
-            state["last_global_run"] = -1
-        return state
-    except FileNotFoundError:
-        return {"last_global_run": -1, "events": {}}
-    except Exception:
-        # If corrupted, start fresh
-        return {"last_global_run": -1, "events": {}}
     
 def resolve_real_source(h5_path: str) -> str:
     """Return the real HDF5 path if images dataset is an ExternalLink; else the input path."""
@@ -148,40 +142,25 @@ def _ensure_section(sections: "OD[Tuple[str,int], List[str]]", key: Tuple[str,in
     if key not in sections:
         sections[key] = [f"#{key[0]} event {key[1]}\n"]
 
-
 def _existing_run_lines_in_section(section_lines: List[str]) -> set:
-    """Return set of run lines (string after header) present in this section, to avoid duplicates."""
+    """
+    Return set of (run_n,dx,dy,indexed,wrmsd) signatures present in this section,
+    ignoring next_* fields, to avoid duplicates for the same trial.
+    """
     existing = set()
     for ln in section_lines:
         if ln.startswith("#"):
             continue
         s = ln.strip()
-        if s:  # non-empty CSV line
-            existing.add(s)
-    return existing
-
-
-def _section_latest_status(section_lines: List[str]) -> Optional[Tuple[str, str]]:
-    """
-    Scan the section bottom-up and return the (next_dx_mm, next_dy_mm) from the
-    most recent row that actually carries a status (either numeric or 'done').
-    Returns None if the section has no status-bearing row yet.
-    """
-    for ln in reversed(section_lines):
-        if not ln or ln.startswith("#"):
-            continue
-        s = ln.strip()
         if not s:
             continue
         parts = [p.strip() for p in s.split(",")]
-        if len(parts) < 7:
-            parts += [""] * (7 - len(parts))
-        nx, ny = parts[5], parts[6]
-        # treat presence of either field as a "status row" (numeric or 'done')
-        if nx or ny:
-            return nx, ny
-    return None
-
+        if len(parts) < 5:
+            parts += [""] * (5 - len(parts))
+        # only the first five fields define a unique trial
+        sig = ",".join(parts[:5])
+        existing.add(sig)
+    return existing
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
@@ -200,8 +179,8 @@ def main(argv=None) -> int:
     runs_dir = run_root
     os.makedirs(runs_dir, exist_ok=True)
 
-    state = load_state(os.path.join(runs_dir, "image_run_state.json"))
-    events_state = state.get("events", {})
+    # state = load_state(os.path.join(runs_dir, "image_run_state.json"))
+    # events_state = state.get("events", {})
 
     last_n, last_run_dir = _find_latest_run_dir(runs_dir)
     if last_n < 0 or not last_run_dir:
@@ -271,47 +250,55 @@ def main(argv=None) -> int:
 
         dx = _to_float(row.get("det_shift_x_mm", 0.0))
         dy = _to_float(row.get("det_shift_y_mm", 0.0))
-        try:
-            indexed = int(row.get("indexed", 0) or 0)
-        except Exception:
-            indexed = 0
 
+        # ---------------------------------------------------------
+        # Compute wr_out and indexed (sticky ever-indexed flag)
+        # ---------------------------------------------------------
         wr_out = ""
         wrmsd = row.get("wrmsd", "")
         try:
-            wv = float(wrmsd) if wrmsd not in ("", None) else float("nan")
+            wv = float(wrmsd) if wrmsd not in (None, "") else float("nan")
             if math.isfinite(wv):
                 wr_out = f"{wv:.6f}"
+            else:
+                wv = float("nan")
         except Exception:
-            pass
-        
-        # Correct key into sidecar
-        sidecar_key = f"{real}::{ev}"
-        ev_state = events_state.get(sidecar_key, {})
+            wv = float("nan")
 
-        # Pull proposed shifts (or blanks)
-        latest_status = ev_state.get("latest_status", ["", ""])
-        next_dx, next_dy = latest_status
+        indexed_this_run = math.isfinite(wv)
 
-        # Use the correct run number
-        csv_line = f"{last_n},{dx},{dy},{indexed},{wr_out},{next_dx},{next_dy}\n"
+        # Get previous indexed flag from *last line* in this section (minimal parsing)
+        if key in sections and sections[key]:  # existing rows for this event
+            last_line = sections[key][-1].strip()
+            parts = last_line.split(",")
+
+            # parts layout:
+            # 0=run_n,1=dx_mm,2=dy_mm,3=indexed,4=wrmsd,5=next_dx,6=next_dy,7=next_reason
+            try:
+                previous_indexed = int(parts[3])
+            except Exception:
+                previous_indexed = 0
+        else:
+            # first run OR new event → no previous indexed
+            previous_indexed = 0
 
 
-        line_stripped = csv_line.strip()
+        # Sticky-flag logic:
+        # If this run indexed OR any previous run indexed → indexed = 1
+        indexed = 1 if (indexed_this_run or previous_indexed == 1) else 0
+        # ---------------------------------------------------------
+        csv_line = f"{last_n},{dx},{dy},{indexed},{wr_out},,,\n"
+
+        # Canonical signature for this trial: only first 5 fields
+        parts_new = [p.strip() for p in csv_line.strip().split(",")]
+        if len(parts_new) < 5:
+            parts_new += [""] * (5 - len(parts_new))
+        sig_new = ",".join(parts_new[:5])
 
         # Create section if missing
         if key not in sections:
             _ensure_section(sections, key)
             new_section_order.append(key)
-
-        # If the latest status row in this section is 'done,done', skip appending
-        latest_status = _section_latest_status(sections[key])
-        if latest_status is not None:
-            nx, ny = latest_status
-            if str(nx).lower() == "done" and str(ny).lower() == "done":
-                # This section is already finalized; do not add fresh rows
-                # (keeps the latest row as 'done,done' so downstream summary is correct)
-                continue
 
         # Avoid duplicates within the section using a cached set
         existing_set = existing_cache.get(key)
@@ -319,9 +306,9 @@ def main(argv=None) -> int:
             existing_set = _existing_run_lines_in_section(sections[key])
             existing_cache[key] = existing_set
 
-        if line_stripped not in existing_set:
+        if sig_new not in existing_set:
             sections[key].append(csv_line)
-            existing_set.add(line_stripped)
+            existing_set.add(sig_new)
             appended_rows += 1
 
     # Reassemble file with preserved order:
