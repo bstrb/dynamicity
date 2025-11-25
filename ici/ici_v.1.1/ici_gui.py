@@ -197,7 +197,7 @@ class OrchestratorMainWindow(QMainWindow):
         main_layout.addWidget(paths_group)
 
         # ---------- Middle group: convergence / propose_next_shifts ----------
-        conv_group = QGroupBox("Convergence / propose_next_shifts parameters", container)
+        conv_group = QGroupBox("Convergence / Hillmap search parameters (Hover over each field for a short explanation.)", container)
         conv_layout = QFormLayout(conv_group)
 
         conv_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
