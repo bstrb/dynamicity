@@ -1,0 +1,40 @@
+remove_images.py file.h5 -> no_images_file.h5 (done locally)
+ici_runs (—no-image-data + --no-revalidate) -> only_done_events.stream/early_break.stream (done on cluster or remote server)
+stream_to_sol.py only_done_events.stream/early_break.stream -> only_done_events.sol/early_break.sol + .geom + .lst (done on cluster or remote 
+update .sol and .lst files to point to file.h5 instead of no_images_file.h5 (done locally, user interaction may be needed)
+create indexamajig.sh script with updated .sol and .lst file+ .geom + .cell (done locally)
+run integration from .sol (done locally since image data available locally):
+
+# indexamajig -g .geom -i image-files.lst -o output.stream \
+#               --indexing=file --fromfile-input-file=.sol \
+#               --integration=rings --int-radius=4,5,9 \
+#               --no-refine --no-check-peaks --no-check-cell --no-revalidate --no-non-hits-in-stream \
+#               --peaks=cxi --no-half-pixel-shift --fix-profile-radius = 50000000 \
+
+Nice, thanks for tightening the workflow. Let’s lock in *this* version and then I’ll show you how I’d implement paths + the `.sol`/`.lst` handling in a clean way.
+
+---
+
+## Workflow 
+
+**Local (with images present)**
+
+1. `file.h5  →  no_images_file.h5`
+   via `remove_images.py`
+
+**Cluster / remote (no images, light file)**
+2. Run `ici_runs` on `no_images_file.h5` with
+`--no-image-data --no-revalidate` + geom, cell, indexing and ici params
+→ `only_done_events.stream` / `early_break.stream`
+
+3. `stream_to_sol.py` on the cluster:
+   `only_done_events.stream  →  only_done_events.sol + .geom`
+
+**Back local**
+4. Rewrite `.sol` so `no_images_file.h5 → file.h5` and
+**generate `.lst`** consistent with `file.h5`
+
+5. Create `indexamajig.sh` using:
+   updated `.sol`, the new `.lst`, and `.geom`
+
+6. Run integration locally from `.sol` (images available in `file.h5`).

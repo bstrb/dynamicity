@@ -19,7 +19,7 @@ AXIS_MAP = {
     "monoclinic": "b",
     "tetragonal": "c",
     "hexagonal": "c",
-    "trigonal": "c",
+    # "trigonal": "c",
     "rhombohedral": "c",
     # orthorhombic, cubic, triclinic → no unique_axis entry
 }
