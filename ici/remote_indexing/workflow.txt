@@ -5,20 +5,19 @@
 1.⁠ ⁠⁠ file.h5 → no_images_file.h5 ⁠
    via ⁠ remove_images.py ⁠ (stores ⁠ original_file_path ⁠ attribute in ⁠ no_images_file.h5 ⁠).
 
-*Cluster / remote (no images, light file)*
-2.⁠ ⁠Run ⁠ ici_runs ⁠ on ⁠ no_images_file.h5 ⁠ with
+*Remote (no images, light file)*
+2.⁠ ⁠Run ⁠ ici runs ⁠ on ⁠ no_images_file.h5 ⁠ with
 ⁠ --no-image-data --no-revalidate ⁠ + geom, cell, indexing and ici params
 → ⁠ only_done_events.stream ⁠ / ⁠ early_break.stream ⁠
 
-3.⁠ ⁠⁠ stream_to_sol.py ⁠ on the cluster:
-   ⁠ only_done_events.stream → only_done_events.sol + only_done_events.geom + only_done_events.cell ⁠
-   (copies geom + cell blocks from the stream header).
+3.⁠ ⁠⁠ only_done_events.stream/early_break.stream → only_done_events.sol/early_break.sol + .geom + .cell ⁠
+   via stream_to_sol.py  (copies geom + cell blocks from the stream header).
 
 *Back local*
-4.⁠ ⁠Run the relinker script on ⁠ .sol ⁠:
+4.⁠ ⁠Run the sol_relink_images.py on⁠ .sol ⁠:
 
 •⁠  ⁠finds all ⁠ no_images_file.h5 ⁠ paths
-•⁠  ⁠resolves originals via ⁠ original_file_path ⁠ (or prompts you)
+•⁠  ⁠resolves originals via ⁠ original_file_path ⁠ (or prompts user)
 •⁠  ⁠rewrites ⁠ .sol ⁠ so ⁠ no_images_file.h5 → file.h5 ⁠
 •⁠  ⁠*generates ⁠ .lst ⁠* listing the original ⁠ file.h5 ⁠ paths
 
