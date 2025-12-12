@@ -11,6 +11,7 @@ set -euo pipefail
 GEOM="{geom}"
 LST="{lst}"
 SOL="{sol}"
+JOBS="$(nproc)" 
 OUT_STREAM="{out_stream}"
 
 indexamajig \\
@@ -19,6 +20,7 @@ indexamajig \\
   -o "$OUT_STREAM" \\
   --indexing=file \\
   --fromfile-input-file="$SOL" \\
+  -j "$JOBS" \\
   --integration=rings \\
   --int-radius=4,5,9 \\
   --no-refine \\
@@ -83,3 +85,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# python create_int_from_sol_sh.py --geom /home/bubl3932/files/remote_index_trial/runs_20251212_123523/only_done_events.geom --lst /home/bubl3932/files/remote_index_trial/runs_20251212_123523/only_done_events.lst --sol /home/bubl3932/files/remote_index_trial/runs_20251212_123523/only_done_events.sol
