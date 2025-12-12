@@ -105,7 +105,7 @@ def main():
         )
     )
     parser.add_argument("input", help="Input HDF5 file (full data)")
-    parser.add_argument("output", help="Output HDF5 file (images replaced by placeholders)")
+    parser.add_argument("--output", required=False, help="Output HDF5 file (images replaced by placeholders)")
     parser.add_argument(
         "--compression",
         default="gzip",
@@ -120,15 +120,21 @@ def main():
 
     args = parser.parse_args()
 
+
+    input_abs = os.path.abspath(args.input)
+    if args.output:
+        output = args.output
+    else:
+        base, ext = os.path.splitext(args.input)
+        output = f"{base}_light{ext}"
+
     print("Input file: ", args.input)
-    print("Output file:", args.output)
+    print("Output file:", output)
     print("Images dataset path:", IMAGES_PATH)
     print("Compression:", args.compression)
     print()
 
-    input_abs = os.path.abspath(args.input)
-
-    with h5py.File(args.input, "r") as f_in, h5py.File(args.output, "w") as f_out:
+    with h5py.File(args.input, "r") as f_in, h5py.File(output, "w") as f_out:
         # Copy root attributes
         copy_attrs(f_in, f_out)
 
@@ -155,5 +161,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-# python make_light_h5.py /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks.h5 /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_light.h5
+# python remove_images.py /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks.h5 /home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524_2038_min_15peaks_light.h5
