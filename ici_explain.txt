@@ -1,0 +1,32 @@
+so i want to start with the zero run (actually now the event folders (event+code for image source) are not named as in the upcoming runs which i would like).
+
+inputs:
+root (output dir)
+geom
+cell
+h5 files
+indexamajig flags
+optional convergence and search parameters
+
+
+run XXX:
+create a run XXX folder and in the run folder a folder for each image and in each image folder a folder for each event
+if image_run_log.csv exists (not first run) build h5-overlays(in current image folders) with proposed next shifts and in each event folder create a lst file referencing to these overlays(or h5 if first run) 
+in each event folder create a sh with geom, cell, list_xxx.lst, and output stream named after event number stream_xxx.stream
+**during parallelizing for each event sent to a worker:
+run all .sh script in respective event folder as wdir
+extract mille shift (only possible if indexed)
+concatenate successful index results into stream_xxx in run_xxx folder
+**evaluate stream_xxx to write run_xxx_results.csv (per image and event: run_n, dx, dy, wrmsd)
+**update global_run_log.csv with run_n, dx, dy, wrmsd, (run_n, dx, dy, wrmsd, ever_indexed, next_dx, next_dy, reason
+**propose next shifts per event based on global_run_log and append next shift along with reason(done if som convergence condition is met):
+-indexed_this_run == 0 (i.e wrmsd is None) AND ever_indexed == 0 (last flag 0) => Step1 Hillmap sampling (pure hillmap using negative gaussians for unindexed previous shifts)
+-indexed_this_run == 0 AND ever_indexed == 1 (if last flag 1) => Step1 Hillmap with Boltzmann weighted gaussian for successful previous shifts and negative gaussians for unindexed previous shifts
+-indexed_this_run == 1 (wrmsd is not None) => Step2 (dx/dy refinement) if dx/dy exists
+-indexed_this_run == 1 but dx/dy not refinable(extract mille failed) => Step1 Hillmap with Boltzmann weighting and negative gaussians for unindexed previous shifts
+**summarize run
+**write early break streams: one with all done events and one with all best so far results
+
+ 
+
+

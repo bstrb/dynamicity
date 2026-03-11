@@ -1,0 +1,17 @@
+-calculate DFM for all reflections (as in pasted script) note FVAR from .lst
+-remove a selected fraction of reflections with highest DFM (record which hkls and the FVAR)
+-redo the DFM calculations with remaining reflections and note FVAR
+repeat for remaining reflections until FVAR doesnt change with removal of high DFM
+
+using removed hkl list scale each .hkl in the raw .hkl with FVAR values from the last run before they were removed (should be in the list)
+
+
+OR
+
+
+
+-calculate DFM for all reflections (as in pasted script) note FVAR from .lst
+-remove a selected fraction of reflections with highest DFM (record which hkls and the FVAR)
+-redo the DFM calculations with remaining reflections and note FVAR
+- scale removed with old fvar and remaining with fvar
+redo this until fvar is stable
