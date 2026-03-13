@@ -1,0 +1,8 @@
+numpy>=1.26
+scipy>=1.11
+pandas>=2.1
+matplotlib>=3.8
+numba>=0.59
+ipywidgets>=8.1
+jupyter>=1.0
+pytest>=8.0
