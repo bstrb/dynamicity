@@ -168,15 +168,38 @@ def parse_gxparm(path: str | Path) -> GXPARMMetadata:
         except ValueError:
             continue
 
-    if len(numeric_lines) < 10:
+    if len(numeric_lines) < 6:
         raise ValueError("GXPARM/XPARM file did not contain enough numeric lines.")
 
     frame_line = numeric_lines[0]
     beam_line = numeric_lines[1]
-    cell_line = numeric_lines[6]
-    a_axis = numeric_lines[7][:3]
-    b_axis = numeric_lines[8][:3]
-    c_axis = numeric_lines[9][:3]
+
+    cell_line_idx: int | None = None
+    search_stop = min(len(numeric_lines), 12)
+    for idx in range(2, search_stop):
+        values = numeric_lines[idx]
+        if len(values) < 7:
+            continue
+        a_len, b_len, c_len = values[1], values[2], values[3]
+        alpha, beta, gamma = values[4], values[5], values[6]
+        if min(a_len, b_len, c_len) <= 0:
+            continue
+        if not (30.0 <= alpha <= 180.0 and 30.0 <= beta <= 180.0 and 30.0 <= gamma <= 180.0):
+            continue
+        if idx + 3 >= len(numeric_lines):
+            continue
+        if any(len(numeric_lines[idx + offset]) < 3 for offset in (1, 2, 3)):
+            continue
+        cell_line_idx = idx
+        break
+
+    if cell_line_idx is None:
+        raise ValueError("Failed to locate unit-cell constants in GXPARM/XPARM numeric payload.")
+
+    cell_line = numeric_lines[cell_line_idx]
+    a_axis = numeric_lines[cell_line_idx + 1][:3]
+    b_axis = numeric_lines[cell_line_idx + 2][:3]
+    c_axis = numeric_lines[cell_line_idx + 3][:3]
 
     start_frame = int(round(frame_line[0]))
     phi0_deg = float(frame_line[1])
