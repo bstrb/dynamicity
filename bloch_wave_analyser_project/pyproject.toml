@@ -15,6 +15,7 @@ dependencies = [
   "matplotlib",
   "jupyter",
   "ipywidgets",
+  "plotly",
 ]
 
 [tool.pytest.ini_options]

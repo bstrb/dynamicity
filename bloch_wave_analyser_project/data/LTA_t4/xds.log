@@ -1,0 +1,914 @@
+
+ ***** XDS ***** (VERSION Jan 19, 2025  BUILT=20251103)  13-Mar-2026
+ Author: Wolfgang Kabsch
+ Copy licensed until 1-Aug-2026  to
+  academic users for non-commercial applications
+ No redistribution.
+
+
+ ***** XYCORR ***** (VERSION Jan 19, 2025  BUILT=20251103)  13-Mar-2026
+
+ DETECTOR=UNKNOWN
+
+
+ X/Y-CORRECTION LOOK-UP TABLES SET TO ZERO
+
+ cpu time used                  0.0 sec
+ elapsed wall-clock time        0.0 sec
+
+
+ ***** INIT ***** (VERSION Jan 19, 2025  BUILT=20251103)  13-Mar-2026
+
+ INPUT PARAMETER VALUES
+ ----------------------
+ NAME=/home/bubl3932/files/3DED-DATA/LTA/LTA_t4/converted/images/?????.img SMV
+ BACKGROUND_RANGE=       1     100
+ MAXIMUM_NUMBER_OF_PROCESSORS=   6
+ SECONDS=     0
+ MINIMUM_VALID_PIXEL_VALUE=       0
+ NBX=    3 NBY=    3
+ TRUSTED_REGION=    0.00    1.41
+ UNTRUSTED_RECTANGLE=    256.   259.       1.   512.   (X1,X2, Y1,Y2)
+ UNTRUSTED_RECTANGLE=      1.   511.     255.   259.   (X1,X2, Y1,Y2)
+ PROCESS #  1 COVERS THE IMAGE RANGE        1 ...      17
+ PROCESS #  2 COVERS THE IMAGE RANGE       18 ...      34
+ PROCESS #  3 COVERS THE IMAGE RANGE       35 ...      51
+ PROCESS #  4 COVERS THE IMAGE RANGE       52 ...      68
+ PROCESS #  5 COVERS THE IMAGE RANGE       69 ...      84
+ PROCESS #  6 COVERS THE IMAGE RANGE       85 ...     100
+ NUMBER OF TRUSTED DETECTOR PIXELS   252506
+
+ LOOK-UP TABLE "BLANK.cbf" FOR DARK CURRENT IS SET CONSTANT TO   OFFSET=       0
+
+ LOOK-UP TABLES FOR GAIN & BACKGROUND DETERMINED FROM DATA IMAGES      1    100
+ The tables are saved as files GAIN.cbf & BKGINIT.cbf
+
+
+ NUMBER OF PIXELS USED FOR DATA COLLECTION               252506
+ MEAN BACKGROUND IN A DATA IMAGE PIXEL                    7.111
+ MINIMUM BACKGROUND VALUE                                 1.140
+ MAXIMUM BACKGROUND VALUE                                53.689
+ Values saved on "BKGINIT.cbf" are multiplied by       1000.000
+
+ NUMBER OF GAIN VALUES IN TABLE                           16002
+ MEAN GAIN VALUE                                          0.529
+ MINIMUM GAIN VALUE IN TABLE                              0.499
+ MAXIMUM GAIN VALUE IN TABLE                              0.607
+ Values saved on "GAIN.cbf" are multiplied by          1000.000
+
+ cpu time used                  0.6 sec
+ elapsed wall-clock time        0.1 sec
+
+ ***** COLSPOT ***** (VERSION Jan 19, 2025  BUILT=20251103)  13-Mar-2026
+
+ INPUT PARAMETER VALUES
+ ----------------------
+ MAXIMUM_NUMBER_OF_PROCESSORS=   6  (0: automatic choice of OpenMP threads)
+ MAXIMUM_NUMBER_OF_JOBS=   4  (0:automatic choice of forked main tasks)
+ number of forked COLSPOT tasks   4
+ CLUSTER_NODES=
+ SECONDS=     0
+ NAME_TEMPLATE_OF_DATA_FRAMES=/home/bubl3932/files/3DED-DATA/LTA/LTA_t4/converted/images/?????.img SMV
+ DATA_RANGE=       1     757
+ SHOW_IMAGE_NUMBER=     1
+ NBX=    3 NBY=    3
+ BACKGROUND_PIXEL=    2.00
+ SIGNAL_PIXEL=    3.00
+ MAXIMUM_NUMBER_OF_STRONG_PIXELS=   1500000
+ MINIMUM_NUMBER_OF_PIXELS_IN_A_SPOT=   10 SPOT_MAXIMUM-CENTROID=    3.00
+ SPOT_RANGE=       1     757
+ ------------------------------------------------------------------------
+
+ Task # 1 scans a subset of     189 images in the range      1 ...   189
+ Task # 2 scans a subset of     189 images in the range    190 ...   378
+ Task # 3 scans a subset of     189 images in the range    379 ...   567
+ Task # 4 scans a subset of     190 images in the range    568 ...   757
+ ------------------------------------------------------------------------
+
+ RESULTS FOR FORKED COLSPOT TASK # 1
+ USING    6 OUT OF   24 PROCESSORS
+ PROCESS #  1 scans    32  images in the range       1 ...     32
+ PROCESS #  2 scans    32  images in the range      33 ...     64
+ PROCESS #  3 scans    32  images in the range      65 ...     96
+ PROCESS #  4 scans    31  images in the range      97 ...    127
+ PROCESS #  5 scans    31  images in the range     128 ...    158
+ PROCESS #  6 scans    31  images in the range     159 ...    189
+
+ *** DEFINITION OF SYMBOLS ***
+ NBKG      = NUMBER OF BACKGROUND PIXELS ON DATA IMAGE
+ NSTRONG   = NUMBER OF STRONG PIXELS ON DATA IMAGE
+ I/O-FLAG  = ERROR CODE AFTER ACCESSING DATA IMAGE 
+              0: NO ERROR
+             -1: CANNOT OPEN OR READ IMAGE FILE
+             -3: WRONG DATA FORMAT
+
+ FRAME #      NBKG     NSTRONG   I/O-FLAG
+       1     10244        3814       0
+       2     10070        3564       0
+       3     10246        3528       0
+       4     10048        3472       0
+       5      9724        3104       0
+       6     10338        3046       0
+       7     11447        2944       0
+       8      9980        2596       0
+       9     10913        3185       0
+      10     11494        3657       0
+      11     10876        2743       0
+      12     11290        2870       0
+      13     10375        2818       0
+      14     12134        3882       0
+      15     11541        2567       0
+      16     10609        2751       0
+      17     10471        3630       0
+      18     10077        4045       0
+      19     11282        3372       0
+      20     11076        4035       0
+      21     11106        2935       0
+      22     10126        2954       0
+      23     10968        3686       0
+      24     10592        3423       0
+      25     10529        3183       0
+      26      9835        3440       0
+      27     10828        3512       0
+      28     10176        3145       0
+      29     10683        3493       0
+      30     11197        3658       0
+      31     11017        3718       0
+      32     10347        3973       0
+      33      9851        3512       0
+      34     10418        3592       0
+      35     11018        3961       0
+      36     10897        3323       0
+      37     10776        2977       0
+      38     10168        3412       0
+      39      9989        3423       0
+      40     10319        2979       0
+      41     10083        3769       0
+      42     10110        3966       0
+      43     11367        3135       0
+      44     11062        4128       0
+      45      9941        5989       0
+      46      9433        6362       0
+      47      9863        6281       0
+      48      9269        5872       0
+      49     10395        4306       0
+      50     10107        2797       0
+      51     10501        2301       0
+      52     10205        3586       0
+      53      9160        5033       0
+      54      9048        6059       0
+      55     10122        6592       0
+      56      9635        5074       0
+      57      9425        6428       0
+      58     10124        4703       0
+      59      9315        4499       0
+      60      9920        4649       0
+      61     10759        3967       0
+      62     10995        4230       0
+      63     10922        4149       0
+      64     11116        4080       0
+      65     10992        4692       0
+      66     11583        3629       0
+      67     10869        4070       0
+      68     10973        2788       0
+      69     10768        4284       0
+      70     11919        4114       0
+      71     10421        3429       0
+      72     11273        3410       0
+      73     12293        3635       0
+      74     12383        3755       0
+      75     10930        4345       0
+      76     11485        4217       0
+      77     11800        4110       0
+      78     11877        4159       0
+      79     12083        3521       0
+      80     11330        4044       0
+      81     11946        5042       0
+      82     11040        4255       0
+      83     11620        3303       0
+      84     11158        3531       0
+      85     11008        4204       0
+      86     10683        3893       0
+      87     11992        3797       0
+      88     11751        3960       0
+      89     11717        4127       0
+      90     11428        4135       0
+      91     11724        4300       0
+      92     12274        3492       0
+      93     10875        4335       0
+      94     10923        4445       0
+      95     11629        3650       0
+      96     10539        3656       0
+      97     11135        3124       0
+      98     11515        3655       0
+      99     11266        4370       0
+     100     10536        2816       0
+     101     11685        3368       0
+     102     11443        4559       0
+     103     12243        4019       0
+     104     11981        3869       0
+     105     10739        3834       0
+     106     10948        3816       0
+     107     11084        4243       0
+     108     11333        4574       0
+     109     11921        4578       0
+     110     11862        3778       0
+     111     10049        4118       0
+     112     10232        4706       0
+     113      9919        4263       0
+     114      9970        3841       0
+     115     10992        4605       0
+     116     11636        5667       0
+     117     12010        3853       0
+     118     11370        4000       0
+     119     11621        4931       0
+     120     12069        4887       0
+     121     11512        4728       0
+     122     11045        4437       0
+     123     11143        4511       0
+     124     11210        3777       0
+     125     11061        3637       0
+     126     10314        3952       0
+     127     10675        4495       0
+     128     11488        5446       0
+     129     11125        5356       0
+     130     12543        4430       0
+     131     11722        4921       0
+     132     11039        4461       0
+     133     10962        3953       0
+     134     10979        3469       0
+     135     11350        4516       0
+     136     11850        5628       0
+     137     12136        4980       0
+     138     11171        3599       0
+     139     10023        3786       0
+     140     11745        4349       0
+     141     11477        4008       0
+     142     11606        4146       0
+     143     12126        4788       0
+     144     10463        5137       0
+     145     11590        5009       0
+     146     12057        3655       0
+     147     13122        3767       0
+     148     12546        5043       0
+     149     11333        5940       0
+     150     10742        5358       0
+     151     11633        3729       0
+     152     11998        4418       0
+     153     12994        5615       0
+     154     11875        5793       0
+     155     11387        4182       0
+     156     11527        3604       0
+     157     12792        3980       0
+     158     11939        3237       0
+     159     11618        4998       0
+     160     12127        4696       0
+     161     12178        4073       0
+     162     12545        4360       0
+     163     10807        4411       0
+     164     12212        4449       0
+     165     11872        6116       0
+     166     11544        6076       0
+     167     11056        6484       0
+     168     12048        6146       0
+     169     12786        5568       0
+     170     11390        5212       0
+     171     12163        5595       0
+     172     12709        4740       0
+     173     12251        3716       0
+     174     11297        4301       0
+     175     11617        4299       0
+     176     12162        5627       0
+     177     12670        5583       0
+     178     11423        5118       0
+     179     11731        5209       0
+     180     12963        5976       0
+     181     11911        4325       0
+     182     11546        4634       0
+     183     12504        5323       0
+     184     13145        4919       0
+     185     12227        4840       0
+     186     11841        4453       0
+     187     11966        4245       0
+     188     11309        6348       0
+     189     12445        5912       0
+
+ NUMBER OF STRONG PIXELS EXTRACTED FROM IMAGES         1512407
+ NUMBER OF EQUIVALENCE CLASSES (<0: ERROR)               24005
+ NUMBER OF SPOTS CONTAINING SUFFICIENT PIXELS             6044
+ OMITTED WEAK SPOTS (INTENSITY<0.1*MEDIAN)                   0
+ NUMBER OF DIFFRACTION SPOTS SAVED (SPOT.XDS)             6044
+
+ total elapsed wall-clock time for COLSPOT       1.0 sec
+
+ TASK     cpu time (sec)    elapsed wall-clock time (sec)
+   1           1.7                     0.4
+   2           1.9                     0.5
+   3           1.9                     0.4
+   4           1.9                     0.4
+
+ ***** IDXREF ***** (VERSION Jan 19, 2025  BUILT=20251103)  13-Mar-2026
+
+ INPUT PARAMETER VALUES
+ ----------------------
+ NAME_TEMPLATE_OF_DATA_FRAMES=/home/bubl3932/files/3DED-DATA/LTA/LTA_t4/converted/images/?????.img SMV
+ STARTING_ANGLE=      -45.0000     STARTING_FRAME=       1
+ NX=   512  NY=   512    QX=  0.055000  QY=  0.055000
+ DIRECTION_OF_DETECTOR_X-AXIS=   1.00000   0.00000   0.00000
+ DIRECTION_OF_DETECTOR_Y-AXIS=   0.00000   1.00000   0.00000
+ DETECTOR_DISTANCE=   444.900
+ ORGX=    243.95  ORGY=    249.35
+ NUMBER OF DETECTOR SEGMENTS   1
+ SEGMENT=    1  512    1  512  ! x1,x2,y1,y2 (pixel units)
+    SEGMENT_ORGX=      0.00   SEGMENT_ORGY=      0.00
+    SEGMENT_DISTANCE=     0.00
+    DIRECTION_OF_SEGMENT_X-AXIS=  1.000000  0.000000  0.000000
+    DIRECTION_OF_SEGMENT_Y-AXIS=  0.000000  1.000000  0.000000
+ X-RAY_WAVELENGTH=       0.019690
+ INCIDENT_BEAM_DIRECTION=  0.000000  0.000000  1.000000
+ ROTATION_AXIS=  0.154084  0.988057 -0.001483
+ OSCILLATION_RANGE=    0.1200
+ INDEX_MAGNITUDE=   8    INDEX_ERROR=   0.050    INDEX_QUALITY=  0.80
+ RGRID=  -1.000E+00 (1/A; <=0 XDS computes a default)
+ SEPMIN=  6.00    CLUSTER_RADIUS=  3.50
+ MAXIMUM_ERROR_OF_SPOT_POSITION=   3.0
+ MAXIMUM_ERROR_OF_SPINDLE_POSITION=   2.0
+ MINIMUM_FRACTION_OF_INDEXED_SPOTS=  0.50
+ TRUSTED_REGION=  0.00  1.41
+ INCLUDE_RESOLUTION_RANGE=     20.000     0.600
+ SPACE_GROUP_NUMBER=  221
+ UNIT_CELL_CONSTANTS=    11.91    11.91    11.91  90.000  90.000  90.000
+ UNIT_CELL_A-AXIS=     7.403    -4.953     7.905
+ UNIT_CELL_B-AXIS=     7.412     9.251    -1.146
+ UNIT_CELL_C-AXIS=    -5.664     5.633     8.833
+
+
+ AUTOINDEXING IS BASED ON   5936 OUT OF    6044 SPOTS
+ WITHIN THE ALLOWED RESOLUTION RANGES OF THE FOLLOWING DATA IMAGES:
+ SPOT_RANGE=       1     757
+
+ ***** DETERMINATION OF DIFFERENCE VECTOR CLUSTERS FROM  3000 SPOTS ******
+ histogram step size (1/A): given RGRID= -1.0000E+00 used   2.1482E-03
+ CLUSTER_RADIUS=  3.50 (pixel) ==   2.1975E-02 (1/A) ==  1.0229E+01 (histogram steps)
+ SEPMIN=  6.00 (pixel) ==   3.7671E-02 (1/A) ==  1.7536E+01 (histogram steps)
+ NUMBER OF DIFFERENCE VECTOR CLUSTERS DETERMINED               108
+
+ ***** LATTICE BASIS DERIVED FROM   108 DIFFERENCE VECTOR CLUSTERS ******
+ OBSERVED BASIS CELL VOLUME (A^3)                       0.1689E+04
+ DIMENSION OF SPACE SPANNED BY DIFFERENCE VECTOR CLUSTERS   3
+
+   #  COORDINATES OF REC. BASIS VECTOR    LENGTH   1/LENGTH
+
+    1  -0.0522022 0.0344480-0.0560283  0.0839697      11.91
+    2  -0.0403811 0.0396792 0.0620122  0.0839678      11.91
+    3   0.0519153 0.0654950-0.0081069  0.0839674      11.91
+
+ PARAMETERS OF THE REDUCED CELL (ANGSTROEM & DEGREES)
+     11.91     11.91     11.91     90.00     90.00     90.00
+
+   #  COORDINATES OF REC. BASIS VECTOR    REDUCED CELL INDICES
+
+    1  -0.0522022 0.0344480-0.0560283     1.00    0.00    0.00
+    2  -0.0403811 0.0396792 0.0620122     0.00   -1.00    0.00
+    3   0.0519153 0.0654950-0.0081069     0.00    0.00   -1.00
+
+
+ ***** REFINED SOLUTION BASED ON INDEXED REFLECTIONS IN SUBTREE # 1 *****
+
+ REFINED VALUES OF DIFFRACTION PARAMETERS DERIVED FROM      2846 INDEXED SPOTS
+ REFINED PARAMETERS:   AXIS ORIENTATION POSITION
+ STANDARD DEVIATION OF SPOT    POSITION (PIXELS)     1.17
+ STANDARD DEVIATION OF SPINDLE POSITION (DEGREES)    0.19
+ SPACE GROUP NUMBER      1
+ UNIT CELL PARAMETERS     11.909    11.909    11.909  89.997  89.998  89.997
+ REC. CELL PARAMETERS   0.083970  0.083968  0.083967  90.003  90.002  90.003
+ COORDINATES OF UNIT CELL A-AXIS    -7.412     4.882    -7.940
+ COORDINATES OF UNIT CELL B-AXIS     5.728    -5.616    -8.802
+ COORDINATES OF UNIT CELL C-AXIS    -7.353    -9.298     1.147
+ CRYSTAL MOSAICITY (DEGREES)     0.142
+ LAB COORDINATES OF ROTATION AXIS  0.147720  0.989029 -0.000391
+ DIRECT BEAM COORDINATES (REC. ANGSTROEM)     0.000455   -0.001466   50.787209
+ DETECTOR COORDINATES (PIXELS) OF DIRECT BEAM     244.03    249.11
+ DETECTOR ORIGIN (PIXELS) AT                      243.96    249.34
+ CRYSTAL TO DETECTOR DISTANCE (mm)       443.58
+ LAB COORDINATES OF DETECTOR X-AXIS  1.000000  0.000000  0.000000
+ LAB COORDINATES OF DETECTOR Y-AXIS  0.000000  1.000000  0.000000
+
+
+ cpu time used                  1.8 sec
+ elapsed wall-clock time        1.1 sec
+
+ ***** DEFPIX ***** (VERSION Jan 19, 2025  BUILT=20251103)  13-Mar-2026
+
+ modifies the initial background image BKGINIT.cbf from the INIT step by
+ labelling detector pixels that should be ignored in the integration step
+ and saves the results as a control image BKGPIX.cbf. Excluded pixels are
+ marked by -3. The control images should be inspected with the XDS-Viewer.
+
+ The pixels are labelled based on parameters in the input file XDS.INP:
+ UNTRUSTED_ELLIPSE=, UNTRUSTED_RECTANGLE=, UNTRUSTED_QUADRILATERAL=,
+ EXCLUDE_RESOLUTION_RANGE=, INCLUDE_RESOLUTION_RANGE=.
+
+ In addition, DEFPIX attempts to recognize and exclude shaded regions
+ of the detector area that are caused by intruding hardware obscuring
+ x-ray diffraction. For this purpose each pixel value in the table is
+ compared with the mean of all pixels at the same resolution; the result
+ is saved in the control image ABS.cbf. Unshaded pixels should have
+ values around 10000 while shaded regions are recognized by their lower
+ values, typically below 7000. The acceptable value range for unshaded
+ pixels is defined in the input file XDS.INP by the parameter
+ VALUE_RANGE_FOR_TRUSTED_DETECTOR_PIXELS=.
+
+ UNTRUSTED_RECTANGLE=    256.   259.       1.   512.   (X1,X2, Y1,Y2)
+ UNTRUSTED_RECTANGLE=      1.   511.     255.   259.   (X1,X2, Y1,Y2)
+ INCLUDE_RESOLUTION_RANGE=     20.000     0.600
+ VALUE_RANGE_FOR_TRUSTED_DETECTOR_PIXELS=      6000.    30000.
+ RESOLUTION RANGE RECORDED BY DETECTOR (ANGSTROM)    19.009     0.600
+ NUMBER OF PIXELS REMOVED FROM   "BKGINIT.cbf"        41065
+ NUMBER OF TRUSTED PIXELS IN      "BKGPIX.cbf"       211441
+ MEAN VALUE OF TRUSTED PIXELS IN  "BKGPIX.cbf"        8.014
+
+
+ cpu time used                  0.0 sec
+ elapsed wall-clock time        0.0 sec
+
+ ***** INTEGRATE ***** (VERSION Jan 19, 2025  BUILT=20251103)  13-Mar-2026
+
+ INPUT PARAMETER VALUES
+ ----------------------
+ MAXIMUM_NUMBER_OF_PROCESSORS=   6  (0: automatic choice of OpenMP threads)
+ MAXIMUM_NUMBER_OF_JOBS=   4  (0:automatic choice of forked main tasks)
+ number of forked INTEGRATE tasks   4
+ CLUSTER_NODES=
+ SECONDS=     0
+ NAME_TEMPLATE_OF_DATA_FRAMES=/home/bubl3932/files/3DED-DATA/LTA/LTA_t4/converted/images/?????.img SMV
+ DATA_RANGE=       1     757
+ SHOW_IMAGE_NUMBER=     1
+ NBX=    3 NBY=    3
+ NUMBER_OF_IMAGES_IN_CACHE=   43
+ MINIMUM_VALID_PIXEL_VALUE=     0    OVERLOAD=    660000
+ BACKGROUND_PIXEL=    2.00      SIGNAL_PIXEL=    3.00
+ MAXIMUM_ERROR_OF_SPOT_POSITION=   3.0
+ MAXIMUM_ERROR_OF_SPINDLE_POSITION=   2.0
+ MINPK=  75.00000
+ CUT=  2.00
+ PROFILE_FITTING= TRUE 
+ SPACE_GROUP_NUMBER=  221
+ UNIT_CELL_CONSTANTS=    11.91    11.91    11.91  90.000  90.000  90.000
+ ROTATION_AXIS=  0.14679  0.98917 -0.00148
+ OSCILLATION_RANGE=  0.120000 DEGREES
+ STARTING_ANGLE= -45.000 STARTING_FRAME=       1
+ X-RAY_WAVELENGTH=   0.01969 ANGSTROM
+ INCIDENT_BEAM_DIRECTION=  0.000455 -0.001466 50.787209
+ NUMBER OF DETECTOR SEGMENTS   1
+ NX=   512 NY=   512 QX= 0.05500 QY= 0.05500
+ ORGX=    243.90  ORGY=    249.30
+ DETECTOR_DISTANCE=   444.291
+ DIRECTION_OF_DETECTOR_X-AXIS=   1.00000   0.00000   0.00000
+ DIRECTION_OF_DETECTOR_Y-AXIS=   0.00000   1.00000   0.00000
+ SEGMENT=    1  512    1  512  ! x1,x2,y1,y2 (pixel units)
+    SEGMENT_ORGX=      0.00   SEGMENT_ORGY=      0.00
+    SEGMENT_DISTANCE=     0.00
+    DIRECTION_OF_SEGMENT_X-AXIS=  1.000000  0.000000  0.000000
+    DIRECTION_OF_SEGMENT_Y-AXIS=  0.000000  1.000000  0.000000
+ RESOLUTION RANGE RECORDED BY DETECTOR (ANGSTROM)    21.555     0.600
+ NUMBER OF TRUSTED DETECTOR PIXELS     211441
+ MEAN CONTENTS OF TRUSTED PIXELS IN BACKGROUND TABLE      8.014
+ MEAN VALUE OF NON-XRAY BACKGROUND (OFFSET)=    0.00
+ NUMBER OF X-RAY COUNTS EQUIVALENT TO PIXEL CONTENTS IN A DATA IMAGE
+ (PIXEL VALUE - OFFSET)/GAIN ,    WITH GAIN=    0.53
+
+
+
+ ******************************************************************************
+                     PROCESSING OF IMAGES        1 ...      47
+ ******************************************************************************
+
+ USING    6 OUT OF    6 PROCESSORS
+
+ *** DEFINITION OF SYMBOLS ***
+ IER     = ERROR CODE AFTER ACCESSING DATA IMAGE 
+              0: NO ERROR
+             -1: CANNOT OPEN OR READ IMAGE FILE
+             -2: EXCLUDED IMAGE
+             -3: WRONG DATA FORMAT
+ SCALE   = SCALING FACTOR FOR THIS DATA IMAGE
+ NBKG    = NUMBER OF BACKGROUND PIXELS ON DATA IMAGE
+ NOVL    = NUMBER OF OVERLOADED REFLECTIONS ON DATA IMAGE
+ NEWALD  = NUMBER OF REFLECTIONS CLOSE TO THE EWALD SPHERE
+ NSTRONG = NUMBER OF STRONG REFLECTIONS ON DATA IMAGE
+ NREJ    = NUMBER OF UNEXPECTED REFLECTIONS
+ SIGMAB  = BEAM_DIVERGENCE_E.S.D.=SIGMAB 
+ SIGMAR  = REFLECTING_RANGE_E.S.D.=SIGMAR (MOSAICITY)
+
+ IMAGE IER    SCALE     NBKG NOVL NEWALD NSTRONG  NREJ   SIGMAB   SIGMAR
+     1   0    1.015     9249    0    284      56     6  0.01958  0.83882
+     2   0    1.019     9016    0    284      39     4  0.02007  0.90943
+     3   0    1.025     9139    0    281      38     4  0.01887  0.61274
+     4   0    1.044     8824    0    282      44     4  0.01966  0.77334
+     5   0    1.037     8749    0    288      39     4  0.01786  1.39956
+     6   0    1.035     9199    0    289      35     4  0.01823  1.68361
+     7   0    1.035    10030    0    287      47     5  0.01897  1.13489
+     8   0    1.034     8708    0    281      36     4  0.01913  2.24399
+     9   0    1.023    10030    0    287      49     5  0.01819  0.81929
+    10   0    1.023    10310    0    281      54     6  0.01669  0.47092
+    11   0    1.019     9655    0    279      38     4  0.01875  1.75231
+    12   0    1.026    10061    0    282      37     4  0.01856  2.62582
+    13   0    1.030     9156    0    286      34     4  0.01892  2.57209
+    14   0    1.026    10743    0    299      48     5  0.01876  0.43885
+    15   0    1.019    10356    0    288      38     4  0.01699  0.94826
+    16   0    1.018     9607    0    283      30     3  0.02018  1.26630
+    17   0    1.007     9320    0    283      39     2  0.01829  0.21997
+    18   0    1.017     8812    0    290      37     4  0.01990  1.11307
+    19   0    1.018     9956    0    286      42     5  0.01840  0.57270
+    20   0    1.014     9866    0    285      44     5  0.01770  0.70586
+    21   0    1.011     9848    0    288      39     4  0.01865  1.57647
+    22   0    1.018     8993    0    293      41     5  0.01936  2.52473
+    23   0    1.021     9960    0    287      52     6  0.01803  1.48355
+    24   0    1.016     9439    0    285      40     4  0.01990  2.71843
+    25   0    1.023     9421    0    284      42     5  0.01946  1.50393
+    26   0    1.019     8790    0    286      38     4  0.02014  1.97385
+    27   0    1.016     9652    0    284      48     4  0.01907  1.90594
+    28   0    1.019     8771    0    280      43     5  0.02135  2.01882
+    29   0    1.014     9544    0    276      38     4  0.02096  1.52537
+    30   0    1.024     9826    0    274      52     5  0.01939  1.93991
+    31   0    1.028     9619    0    277      47     4  0.02206  2.21513
+    32   0    1.016     8750    0    290      35     3  0.02470  2.01351
+    33   0    1.024     8537    0    288      38     0  0.02452  5.98388
+    34   0    1.028     9133    0    280      39     4  0.01994  1.66453
+    35   0    1.024     9451    0    269      47     5  0.01935  1.36930
+    36   0    1.030     9609    0    274      38     4  0.01877  4.06014
+    37   0    1.029     9564    0    282      51     6  0.01742  2.09703
+    38   0    1.020     8920    0    275      44     0  0.02091  6.73063
+    39   0    1.011     8769    0    278      44     5  0.02110  0.83083
+    40   0    1.016     8938    0    281      40     0  0.02005  6.56067
+    41   0    1.020     8813    0    280      47     5  0.02202  2.21258
+    42   0    1.016     8879    0    273      54     6  0.02023  1.46287
+    43   0    1.005    10110    0    276      49     5  0.01980  1.44823
+    44   0    1.003     9538    0    282      54     6  0.01909  0.71963
+    45   0    1.006     8615    0    288      70     7  0.02277  0.76484
+    46   0    1.010     8303    0    292      65     4  0.02465  1.08465
+    47   0    1.020     8474    0    294      64     0  0.02605  1.08760
+
+   782 OUT OF    898 REFLECTIONS ACCEPTED FOR REFINEMENT
+ REFINED PARAMETERS:   POSITION ORIENTATION                                  
+ STANDARD DEVIATION OF SPOT    POSITION (PIXELS)     1.29
+ STANDARD DEVIATION OF SPINDLE POSITION (DEGREES)    0.32
+ SPACE GROUP NUMBER    221
+ UNIT CELL PARAMETERS     11.909    11.909    11.909  90.000  90.000  90.000
+ REC. CELL PARAMETERS   0.083968  0.083968  0.083968  90.000  90.000  90.000
+ COORDINATES OF UNIT CELL A-AXIS     7.437    -4.883     7.917
+ COORDINATES OF UNIT CELL B-AXIS     7.370     9.277    -1.202
+ COORDINATES OF UNIT CELL C-AXIS    -5.674     5.650     8.815
+ CRYSTAL ROTATION OFF FROM INITIAL ORIENTATION     0.308    -0.148    -0.045
+ shown as x,y,z components of rotation axis X angle (degrees)
+ CRYSTAL MOSAICITY (DEGREES)     0.142
+ LAB COORDINATES OF ROTATION AXIS  0.146787  0.989167 -0.001481
+ DIRECT BEAM COORDINATES (REC. ANGSTROEM)   0.000455 -0.001466 50.787201
+ DETECTOR COORDINATES (PIXELS) OF DIRECT BEAM     243.95    249.09
+ DETECTOR ORIGIN (PIXELS) AT                      243.88    249.33
+ CRYSTAL TO DETECTOR DISTANCE (mm)       444.84
+ LAB COORDINATES OF DETECTOR X-AXIS  1.000000  0.000000  0.000000
+ LAB COORDINATES OF DETECTOR Y-AXIS  0.000000  1.000000  0.000000
+
+
+ STANDARD DEVIATIONS OF BEAM DIVERGENCE AND REFLECTING RANGE OBTAINED
+ FROM     782 REFLECTION PROFILES AT 9 POSITIONS ON THE DETECTOR SURFACE.
+ POSITION NUMBER        1      2      3      4      5      6      7      8      9
+ X-COORDINATE (pixel)  256.0  446.8  390.9  256.0  121.1   65.2  121.1  256.0  390.9
+ Y-COORDINATE (pixel)  256.0  256.0  390.9  446.8  390.9  256.0  121.1   65.2  121.1
+ NUMBER                   69    102     70     52    102    114     87     57     98
+ SIGMAB (degree)       0.025  0.025  0.025  0.025  0.024  0.024  0.025  0.024  0.025
+ SIGMAR (degree)       0.066  0.063  0.059  0.045  0.057  0.064  0.064  0.053  0.057
+
+
+   1227 REFLECTION INTENSITIES INTEGRATED
+
+
+ ******************************************************************************
+                     PROCESSING OF IMAGES       48 ...      94
+ ******************************************************************************
+
+ USING    6 OUT OF    6 PROCESSORS
+
+ *** DEFINITION OF SYMBOLS ***
+ IER     = ERROR CODE AFTER ACCESSING DATA IMAGE 
+              0: NO ERROR
+             -1: CANNOT OPEN OR READ IMAGE FILE
+             -2: EXCLUDED IMAGE
+             -3: WRONG DATA FORMAT
+ SCALE   = SCALING FACTOR FOR THIS DATA IMAGE
+ NBKG    = NUMBER OF BACKGROUND PIXELS ON DATA IMAGE
+ NOVL    = NUMBER OF OVERLOADED REFLECTIONS ON DATA IMAGE
+ NEWALD  = NUMBER OF REFLECTIONS CLOSE TO THE EWALD SPHERE
+ NSTRONG = NUMBER OF STRONG REFLECTIONS ON DATA IMAGE
+ NREJ    = NUMBER OF UNEXPECTED REFLECTIONS
+ SIGMAB  = BEAM_DIVERGENCE_E.S.D.=SIGMAB 
+ SIGMAR  = REFLECTING_RANGE_E.S.D.=SIGMAR (MOSAICITY)
+
+ IMAGE IER    SCALE     NBKG NOVL NEWALD NSTRONG  NREJ   SIGMAB   SIGMAR
+    48   0    1.030     8027    0    304      60     3  0.02376  1.54717
+    49   0    1.037     9094    0    286      71     3  0.01996  1.52767
+    50   0    1.031     8726    0    282      55     6  0.01763  0.43082
+    51   0    1.023     9309    0    275      60     6  0.01666  0.73778
+    52   0    1.026     9190    0    280      67     7  0.02016  1.17208
+    53   0    1.024     7955    0    294      75     2  0.02260  2.12427
+    54   0    1.012     7989    0    305      70     4  0.02506  1.44345
+    55   0    1.004     8818    0    303      74     4  0.02326  0.98907
+    56   0    0.993     8433    0    301      73     3  0.02148  0.92002
+    57   0    1.001     8447    0    293      76     6  0.02363  0.74473
+    58   0    1.004     8795    0    283      56     6  0.02160  1.15739
+    59   0    1.009     8151    0    278      62     0  0.02105  2.11921
+    60   0    1.018     8639    0    283      44     5  0.02072  1.25965
+    61   0    1.018     9435    0    293      54     4  0.02033  2.12587
+    62   0    1.022     9499    0    291      46     5  0.02019  1.92116
+    63   0    1.013     9826    0    286      45     5  0.02052  1.57861
+    64   0    1.015     9606    0    278      52     6  0.01922  1.43778
+    65   0    1.024     9823    0    281      59     6  0.01942  0.92078
+    66   0    1.019    10171    0    276      52     6  0.01818  1.62522
+    67   0    1.011     9711    0    288      40     4  0.01986  1.52360
+    68   0    1.012     9562    0    298      40     4  0.01776  1.84575
+    69   0    1.008     9407    0    299      36     4  0.02080  1.24425
+    70   0    1.007    10303    0    288      40     4  0.01870  0.57586
+    71   0    1.012     9180    0    282      44     5  0.01797  1.29437
+    72   0    1.013     9977    0    283      40     4  0.02023  2.52037
+    73   0    1.008    10919    0    281      55     6  0.01759  1.26314
+    74   0    1.008    10970    0    286      52     6  0.01813  0.55327
+    75   0    1.021     9713    0    282      49     5  0.02019  0.78876
+    76   0    1.007    10176    0    287      44     5  0.02003  0.73000
+    77   0    1.000    10643    0    273      54     6  0.01981  1.23672
+    78   0    1.003    10625    0    277      48     5  0.01950  2.03119
+    79   0    0.995    10527    0    282      45     5  0.01699  1.29155
+    80   0    0.992    10101    0    286      45     5  0.01766  1.34819
+    81   0    1.001    10655    0    287      54     6  0.02153  0.61956
+    82   0    1.007     9748    0    283      45     5  0.01956  1.26157
+    83   0    1.014    10076    0    280      48     5  0.01830  2.10179
+    84   0    1.002     9970    0    286      45     5  0.01963  2.11516
+    85   0    0.998     9841    0    285      45     5  0.01973  1.44973
+    86   0    1.005     9498    0    285      44     5  0.02063  3.06997
+    87   0    1.004    10883    0    281      40     4  0.01947  2.76462
+    88   0    0.999    10493    0    276      53     6  0.01865  0.87710
+    89   0    1.003    10441    0    275      55     6  0.01896  1.31018
+    90   0    1.002    10027    0    272      45     5  0.02049  2.14897
+    91   0    1.002    10308    0    279      51     6  0.01891  1.20103
+    92   0    1.006    10569    0    279      57     6  0.01740  2.18138
+    93   0    1.006     9601    0    279      50     5  0.02117  2.85960
+    94   0    1.008     9821    0    287      49     5  0.02103  2.28699
+
+   875 OUT OF   1020 REFLECTIONS ACCEPTED FOR REFINEMENT
+ REFINED PARAMETERS:   POSITION ORIENTATION                                  
+ STANDARD DEVIATION OF SPOT    POSITION (PIXELS)     1.33
+ STANDARD DEVIATION OF SPINDLE POSITION (DEGREES)    0.37
+ SPACE GROUP NUMBER    221
+ UNIT CELL PARAMETERS     11.909    11.909    11.909  90.000  90.000  90.000
+ REC. CELL PARAMETERS   0.083968  0.083968  0.083968  90.000  90.000  90.000
+ COORDINATES OF UNIT CELL A-AXIS     7.428    -4.890     7.921
+ COORDINATES OF UNIT CELL B-AXIS     7.383     9.267    -1.203
+ COORDINATES OF UNIT CELL C-AXIS    -5.670     5.661     8.811
+ CRYSTAL ROTATION OFF FROM INITIAL ORIENTATION     0.364    -0.126     0.012
+ shown as x,y,z components of rotation axis X angle (degrees)
+ CRYSTAL MOSAICITY (DEGREES)     0.142
+ LAB COORDINATES OF ROTATION AXIS  0.146787  0.989167 -0.001481
+ DIRECT BEAM COORDINATES (REC. ANGSTROEM)   0.000455 -0.001466 50.787201
+ DETECTOR COORDINATES (PIXELS) OF DIRECT BEAM     243.83    249.17
+ DETECTOR ORIGIN (PIXELS) AT                      243.76    249.40
+ CRYSTAL TO DETECTOR DISTANCE (mm)       444.73
+ LAB COORDINATES OF DETECTOR X-AXIS  1.000000  0.000000  0.000000
+ LAB COORDINATES OF DETECTOR Y-AXIS  0.000000  1.000000  0.000000
+
+
+ STANDARD DEVIATIONS OF BEAM DIVERGENCE AND REFLECTING RANGE OBTAINED
+ FROM     875 REFLECTION PROFILES AT 9 POSITIONS ON THE DETECTOR SURFACE.
+ POSITION NUMBER        1      2      3      4      5      6      7      8      9
+ X-COORDINATE (pixel)  256.0  446.8  390.9  256.0  121.1   65.2  121.1  256.0  390.9
+ Y-COORDINATE (pixel)  256.0  256.0  390.9  446.8  390.9  256.0  121.1   65.2  121.1
+ NUMBER                   76    124     89     58    113    125     91     61    112
+ SIGMAB (degree)       0.024  0.024  0.025  0.025  0.024  0.024  0.024  0.024  0.023
+ SIGMAR (degree)       0.067  0.066  0.062  0.049  0.060  0.063  0.058  0.055  0.066
+
+
+   1257 REFLECTION INTENSITIES INTEGRATED
+
+
+ ******************************************************************************
+                     PROCESSING OF IMAGES       95 ...     141
+ ******************************************************************************
+
+ USING    6 OUT OF    6 PROCESSORS
+
+ *** DEFINITION OF SYMBOLS ***
+ IER     = ERROR CODE AFTER ACCESSING DATA IMAGE 
+              0: NO ERROR
+             -1: CANNOT OPEN OR READ IMAGE FILE
+             -2: EXCLUDED IMAGE
+             -3: WRONG DATA FORMAT
+ SCALE   = SCALING FACTOR FOR THIS DATA IMAGE
+ NBKG    = NUMBER OF BACKGROUND PIXELS ON DATA IMAGE
+ NOVL    = NUMBER OF OVERLOADED REFLECTIONS ON DATA IMAGE
+ NEWALD  = NUMBER OF REFLECTIONS CLOSE TO THE EWALD SPHERE
+ NSTRONG = NUMBER OF STRONG REFLECTIONS ON DATA IMAGE
+ NREJ    = NUMBER OF UNEXPECTED REFLECTIONS
+ SIGMAB  = BEAM_DIVERGENCE_E.S.D.=SIGMAB 
+ SIGMAR  = REFLECTING_RANGE_E.S.D.=SIGMAR (MOSAICITY)
+
+ IMAGE IER    SCALE     NBKG NOVL NEWALD NSTRONG  NREJ   SIGMAB   SIGMAR
+    95   0    1.013    10355    0    280      44     5  0.01944  3.60777
+    96   0    1.015     9360    0    272      37     4  0.02084  5.18881
+    97   0    1.001     9785    0    277      42     5  0.01872  2.88291
+    98   0    0.992    10150    0    285      40     4  0.01938  1.95405
+    99   0    1.005     9929    0    275      49     5  0.01965  2.27363
+   100   0    1.006     9122    0    275      37     3  0.01868  5.41331
+   101   0    1.004    10021    0    272      48     5  0.01834  3.26556
+   102   0    0.993    10145    0    276      52     6  0.02009  1.41047
+   103   0    0.996    10914    0    286      49     5  0.01891  1.88403
+   104   0    1.013    10467    0    279      45     5  0.01846  2.60089
+   105   0    1.015     9542    0    289      40     4  0.02000  4.08043
+   106   0    0.999     9780    0    282      47     5  0.02238  3.58855
+   107   0    0.990    10009    0    277      47     5  0.01971  2.97931
+   108   0    1.005    10085    0    276      44     5  0.02182  2.81383
+   109   0    1.012    10468    0    274      56     6  0.01975  1.36363
+   110   0    1.012    10329    0    277      46     5  0.02074  3.90502
+   111   0    1.020     8946    0    288      53     5  0.02142  3.68123
+   112   0    1.023     8918    0    286      49     4  0.02345  5.30576
+   113   0    1.021     8590    0    281      38     0  0.02380  9.40371
+   114   0    1.021     8768    0    280      49     4  0.02220  4.87257
+   115   0    1.013     9283    0    285      54     5  0.02157  3.96949
+   116   0    1.000    10332    0    288      56     6  0.02188  2.50206
+   117   0    1.005    10714    0    282      53     6  0.01930  2.25726
+   118   0    1.006     9882    0    278      48     5  0.01982  2.45541
+   119   0    1.014    10044    0    270      59     6  0.01941  1.94727
+   120   0    0.998    10608    0    276      60     6  0.01935  1.58081
+   121   0    1.001    10079    0    274      50     5  0.01993  1.26006
+   122   0    1.011     9564    0    280      66     6  0.01961  3.16922
+   123   0    1.015     9727    0    287      51     6  0.02114  2.19690
+   124   0    1.016     9623    0    285      57     6  0.01903  3.37484
+   125   0    1.020     9466    0    290      53     6  0.01995  3.53939
+   126   0    1.025     9077    0    284      54     6  0.01926  3.44587
+   127   0    1.024     9410    0    278      45     5  0.02132  3.46767
+   128   0    1.019    10169    0    269      59     6  0.02188  1.97054
+   129   0    1.002     9765    0    268      72     7  0.02031  1.12714
+   130   0    1.014    10674    0    274      55     6  0.02038  2.51713
+   131   0    1.009    10225    0    284      53     6  0.02038  2.27295
+   132   0    1.014    10022    0    279      44     5  0.02355  4.13886
+   133   0    1.015     9676    0    280      56     6  0.02036  3.34249
+   134   0    1.015     9752    0    282      49     5  0.01948  3.74025
+   135   0    1.002     9902    0    274      49     5  0.01951  2.28413
+   136   0    1.006    10311    0    279      66     7  0.02095  1.48743
+   137   0    1.007    10802    0    280      53     6  0.02184  2.64262
+   138   0    1.015     9705    0    275      43     5  0.01962  3.85963
+   139   0    1.027     8886    0    284      42     5  0.02051  3.54938
+   140   0    1.001    10340    0    278      48     5  0.01957  2.43645
+   141   0    0.988     9755    0    283      47     5  0.01790  2.98326
+
+   829 OUT OF   1015 REFLECTIONS ACCEPTED FOR REFINEMENT
+ REFINED PARAMETERS:   POSITION ORIENTATION                                  
+ STANDARD DEVIATION OF SPOT    POSITION (PIXELS)     1.34
+ STANDARD DEVIATION OF SPINDLE POSITION (DEGREES)    0.32
+ SPACE GROUP NUMBER    221
+ UNIT CELL PARAMETERS     11.909    11.909    11.909  90.000  90.000  90.000
+ REC. CELL PARAMETERS   0.083968  0.083968  0.083968  90.000  90.000  90.000
+ COORDINATES OF UNIT CELL A-AXIS     7.420    -4.895     7.926
+ COORDINATES OF UNIT CELL B-AXIS     7.388     9.264    -1.194
+ COORDINATES OF UNIT CELL C-AXIS    -5.675     5.661     8.808
+ CRYSTAL ROTATION OFF FROM INITIAL ORIENTATION     0.352    -0.102     0.057
+ shown as x,y,z components of rotation axis X angle (degrees)
+ CRYSTAL MOSAICITY (DEGREES)     0.142
+ LAB COORDINATES OF ROTATION AXIS  0.146787  0.989167 -0.001481
+ DIRECT BEAM COORDINATES (REC. ANGSTROEM)   0.000455 -0.001466 50.787201
+ DETECTOR COORDINATES (PIXELS) OF DIRECT BEAM     243.85    249.13
+ DETECTOR ORIGIN (PIXELS) AT                      243.78    249.36
+ CRYSTAL TO DETECTOR DISTANCE (mm)       444.78
+ LAB COORDINATES OF DETECTOR X-AXIS  1.000000  0.000000  0.000000
+ LAB COORDINATES OF DETECTOR Y-AXIS  0.000000  1.000000  0.000000
+
+
+ STANDARD DEVIATIONS OF BEAM DIVERGENCE AND REFLECTING RANGE OBTAINED
+ FROM     829 REFLECTION PROFILES AT 9 POSITIONS ON THE DETECTOR SURFACE.
+ POSITION NUMBER        1      2      3      4      5      6      7      8      9
+ X-COORDINATE (pixel)  256.0  446.8  390.9  256.0  121.1   65.2  121.1  256.0  390.9
+ Y-COORDINATE (pixel)  256.0  256.0  390.9  446.8  390.9  256.0  121.1   65.2  121.1
+ NUMBER                   70    113     81     51    106    126     95     62    103
+ SIGMAB (degree)       0.025  0.025  0.024  0.025  0.024  0.024  0.024  0.024  0.025
+ SIGMAR (degree)       0.058  0.061  0.055  0.045  0.057  0.063  0.056  0.051  0.057
+
+
+   1232 REFLECTION INTENSITIES INTEGRATED
+
+
+ ******************************************************************************
+                     PROCESSING OF IMAGES      142 ...     189
+ ******************************************************************************
+
+ USING    6 OUT OF    6 PROCESSORS
+
+ *** DEFINITION OF SYMBOLS ***
+ IER     = ERROR CODE AFTER ACCESSING DATA IMAGE 
+              0: NO ERROR
+             -1: CANNOT OPEN OR READ IMAGE FILE
+             -2: EXCLUDED IMAGE
+             -3: WRONG DATA FORMAT
+ SCALE   = SCALING FACTOR FOR THIS DATA IMAGE
+ NBKG    = NUMBER OF BACKGROUND PIXELS ON DATA IMAGE
+ NOVL    = NUMBER OF OVERLOADED REFLECTIONS ON DATA IMAGE
+ NEWALD  = NUMBER OF REFLECTIONS CLOSE TO THE EWALD SPHERE
+ NSTRONG = NUMBER OF STRONG REFLECTIONS ON DATA IMAGE
+ NREJ    = NUMBER OF UNEXPECTED REFLECTIONS
+ SIGMAB  = BEAM_DIVERGENCE_E.S.D.=SIGMAB 
+ SIGMAR  = REFLECTING_RANGE_E.S.D.=SIGMAR (MOSAICITY)
+
+ IMAGE IER    SCALE     NBKG NOVL NEWALD NSTRONG  NREJ   SIGMAB   SIGMAR
+   142   0    1.005    10120    0    284      55     6  0.01926  2.92295
+   143   0    1.001    10697    0    273      54     6  0.02062  1.33004
+   144   0    1.005     9261    0    278      59     5  0.02071  3.00276
+   145   0    1.010    10030    0    280      56     6  0.01934  2.02054
+   146   0    1.012    10464    0    279      45     5  0.01970  4.55427
+   147   0    1.005    11855    0    283      53     6  0.01869  2.55301
+   148   0    0.996    11085    0    277      56     6  0.01907  1.33955
+   149   0    0.991    10166    0    276      57     6  0.01984  1.49965
+   150   0    1.008     9558    0    280      61     7  0.02053  2.14299
+   151   0    1.007    10207    0    284      46     5  0.01960  3.36627
+   152   0    1.015    10234    0    292      54     5  0.02156  3.29668
+   153   0    1.011    10945    0    287      56     5  0.02030  1.63655
+   154   0    1.009    10426    0    277      53     3  0.02089  1.47313
+   155   0    1.012     9710    0    276      49     5  0.01977  3.19558
+   156   0    1.017     9864    0    273      50     5  0.01875  4.03435
+   157   0    1.024    11390    0    282      53     6  0.01926  3.57400
+   158   0    1.016    10544    0    285      49     5  0.01844  4.32737
+   159   0    1.004    10276    0    271      50     5  0.02045  2.65026
+   160   0    1.009    10701    0    280      51     5  0.01879  2.53192
+   161   0    1.012    10752    0    280      63     7  0.01807  2.77366
+   162   0    1.011    11035    0    279      54     6  0.01938  3.24077
+   163   0    1.017     9286    0    275      46     5  0.02177  4.30154
+   164   0    1.010    10633    0    278      57     6  0.01806  1.53942
+   165   0    1.006    10455    0    279      61     7  0.01986  1.42717
+   166   0    0.994     9780    0    284      69     6  0.02087  1.92129
+   167   0    1.000     9843    0    272      67     4  0.02109  2.92200
+   168   0    1.000    10724    0    275      68     4  0.02102  2.78921
+   169   0    1.000    11067    0    273      68     7  0.01926  1.98725
+   170   0    1.008    10003    0    283      59     5  0.02104  3.06286
+   171   0    1.007    10372    0    286      64     5  0.02109  3.02480
+   172   0    1.002    11243    0    290      67     3  0.02083  3.25778
+   173   0    1.005    10832    0    277      53     6  0.01871  2.61221
+   174   0    1.000     9801    0    281      54     6  0.01886  2.50503
+   175   0    1.006    10194    0    285      61     7  0.01931  2.20033
+   176   0    1.014    10378    0    283      57     4  0.02091  2.53455
+   177   0    1.018    11169    0    288      73     4  0.02002  3.54641
+   178   0    1.013     9905    0    278      53     3  0.02282  3.50419
+   179   0    1.002    10327    0    282      62     3  0.01953  2.86776
+   180   0    0.996    11112    0    282      66     6  0.02081  2.85917
+   181   0    1.009    10253    0    275      52     5  0.01856  2.75183
+   182   0    0.997    10366    0    279      55     6  0.01822  2.67656
+   183   0    1.007    10859    0    282      63     7  0.01999  1.99340
+   184   0    1.007    11772    0    280      60     6  0.02002  2.18458
+   185   0    1.011    10718    0    273      58     6  0.01950  2.34972
+   186   0    1.017    10164    0    277      60     6  0.01928  2.97272
+   187   0    1.013    10170    0    274      58     6  0.01868  2.80045
+   188   0    1.001     9896    0    278      61     4  0.02208  2.66214
+   189   0    1.008    10631    0    274      71     4  0.02111  2.56409
+
+   888 OUT OF   1155 REFLECTIONS ACCEPTED FOR REFINEMENT
+ REFINED PARAMETERS:   POSITION ORIENTATION                                  
+ STANDARD DEVIATION OF SPOT    POSITION (PIXELS)     1.36
+ STANDARD DEVIATION OF SPINDLE POSITION (DEGREES)    0.36
+ SPACE GROUP NUMBER    221
+ UNIT CELL PARAMETERS     11.909    11.909    11.909  90.000  90.000  90.000
+ REC. CELL PARAMETERS   0.083968  0.083968  0.083968  90.000  90.000  90.000
+ COORDINATES OF UNIT CELL A-AXIS     7.417    -4.905     7.922
+ COORDINATES OF UNIT CELL B-AXIS     7.391     9.263    -1.184
+ COORDINATES OF UNIT CELL C-AXIS    -5.674     5.653     8.813
+ CRYSTAL ROTATION OFF FROM INITIAL ORIENTATION     0.322    -0.133     0.101
+ shown as x,y,z components of rotation axis X angle (degrees)
+ CRYSTAL MOSAICITY (DEGREES)     0.142
+ LAB COORDINATES OF ROTATION AXIS  0.146787  0.989167 -0.001481
+ DIRECT BEAM COORDINATES (REC. ANGSTROEM)   0.000455 -0.001466 50.787201
+ DETECTOR COORDINATES (PIXELS) OF DIRECT BEAM     243.90    249.11
+ DETECTOR ORIGIN (PIXELS) AT                      243.83    249.34
+ CRYSTAL TO DETECTOR DISTANCE (mm)       444.77
+ LAB COORDINATES OF DETECTOR X-AXIS  1.000000  0.000000  0.000000
+ LAB COORDINATES OF DETECTOR Y-AXIS  0.000000  1.000000  0.000000
+
+
+ STANDARD DEVIATIONS OF BEAM DIVERGENCE AND REFLECTING RANGE OBTAINED
+ FROM     888 REFLECTION PROFILES AT 9 POSITIONS ON THE DETECTOR SURFACE.
+ POSITION NUMBER        1      2      3      4      5      6      7      8      9
+ X-COORDINATE (pixel)  256.0  446.8  390.9  256.0  121.1   65.2  121.1  256.0  390.9
+ Y-COORDINATE (pixel)  256.0  256.0  390.9  446.8  390.9  256.0  121.1   65.2  121.1
+ NUMBER                   74    126     86     54    109    127     95     65    121
+ SIGMAB (degree)       0.024  0.024  0.024  0.025  0.024  0.024  0.025  0.024  0.023
+ SIGMAR (degree)       0.067  0.065  0.061  0.058  0.062  0.069  0.067  0.059  0.069
+
+
+   1248 REFLECTION INTENSITIES INTEGRATED
+
+   15154 REFLECTIONS SAVED ON FILE "INTEGRATE.HKL"
+
+
+ total elapsed wall-clock time for INTEGRATE       1.3 sec
+
+ TASK     cpu time (sec)    elapsed wall-clock time (sec)
+   1           7.0                     1.2
+   2           7.3                     1.2
+   3           7.0                     1.2
+   4           6.8                     1.2
+
+ Total elapsed wall-clock time for XDS        3.5 sec

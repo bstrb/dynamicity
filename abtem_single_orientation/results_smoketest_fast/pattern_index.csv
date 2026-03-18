@@ -1,0 +1,2 @@
+thickness_nm,requested_thickness_A,actual_thickness_A,repetitions_z,npy_path,shape_y,shape_x,intensity_sum,intensity_max,orientation_mode,gxparm_path,frame_number,phi0_deg,dphi_deg,phi_deg,axis_x,axis_y,axis_z
+10.0,100.0,156.0,2,/Users/xiaodong/Desktop/dynamicity/abtem_single_orientation/results_smoketest_fast/patterns/pattern_t10nm.npy,123,23,0.9881761806816434,0.9496310949325562,xds_frame,/Users/xiaodong/Desktop/dynamicity/bloch_wave_analyser_project/data/LTA_t1/GXPARM.XDS,50,-45.0,0.12,-39.12,0.14723493505159255,0.9891005636870664,-0.0013959993841954916

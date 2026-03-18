@@ -1,0 +1,5 @@
+abtem
+ase
+numpy<2
+matplotlib
+pandas

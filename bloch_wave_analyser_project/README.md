@@ -134,6 +134,62 @@ python examples/run_analysis.py \
 
 Results are written to `analysis_output/` by default.
 
+## Interactive HTML visualization
+
+To generate an interactive HTML report showing predicted dynamical peaks on the detector across orientations:
+
+```bash
+python examples/export_orientation_peaks_html.py \
+  --gxparm data/GXPARM.XDS \
+  --integrate data/INTEGRATE.HKL \
+  --xdsinp data/XDS.INP \
+  --composition "24 Si, 48 O" \
+  --mode proxy \
+  --output-html analysis_output/orientation_dynamical_peaks.html
+```
+
+The report contains:
+
+- frame-wise trend panel (e.g., `S_MB` vs frame)
+- animated detector panel with predicted reflection positions per frame
+- reflection coloring and sizing by your selected score column (default `S_comb`)
+
+Single-frame 3D Gaussian view (for example frame 45):
+
+```bash
+python examples/export_single_frame_gaussian_html.py \
+  --gxparm data/GXPARM.XDS \
+  --integrate data/INTEGRATE.HKL \
+  --xdsinp data/XDS.INP \
+  --composition "24 Si, 48 O" \
+  --frame-number 45 \
+  --score-column S_comb \
+  --output-html analysis_output/frame45_gaussian_3d.html
+```
+
+In this view, each predicted reflection contributes a Gaussian peak at its detector position.
+Peak sigma and color are both mapped from the selected score column, so more dynamically affected reflections appear broader and redder.
+
+## Verifying predicted thickness trends against real reflection data
+
+If you have multiple thickness datasets (for example `LTA_t1..LTA_t4` or `STW_t1_360..STW_t4_360`) under `data/`, you can compare predicted intensity-vs-thickness trends against observed `INTEGRATE.HKL` intensities:
+
+```bash
+python examples/verify_thickness_against_real.py \
+  --sample LTA \
+  --composition "24 Si, 48 O" \
+  --frame-number 45 \
+  --phi-tolerance-deg 0.8 \
+  --output-dir analysis_output
+```
+
+Outputs include:
+
+- `*_pred_vs_obs_long.csv`: merged predicted/observed long table
+- `*_reflection_correlations.csv`: per-reflection Pearson/Spearman agreement over thickness
+- `*_summary.txt`: compact run summary
+- diagnostic plots (`*_pred_vs_obs_scatter.png`, `*_top_trend_matches.png`)
+
 ## Proxy mode vs thickness-aware mode
 
 ### Proxy mode

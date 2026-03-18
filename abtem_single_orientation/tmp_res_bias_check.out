@@ -1,0 +1,20 @@
+/Users/xiaodong/Desktop/dynamicity/abtem_single_orientation/tmp_res_bias_check.py:42: FutureWarning: The default of observed=False is deprecated and will be changed to True in a future version of pandas. Pass observed=False to retain current behavior or observed=True to adopt the future default and silence this warning.
+  print(G.groupby('shell')['max_abs_rel_pct'].median().round(2).to_string())
+/Users/xiaodong/Desktop/dynamicity/abtem_single_orientation/tmp_res_bias_check.py:44: FutureWarning: The default of observed=False is deprecated and will be changed to True in a future version of pandas. Pass observed=False to retain current behavior or observed=True to adopt the future default and silence this warning.
+  print(G.groupby('shell')['abs_range'].median().round(2).to_string())
+n_reflections 45
+corr(max_abs_rel_pct,hkl_norm)= 0.2591
+corr(abs_range,hkl_norm)= -0.2718
+corr(max_abs_rel_pct,mean_abs_int)= -0.0427
+shell_median_max_abs_rel_pct
+shell
+inner_lowres      97.99
+mid_lowres       199.42
+mid_highres      609.44
+outer_highres    383.39
+shell_median_abs_range
+shell
+inner_lowres     0.02
+mid_lowres       0.00
+mid_highres      0.00
+outer_highres    0.00

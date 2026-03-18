@@ -1,0 +1,26 @@
+{
+  "structure_path": "../../../SCXRD-DATA/SCXRDLTA/LTA.cif",
+  "output_dir": "results_10to500_step10",
+  "thickness_nm": [
+    10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+    110, 120, 130, 140, 150, 160, 170, 180, 190, 200,
+    210, 220, 230, 240, 250, 260, 270, 280, 290, 300,
+    310, 320, 330, 340, 350, 360, 370, 380, 390, 400,
+    410, 420, 430, 440, 450, 460, 470, 480, 490, 500
+  ],
+  "energy_eV": 200000,
+  "sampling_A": 0.1,
+  "slice_thickness_A": 1.0,
+  "max_angle_mrad": 35.0,
+  "orientation": {
+    "mode": "xds_frame",
+    "gxparm_path": "../../bloch_wave_analyser_project/data/LTA_t1/GXPARM.XDS",
+    "frame_number": 50,
+    "extra_rotation_deg": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    }
+  },
+  "gpts": [512, 512]
+}

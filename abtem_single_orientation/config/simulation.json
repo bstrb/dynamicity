@@ -1,0 +1,20 @@
+{
+  "structure_path": "../../../SCXRD-DATA/SCXRDLTA/LTA.cif",
+  "output_dir": "results",
+  "thickness_nm": [100, 200, 350, 600],
+  "energy_eV": 200000,
+  "sampling_A": 0.1,
+  "slice_thickness_A": 1.0,
+  "max_angle_mrad": 35.0,
+  "orientation": {
+    "mode": "xds_frame",
+    "gxparm_path": "../../bloch_wave_analyser_project/data/LTA_t1/GXPARM.XDS",
+    "frame_number": 50,
+    "extra_rotation_deg": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    }
+  },
+  "gpts": [512, 512]
+}

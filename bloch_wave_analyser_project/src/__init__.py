@@ -18,6 +18,8 @@ from .geometry import (
     project_to_detector,
     rodrigues_rotation_matrix,
 )
+from .html_visualization import export_orientation_peaks_html
+from .html_visualization import export_single_frame_gaussian_html
 from .metrics import (
     aggregate_frame_thickness_sensitivity,
     aggregate_reflection_thickness_sensitivity,
@@ -66,6 +68,8 @@ __all__ = [
     "cell_volume",
     "combined_proxy_score",
     "effective_coupling_multiplicity",
+    "export_orientation_peaks_html",
+    "export_single_frame_gaussian_html",
     "excitation_error",
     "extinction_distance_angstrom",
     "generate_candidate_reflections",
