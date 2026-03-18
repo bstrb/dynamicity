@@ -228,6 +228,17 @@ Columns include:
 
 A compact export for scaling experiments containing the columns most useful for downstream merging.
 
+### `run_provenance.json`
+
+Machine-readable run log for reproducibility, including:
+
+* CLI arguments,
+* UTC timestamp,
+* current working directory,
+* Python executable,
+* git commit/branch/dirty status,
+* entrypoint script identifier.
+
 ## Notebooks
 
 ### `notebooks/orientation_analysis.ipynb`

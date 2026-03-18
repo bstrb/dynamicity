@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from .parsers import (
     load_xds_rotation_series,
     parse_cell_json,
 )
+from .provenance import build_run_provenance
 from .reflection_metrics import ReflectionMetricConfig, compute_reflection_metrics
 from .weighting import WeightingConfig, apply_orientation_aware_weighting
 
@@ -187,7 +189,11 @@ def run_xds_pipeline(
     return run_pipeline_from_tables(orientations, reflections, cell, config=config, metadata=metadata)
 
 
-def export_results(results: PipelineResults, output_dir: str | Path) -> dict[str, Path]:
+def export_results(
+    results: PipelineResults,
+    output_dir: str | Path,
+    run_provenance: dict[str, Any] | None = None,
+) -> dict[str, Path]:
     """Write pipeline results to an output directory."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -196,6 +202,7 @@ def export_results(results: PipelineResults, output_dir: str | Path) -> dict[str
     reflection_scores_path = output_path / "reflection_scores.csv"
     merge_weights_path = output_path / "merge_weights.csv"
     metadata_path = output_path / "pipeline_metadata.json"
+    run_provenance_path = output_path / "run_provenance.json"
 
     results.frame_summary.to_csv(frame_summary_path, index=False)
     results.reflection_table.to_csv(reflection_scores_path, index=False)
@@ -226,13 +233,18 @@ def export_results(results: PipelineResults, output_dir: str | Path) -> dict[str
         "n_reflections": int(results.reflection_table.shape[0]),
     }
     metadata_path.write_text(json.dumps(metadata_payload, indent=2))
+    if run_provenance is not None:
+        run_provenance_path.write_text(json.dumps(run_provenance, indent=2))
 
-    return {
+    written_paths = {
         "frame_summary": frame_summary_path,
         "reflection_scores": reflection_scores_path,
         "merge_weights": merge_weights_path,
         "metadata": metadata_path,
     }
+    if run_provenance is not None:
+        written_paths["run_provenance"] = run_provenance_path
+    return written_paths
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -291,7 +303,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def run_from_cli(argv: list[str] | None = None) -> PipelineResults:
     """Entry point used by the example command-line script."""
     parser = build_arg_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(argv) if argv is not None else list(sys.argv[1:])
+    args = parser.parse_args(raw_argv)
 
     snapshot_mode = bool(args.orientations and args.reflections and args.cell)
     xds_mode = bool(args.gxparm and args.integrate)
@@ -335,7 +348,12 @@ def run_from_cli(argv: list[str] | None = None) -> PipelineResults:
             config=config,
         )
 
-    written = export_results(results, args.output)
+    run_provenance = build_run_provenance(
+        raw_argv,
+        project_root=Path(__file__).resolve().parents[1],
+        extra={"entrypoint": "examples/run_pipeline.py"},
+    )
+    written = export_results(results, args.output, run_provenance=run_provenance)
     print("Wrote pipeline outputs:")
     for label, path in written.items():
         print(f"  {label}: {path}")

@@ -22,6 +22,7 @@ Defaults:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.pipeline import PipelineConfig, run_xds_pipeline
+from src.provenance import build_run_provenance
 
 
 @dataclass(slots=True)
@@ -118,7 +120,13 @@ def select_frames(frame_summary: pd.DataFrame, include_frames: Iterable[int], of
     return sorted(set(picked))
 
 
-def run_dataset(spec: DatasetSpec, config: PipelineConfig, include_frames: Iterable[int], offaxis_count: int, output_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def run_dataset(
+    spec: DatasetSpec,
+    config: PipelineConfig,
+    include_frames: Iterable[int],
+    offaxis_count: int,
+    output_dir: Path,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[int]]:
     results = run_xds_pipeline(
         gxparm_path=spec.gxparm,
         integrate_path=spec.integrate,
@@ -134,7 +142,7 @@ def run_dataset(spec: DatasetSpec, config: PipelineConfig, include_frames: Itera
     subset_reflections.to_csv(ds_dir / "reflection_scores_subset.csv", index=False)
     subset_frames.to_csv(ds_dir / "frame_summary_subset.csv", index=False)
 
-    return subset_reflections, subset_frames
+    return subset_reflections, subset_frames, frames_to_keep
 
 
 def aggregate_across_thickness(
@@ -211,6 +219,7 @@ def try_plot(summary: pd.DataFrame, output_dir: Path) -> None:
 
 
 def main() -> None:
+    raw_argv = list(sys.argv[1:])
     args = parse_args()
     output_dir = args.output.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -219,8 +228,9 @@ def main() -> None:
 
     reflections_by_set: list[tuple[DatasetSpec, pd.DataFrame]] = []
     frame_summaries: list[tuple[DatasetSpec, pd.DataFrame]] = []
+    per_dataset_log: list[dict[str, object]] = []
     for spec in args.dataset:
-        subset_reflections, subset_frames = run_dataset(
+        subset_reflections, subset_frames, selected_frames = run_dataset(
             spec=spec,
             config=config,
             include_frames=args.frames,
@@ -229,14 +239,44 @@ def main() -> None:
         )
         reflections_by_set.append((spec, subset_reflections))
         frame_summaries.append((spec, subset_frames))
+        per_dataset_log.append(
+            {
+                "name": spec.name,
+                "thickness_nm": spec.thickness_nm,
+                "gxparm": str(spec.gxparm),
+                "integrate": str(spec.integrate),
+                "xds_inp": str(spec.xds_inp) if spec.xds_inp is not None else None,
+                "selected_frames": selected_frames,
+                "n_selected_frames": int(len(selected_frames)),
+            }
+        )
 
     summary = aggregate_across_thickness(reflections_by_set, min_thickness_presence=args.min_thickness_presence)
     summary.to_csv(output_dir / "hkl_variation_summary.csv", index=False)
+
+    run_provenance = build_run_provenance(
+        raw_argv,
+        project_root=PROJECT_ROOT,
+        extra={
+            "entrypoint": "examples/run_thickness_poc.py",
+            "pipeline_config": {
+                "dmin": args.dmin,
+                "dmax": args.dmax,
+                "frames": list(args.frames),
+                "offaxis_per_set": int(args.offaxis_per_set),
+                "min_thickness_presence": int(args.min_thickness_presence),
+                "output": str(output_dir),
+            },
+            "datasets": per_dataset_log,
+        },
+    )
+    (output_dir / "run_provenance.json").write_text(json.dumps(run_provenance, indent=2))
 
     try_plot(summary, output_dir)
 
     # Minimal console report
     print(f"Saved per-dataset subsets to {output_dir}")
+    print(f"Run provenance: {output_dir / 'run_provenance.json'}")
     print(f"Aggregated HKL rows (presence >= {args.min_thickness_presence}): {len(summary)}")
     if not summary.empty:
         print(
