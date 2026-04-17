@@ -10,10 +10,12 @@ This project is aimed at method development in electron crystallography and Seri
 
 - parse `GXPARM.XDS`, `INTEGRATE.HKL`, and optionally `XDS.INP`
 - parse CrystFEL `.stream` output directly for snapshot SerialED
+- parse PETS project outputs (`.pts2/.pts2.backup` + `.rprofall`) directly
 - reconstruct frame orientations from `phi0`, `dphi`, and the XDS rotation axis
 - generate candidate reciprocal-lattice vectors from the GXPARM reference basis
 - compute excitation errors and reflection-wise dynamicality proxy scores
 - compute orientation-only per-reflection uncertainty terms (`orientation_sigma_sg_invA`, `orientation_p_excited`, `S_orient`)
+- optionally run a pure orientation-only mode that skips Wilson/coupling terms
 - optionally propagate a Bloch-wave state through crystal thickness and study thickness sensitivity
 - export frame summaries and long-format reflection tables for downstream analysis
 
@@ -125,6 +127,25 @@ python examples/run_analysis.py \
 
 `--integrate` and `--rprofall` are mutually exclusive.
 
+Using PETS project files only (no GXPARM / INTEGRATE needed):
+
+```bash
+python examples/run_analysis.py \
+  --pets-project path/to/pets_project_folder \
+  --composition "64 C, 8 H, 40 O, 8 V" \
+  --mode proxy
+```
+
+Optional explicit `.rprofall` override in PETS mode:
+
+```bash
+python examples/run_analysis.py \
+  --pets-project path/to/lta1_new.pts2.backup \
+  --pets-rprofall path/to/lta1_new.rprofall \
+  --composition "64 C, 8 H, 40 O, 8 V" \
+  --mode proxy
+```
+
 Using CrystFEL `.stream` only (no GXPARM / INTEGRATE required):
 
 ```bash
@@ -134,8 +155,18 @@ python examples/run_analysis.py \
   --mode proxy
 ```
 
-`--stream` is mutually exclusive with `--gxparm`, `--integrate`, `--rprofall`, and `--xdsinp`.
+`--stream` is mutually exclusive with `--pets-project`, `--pets-rprofall`, `--gxparm`, `--integrate`, `--rprofall`, and `--xdsinp`.
 In stream mode, each indexed crystal block is treated as one snapshot frame (ordered by appearance in the stream).
+
+Pure orientation-only scoring (no Wilson scaling, no Bloch coupling terms):
+
+```bash
+python examples/run_analysis.py \
+  --pets-project path/to/pets_project_folder \
+  --composition "64 C, 8 H, 40 O, 8 V" \
+  --mode proxy \
+  --orientation-only
+```
 
 Thickness-aware analysis at one thickness:
 
@@ -257,6 +288,9 @@ Because the original HTML is a proxy model, absolute scaling should be treated c
 ## Limitations and assumptions
 
 - `GXPARM.XDS` parsing follows the line layout used by the supplied analyser and typical XDS exports.
+- PETS-only mode uses `.rprofall` for observations and reads geometry/orientation essentials from `.pts2/.pts2.backup` (`lambda`, `aperpixel`, unit cell, `ubmatrix`, and `imagelist` angles/centers).
+- PETS frame rotations are reconstructed from `alpha`, `beta`, and `domega` in the order `Rz(domega) * Ry(beta) * Rx(alpha)`; this is an explicit approximation for interoperability.
+- In `--orientation-only` mode, `S_orient` is set directly to `orientation_p_excited` and coupling-derived columns (`S_MB`, `S_comb`, `N_eff`) are set to zero.
 - Equivalent-reflection merging uses the deliberately simple absolute-value sorting key inherited from the HTML prototype.
 - The reciprocal basis is taken as the inverse of the GXPARM real-space reference matrix, matching the original script.
 - Untrusted detector rectangles are parsed and visualized; they are not removed from the dynamical calculation unless you extend the code.
@@ -294,3 +328,4 @@ The tests cover lightweight parsing, rotation, composition parsing, and metric s
 - `--orientation-sigma-axis-deg SX SY SZ` anisotropic uncertainty around lab axes
 - `--orientation-score-formulation {log_n_eff,linear_n_eff}`
 - `--orientation-sigma-alpha` for `sigma_orient_scale`
+- `--orientation-only` to skip Wilson/coupling terms and score purely from orientation uncertainty

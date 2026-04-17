@@ -56,7 +56,9 @@ from .parsers import (
     parse_crystfel_stream,
     parse_gxparm,
     parse_integrate_hkl,
+    parse_pets_project,
     parse_rprofall,
+    pets_project_to_analysis_inputs,
     rprofall_to_integrate_data,
 )
 from .wilson import WilsonCalibration, wilson_calibrate
@@ -73,6 +75,7 @@ class AnalysisConfig:
     thickness_nm: float | Sequence[float] | None = None
     zone_axis_limit: int = 5
     filter_untrusted: bool = False
+    orientation_only: bool = False
     orientation_sigma_deg: float | tuple[float, float, float] = 0.2
     orientation_sigma_alpha: float = 0.5
     orientation_score_formulation: Literal["log_n_eff", "linear_n_eff"] = "log_n_eff"
@@ -96,7 +99,7 @@ class AnalysisResult:
     integrate: IntegrateData
     xds_input: XDSInputData | None
     composition: CompositionResult
-    wilson: WilsonCalibration
+    wilson: WilsonCalibration | None
     candidate_reflections: pd.DataFrame
     reflections_long: pd.DataFrame
     frame_summary: pd.DataFrame
@@ -142,25 +145,33 @@ def run_analysis(
     cfg = config or AnalysisConfig()
     orienter = orientation_model or RotationSeriesOrientationModel(gxparm)
     n_frames = _frame_count_from_inputs(integrate, xds_input)
+    if cfg.orientation_only and cfg.mode == "thickness":
+        raise ValueError("orientation_only mode does not support thickness propagation.")
 
-    calibration = wilson_calibrate(integrate.observations, composition.sum_fj2)
+    calibration: WilsonCalibration | None = None
     candidate_reflections = generate_candidate_reflections(
         gxparm,
         dmin_angstrom=cfg.dmin_angstrom,
         dmax_angstrom=cfg.dmax_angstrom,
     ).copy()
-
-    candidate_reflections["Fg_abs"] = [
-        calibration.lookup_amplitude(int(h), int(k), int(l))
-        for h, k, l in candidate_reflections[["h", "k", "l"]].itertuples(index=False, name=None)
-    ]
     volume_ang3 = cell_volume(gxparm.unit_cell)
-    candidate_reflections["xi_angstrom"] = extinction_distance_angstrom(
-        gxparm.wavelength_angstrom,
-        volume_ang3,
-        candidate_reflections["Fg_abs"].to_numpy(dtype=float),
-    )
-    candidate_reflections["xi_nm"] = candidate_reflections["xi_angstrom"] / 10.0
+
+    if cfg.orientation_only:
+        candidate_reflections["Fg_abs"] = np.nan
+        candidate_reflections["xi_angstrom"] = np.nan
+        candidate_reflections["xi_nm"] = np.nan
+    else:
+        calibration = wilson_calibrate(integrate.observations, composition.sum_fj2)
+        candidate_reflections["Fg_abs"] = [
+            calibration.lookup_amplitude(int(h), int(k), int(l))
+            for h, k, l in candidate_reflections[["h", "k", "l"]].itertuples(index=False, name=None)
+        ]
+        candidate_reflections["xi_angstrom"] = extinction_distance_angstrom(
+            gxparm.wavelength_angstrom,
+            volume_ang3,
+            candidate_reflections["Fg_abs"].to_numpy(dtype=float),
+        )
+        candidate_reflections["xi_nm"] = candidate_reflections["xi_angstrom"] / 10.0
 
     zone_axes = build_zone_axes(limit=cfg.zone_axis_limit)
     reference_vectors = candidate_reflections[["gx_ref", "gy_ref", "gz_ref"]].to_numpy(dtype=float)
@@ -228,25 +239,30 @@ def run_analysis(
         frame_table["y_px"] = y_px[excited_mask]
         frame_table["in_untrusted_region"] = in_untrusted[excited_mask]
 
-        structure = build_structure_matrix(
-            frame_table,
-            calibration=calibration,
-            wavelength_angstrom=gxparm.wavelength_angstrom,
-            cell_volume_ang3=volume_ang3,
-        )
-
-        d2beam_values = two_beam_metric(
-            frame_table["sg_invA"].to_numpy(dtype=float),
-            frame_table["xi_angstrom"].to_numpy(dtype=float),
-        )
-        n_eff_values = np.asarray(
-            [
-                effective_coupling_multiplicity(structure.eigenvectors, beam_index=i + 1)
-                for i in range(frame_table.shape[0])
-            ],
-            dtype=float,
-        )
-        s_comb_values = combined_proxy_score(d2beam_values, n_eff_values)
+        structure = None
+        if cfg.orientation_only:
+            d2beam_values = np.zeros(frame_table.shape[0], dtype=float)
+            n_eff_values = np.zeros(frame_table.shape[0], dtype=float)
+            s_comb_values = np.zeros(frame_table.shape[0], dtype=float)
+        else:
+            structure = build_structure_matrix(
+                frame_table,
+                calibration=calibration,
+                wavelength_angstrom=gxparm.wavelength_angstrom,
+                cell_volume_ang3=volume_ang3,
+            )
+            d2beam_values = two_beam_metric(
+                frame_table["sg_invA"].to_numpy(dtype=float),
+                frame_table["xi_angstrom"].to_numpy(dtype=float),
+            )
+            n_eff_values = np.asarray(
+                [
+                    effective_coupling_multiplicity(structure.eigenvectors, beam_index=i + 1)
+                    for i in range(frame_table.shape[0])
+                ],
+                dtype=float,
+            )
+            s_comb_values = combined_proxy_score(d2beam_values, n_eff_values)
         orientation_sigma_values = orientation_sg_sigma(
             g_vectors_invA=g_mid[excited_mask],
             wavelength_angstrom=gxparm.wavelength_angstrom,
@@ -257,11 +273,14 @@ def run_analysis(
             sg_sigma_orient_invA=orientation_sigma_values,
             excitation_tolerance_invA=cfg.excitation_tolerance_invA,
         )
-        s_orient_values = orientation_proxy_score(
-            p_excited_orient=orientation_p_excited_values,
-            n_eff=n_eff_values,
-            formulation=cfg.orientation_score_formulation,
-        )
+        if cfg.orientation_only:
+            s_orient_values = orientation_p_excited_values.copy()
+        else:
+            s_orient_values = orientation_proxy_score(
+                p_excited_orient=orientation_p_excited_values,
+                n_eff=n_eff_values,
+                formulation=cfg.orientation_score_formulation,
+            )
         frame_table["d_2beam"] = d2beam_values
         frame_table["N_eff"] = n_eff_values
         frame_table["S_comb"] = s_comb_values
@@ -270,7 +289,7 @@ def run_analysis(
         frame_table["S_orient"] = s_orient_values
         frame_table["sigma_orient_scale"] = 1.0 + float(cfg.orientation_sigma_alpha) * s_orient_values
 
-        if cfg.mode == "thickness" and thickness_array_nm is not None:
+        if cfg.mode == "thickness" and thickness_array_nm is not None and structure is not None:
             amplitudes = propagate_bloch_wave(
                 structure.eigenvalues,
                 structure.eigenvectors,
@@ -324,7 +343,11 @@ def run_analysis(
                 "max_N_eff": float(frame_metrics["max_N_eff"]),
                 "mean_orientation_sigma_sg_invA": float(np.mean(orientation_sigma_values)),
                 "mean_orientation_p_excited": float(np.mean(orientation_p_excited_values)),
-                "eigenvalue_spread_invA": float(structure.eigenvalues.max() - structure.eigenvalues.min()),
+                "eigenvalue_spread_invA": (
+                    0.0
+                    if structure is None
+                    else float(structure.eigenvalues.max() - structure.eigenvalues.min())
+                ),
             }
         )
 
@@ -396,6 +419,31 @@ def run_analysis_from_stream_path(
 
     stream_data = parse_crystfel_stream(stream_path)
     gxparm, integrate, reciprocal_by_frame = crystfel_stream_to_analysis_inputs(stream_data)
+    orientation_model = ReciprocalMatrixOrientationModel(
+        reciprocal_by_frame=reciprocal_by_frame,
+        reciprocal_reference=gxparm.reciprocal_reference,
+    )
+    composition = parse_composition(composition_text)
+    return run_analysis(
+        gxparm=gxparm,
+        integrate=integrate,
+        composition=composition,
+        xds_input=None,
+        config=config,
+        orientation_model=orientation_model,
+    )
+
+
+def run_analysis_from_pets_project_path(
+    pets_project_path: str | Path,
+    composition_text: str,
+    config: AnalysisConfig | None = None,
+    rprofall_path: str | Path | None = None,
+) -> AnalysisResult:
+    """Parse a PETS project folder (plus ``.rprofall``) and run analysis."""
+
+    pets_data = parse_pets_project(pets_project_path, rprofall_path=rprofall_path)
+    gxparm, integrate, reciprocal_by_frame = pets_project_to_analysis_inputs(pets_data)
     orientation_model = ReciprocalMatrixOrientationModel(
         reciprocal_by_frame=reciprocal_by_frame,
         reciprocal_reference=gxparm.reciprocal_reference,

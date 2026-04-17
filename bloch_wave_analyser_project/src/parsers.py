@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
-from typing import Iterable
+import shlex
 
 import numpy as np
 import pandas as pd
@@ -72,6 +72,24 @@ class CrystFELStreamData:
     unit_cell: UnitCell
     crystal_table: pd.DataFrame
     reflections: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class PETSProjectData:
+    """Parsed PETS project metadata plus integrated reflection rows."""
+
+    pts_path: Path
+    rprofall_path: Path
+    wavelength_angstrom: float
+    aperpixel_invA_per_px: float
+    unit_cell: UnitCell
+    reciprocal_reference: FloatArray
+    detector_nx: int
+    detector_ny: int
+    orgx_px: float
+    orgy_px: float
+    imagelist: pd.DataFrame
+    rprofall: RProfallData
 
 
 @dataclass(frozen=True)
@@ -168,6 +186,27 @@ STREAM_MATRIX_COLUMNS: tuple[str, ...] = (
     "UB33",
 )
 
+PETS_IMAGELIST_DEFAULT_HEADER: tuple[str, ...] = (
+    "imgname",
+    "alpha",
+    "beta",
+    "domega",
+    "alphaorig",
+    "betaorig",
+    "domegaorig",
+    "xcenter",
+    "ycenter",
+    "intscale",
+    "diffbfac",
+    "magcorr",
+    "elliamp",
+    "elliph",
+    "paraamp",
+    "paraph",
+    "useforcalc",
+    "dataset",
+)
+
 
 def _clean_lines(text: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
@@ -256,6 +295,62 @@ def _parse_stream_reflection_row(line: str) -> dict[str, float | int | str] | No
         "ss_px": ss_px,
         "panel": panel,
     }
+
+
+def _rotation_matrix_x_deg(angle_deg: float) -> FloatArray:
+    theta = np.deg2rad(float(angle_deg))
+    c = float(np.cos(theta))
+    s = float(np.sin(theta))
+    return np.asarray(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, c, -s],
+            [0.0, s, c],
+        ],
+        dtype=float,
+    )
+
+
+def _rotation_matrix_y_deg(angle_deg: float) -> FloatArray:
+    theta = np.deg2rad(float(angle_deg))
+    c = float(np.cos(theta))
+    s = float(np.sin(theta))
+    return np.asarray(
+        [
+            [c, 0.0, s],
+            [0.0, 1.0, 0.0],
+            [-s, 0.0, c],
+        ],
+        dtype=float,
+    )
+
+
+def _rotation_matrix_z_deg(angle_deg: float) -> FloatArray:
+    theta = np.deg2rad(float(angle_deg))
+    c = float(np.cos(theta))
+    s = float(np.sin(theta))
+    return np.asarray(
+        [
+            [c, -s, 0.0],
+            [s, c, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+
+def _pets_rotation_from_angles_deg(alpha_deg: float, beta_deg: float, domega_deg: float) -> FloatArray:
+    """Compose PETS per-frame angles into a 3D rotation matrix.
+
+    The convention used here is a practical approximation:
+    ``R = Rz(domega) * Ry(beta) * Rx(alpha)``.
+    """
+
+    return (
+        _rotation_matrix_z_deg(domega_deg)
+        @ _rotation_matrix_y_deg(beta_deg)
+        @ _rotation_matrix_x_deg(alpha_deg)
+    )
 
 
 def parse_gxparm_text(text: str) -> GXPARMData:
@@ -728,6 +823,351 @@ def crystfel_stream_to_analysis_inputs(
         observations=observations,
         estimated_n_frames=estimated_n_frames,
     )
+    return gxparm, integrate, reciprocal_by_frame
+
+
+def _resolve_pets_paths(
+    path: str | Path,
+    rprofall_path: str | Path | None = None,
+) -> tuple[Path, Path]:
+    source = Path(path)
+    if source.is_dir():
+        pts_candidates = sorted(source.glob("*.pts2.backup")) + sorted(source.glob("*.pts2"))
+        if not pts_candidates:
+            raise ValueError(
+                f"Could not find PETS project file (*.pts2.backup or *.pts2) in directory: {source}"
+            )
+        pts_path = pts_candidates[0]
+        directory = source
+    else:
+        if not source.exists():
+            raise ValueError(f"PETS path does not exist: {source}")
+        pts_path = source
+        directory = source.parent
+
+    if rprofall_path is not None:
+        rpf = Path(rprofall_path)
+        if not rpf.exists():
+            raise ValueError(f"PETS .rprofall path does not exist: {rpf}")
+        return pts_path, rpf
+
+    rprofall_candidates = sorted(directory.glob("*.rprofall"))
+    if not rprofall_candidates:
+        raise ValueError(f"Could not find PETS .rprofall file in directory: {directory}")
+    if len(rprofall_candidates) == 1:
+        return pts_path, rprofall_candidates[0]
+
+    base_name = pts_path.name
+    prefix_candidates: list[str] = []
+    if ".pts2" in base_name:
+        prefix_candidates.append(base_name.split(".pts2", maxsplit=1)[0])
+    if ".ptsopt" in base_name:
+        prefix_candidates.append(base_name.split(".ptsopt", maxsplit=1)[0])
+    prefix_candidates.append(pts_path.stem)
+
+    for prefix in prefix_candidates:
+        matched = [cand for cand in rprofall_candidates if cand.name.startswith(prefix)]
+        if len(matched) == 1:
+            return pts_path, matched[0]
+
+    candidates_text = ", ".join(cand.name for cand in rprofall_candidates[:8])
+    raise ValueError(
+        "Found multiple PETS .rprofall files and could not determine which one to use. "
+        f"Pass rprofall_path explicitly. Candidates: {candidates_text}"
+    )
+
+
+def _parse_pets_badpixel_max(lines: list[str]) -> tuple[int | None, int | None]:
+    in_badpixels = False
+    max_x: int | None = None
+    max_y: int | None = None
+    for raw_line in lines:
+        line = raw_line.strip()
+        lower = line.lower()
+        if lower == "badpixels":
+            in_badpixels = True
+            continue
+        if lower == "endbadpixels":
+            in_badpixels = False
+            continue
+        if not in_badpixels:
+            continue
+        numbers: list[int] = []
+        for token in line.split():
+            if re.fullmatch(r"[-+]?\d+", token) is None:
+                continue
+            numbers.append(int(token))
+        for idx in range(0, len(numbers) - 1, 2):
+            x = numbers[idx]
+            y = numbers[idx + 1]
+            max_x = x if max_x is None else max(max_x, x)
+            max_y = y if max_y is None else max(max_y, y)
+    return max_x, max_y
+
+
+def _parse_pets_imagelist(lines: list[str]) -> pd.DataFrame:
+    header: list[str] | None = None
+    rows: list[dict[str, str | None]] = []
+    in_block = False
+    for raw_line in lines:
+        line = raw_line.strip()
+        lower = line.lower()
+        if lower.startswith("imagelistheader"):
+            parts = line.split()
+            if len(parts) > 1:
+                header = [token.strip().lower() for token in parts[1:]]
+            continue
+        if lower == "imagelist":
+            in_block = True
+            continue
+        if lower == "endimagelist":
+            in_block = False
+            continue
+        if not in_block or not line:
+            continue
+
+        values = shlex.split(line)
+        if not values:
+            continue
+        if header is None:
+            header = list(PETS_IMAGELIST_DEFAULT_HEADER)
+        row: dict[str, str | None] = {}
+        for col_idx, col_name in enumerate(header):
+            row[col_name] = values[col_idx] if col_idx < len(values) else None
+        rows.append(row)
+
+    if not rows:
+        raise ValueError("Could not parse PETS imagelist block.")
+
+    table = pd.DataFrame.from_records(rows)
+    for column in table.columns:
+        if column == "imgname":
+            continue
+        table[column] = pd.to_numeric(table[column], errors="coerce")
+
+    table["frame"] = np.arange(table.shape[0], dtype=int)
+    table["frame_number"] = table["frame"] + 1
+    table["image_number"] = (
+        table["imgname"]
+        .astype(str)
+        .str.extract(r"(\d+)", expand=False)
+        .pipe(pd.to_numeric, errors="coerce")
+    )
+    return table
+
+
+def _parse_pets_ubmatrix(lines: list[str]) -> FloatArray:
+    for line_index, raw_line in enumerate(lines):
+        if raw_line.strip().lower() != "ubmatrix":
+            continue
+        matrix_rows: list[list[float]] = []
+        scan_index = line_index + 1
+        while scan_index < len(lines) and len(matrix_rows) < 3:
+            stripped = lines[scan_index].strip()
+            scan_index += 1
+            if not stripped:
+                continue
+            tokens = stripped.split()
+            if len(tokens) < 3:
+                break
+            try:
+                row = [float(tokens[0]), float(tokens[1]), float(tokens[2])]
+            except ValueError:
+                break
+            matrix_rows.append(row)
+        if len(matrix_rows) == 3:
+            return np.asarray(matrix_rows, dtype=float)
+    raise ValueError("Could not parse PETS ubmatrix (3x3) from project file.")
+
+
+def _parse_pets_cell(lines: list[str]) -> UnitCell:
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped.lower().startswith("cell "):
+            continue
+        tokens = stripped.split()
+        if len(tokens) < 7:
+            continue
+        try:
+            return UnitCell(
+                a=float(tokens[1]),
+                b=float(tokens[2]),
+                c=float(tokens[3]),
+                alpha=float(tokens[4]),
+                beta=float(tokens[5]),
+                gamma=float(tokens[6]),
+            )
+        except ValueError:
+            continue
+    raise ValueError("Could not parse PETS unit-cell parameters from project file.")
+
+
+def _infer_pets_detector_size(
+    orgx_px: float,
+    orgy_px: float,
+    badpixel_max_x: int | None,
+    badpixel_max_y: int | None,
+) -> tuple[int, int]:
+    nx_from_center = int(np.ceil(max(orgx_px, 1.0) * 2.0 + 20.0))
+    ny_from_center = int(np.ceil(max(orgy_px, 1.0) * 2.0 + 20.0))
+    nx_from_badpixels = 0 if badpixel_max_x is None else int(badpixel_max_x) + 1
+    ny_from_badpixels = 0 if badpixel_max_y is None else int(badpixel_max_y) + 1
+    nx = max(512, nx_from_center, nx_from_badpixels)
+    ny = max(512, ny_from_center, ny_from_badpixels)
+    return nx, ny
+
+
+def parse_pets_project(
+    path: str | Path,
+    rprofall_path: str | Path | None = None,
+) -> PETSProjectData:
+    """Parse a PETS project directory or ``.pts2(.backup)`` file.
+
+    The parser keeps ``.rprofall`` observations and only the geometry/orientation
+    metadata required by the analysis pipeline.
+    """
+
+    pts_path, resolved_rprofall_path = _resolve_pets_paths(path, rprofall_path=rprofall_path)
+    text = pts_path.read_text()
+    lines = text.splitlines()
+
+    wavelength_angstrom: float | None = None
+    aperpixel_invA_per_px: float | None = None
+    center_x: float | None = None
+    center_y: float | None = None
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        tokens = line.split()
+        key = tokens[0].lower()
+        if key == "lambda" and len(tokens) >= 2:
+            wavelength_angstrom = float(tokens[1])
+        elif key == "aperpixel" and len(tokens) >= 2:
+            aperpixel_invA_per_px = float(tokens[1])
+        elif key == "center" and len(tokens) >= 3:
+            if tokens[1].upper() != "AUTO":
+                center_x = float(tokens[1])
+                center_y = float(tokens[2])
+
+    if wavelength_angstrom is None:
+        raise ValueError("Could not parse PETS wavelength ('lambda').")
+    if aperpixel_invA_per_px is None:
+        raise ValueError("Could not parse PETS reciprocal calibration ('aperpixel').")
+    if aperpixel_invA_per_px <= 0.0:
+        raise ValueError("PETS 'aperpixel' must be positive.")
+
+    unit_cell = _parse_pets_cell(lines)
+    reciprocal_reference = _parse_pets_ubmatrix(lines)
+    imagelist = _parse_pets_imagelist(lines)
+    rprofall = parse_rprofall(resolved_rprofall_path)
+
+    orgx_px = float(imagelist["xcenter"].dropna().median()) if "xcenter" in imagelist.columns else float("nan")
+    orgy_px = float(imagelist["ycenter"].dropna().median()) if "ycenter" in imagelist.columns else float("nan")
+    if not np.isfinite(orgx_px) and center_x is not None:
+        orgx_px = float(center_x)
+    if not np.isfinite(orgy_px) and center_y is not None:
+        orgy_px = float(center_y)
+    if not np.isfinite(orgx_px):
+        orgx_px = 256.0
+    if not np.isfinite(orgy_px):
+        orgy_px = 256.0
+
+    max_bad_x, max_bad_y = _parse_pets_badpixel_max(lines)
+    detector_nx, detector_ny = _infer_pets_detector_size(
+        orgx_px=orgx_px,
+        orgy_px=orgy_px,
+        badpixel_max_x=max_bad_x,
+        badpixel_max_y=max_bad_y,
+    )
+
+    return PETSProjectData(
+        pts_path=pts_path,
+        rprofall_path=resolved_rprofall_path,
+        wavelength_angstrom=float(wavelength_angstrom),
+        aperpixel_invA_per_px=float(aperpixel_invA_per_px),
+        unit_cell=unit_cell,
+        reciprocal_reference=reciprocal_reference,
+        detector_nx=int(detector_nx),
+        detector_ny=int(detector_ny),
+        orgx_px=float(orgx_px),
+        orgy_px=float(orgy_px),
+        imagelist=imagelist,
+        rprofall=rprofall,
+    )
+
+
+def pets_project_to_analysis_inputs(
+    pets_data: PETSProjectData,
+) -> tuple[GXPARMData, IntegrateData, dict[int, FloatArray]]:
+    """Convert parsed PETS project data to core analysis inputs."""
+
+    integrate = rprofall_to_integrate_data(pets_data.rprofall)
+    reciprocal_reference = np.asarray(pets_data.reciprocal_reference, dtype=float)
+    if reciprocal_reference.shape != (3, 3):
+        raise ValueError("PETS reciprocal reference must be a 3x3 matrix.")
+
+    real_space_reference = np.linalg.inv(reciprocal_reference)
+    distance_over_pixel = 1.0 / (
+        float(pets_data.aperpixel_invA_per_px) * float(pets_data.wavelength_angstrom)
+    )
+    pixel_size_mm = 1.0
+    distance_mm = distance_over_pixel * pixel_size_mm
+
+    gxparm = GXPARMData(
+        phi0_deg=0.0,
+        dphi_deg=0.0,
+        rotation_axis=np.asarray([0.0, 0.0, 1.0], dtype=float),
+        wavelength_angstrom=float(pets_data.wavelength_angstrom),
+        space_group=1,
+        unit_cell=pets_data.unit_cell,
+        real_space_reference=real_space_reference,
+        reciprocal_reference=reciprocal_reference,
+        detector_nx=int(pets_data.detector_nx),
+        detector_ny=int(pets_data.detector_ny),
+        pixel_x_mm=float(pixel_size_mm),
+        pixel_y_mm=float(pixel_size_mm),
+        orgx_px=float(pets_data.orgx_px),
+        orgy_px=float(pets_data.orgy_px),
+        distance_mm=float(distance_mm),
+    )
+
+    if pets_data.imagelist.empty:
+        raise ValueError("PETS imagelist is empty.")
+
+    angle_table = pets_data.imagelist.reindex(columns=["alpha", "beta", "domega"]).copy()
+    for column in ("alpha", "beta", "domega"):
+        angle_table[column] = pd.to_numeric(angle_table[column], errors="coerce")
+    angle_table = angle_table.ffill().bfill().fillna(0.0)
+
+    first_angles = angle_table.iloc[0]
+    first_rotation = _pets_rotation_from_angles_deg(
+        alpha_deg=float(first_angles["alpha"]),
+        beta_deg=float(first_angles["beta"]),
+        domega_deg=float(first_angles["domega"]),
+    )
+    inverse_first_rotation = np.linalg.inv(first_rotation)
+
+    reciprocal_by_frame: dict[int, FloatArray] = {}
+    n_orient_frames = min(int(integrate.estimated_n_frames), angle_table.shape[0])
+    for frame_idx in range(n_orient_frames):
+        row = angle_table.iloc[frame_idx]
+        current_rotation = _pets_rotation_from_angles_deg(
+            alpha_deg=float(row["alpha"]),
+            beta_deg=float(row["beta"]),
+            domega_deg=float(row["domega"]),
+        )
+        relative_rotation = current_rotation @ inverse_first_rotation
+        reciprocal_by_frame[frame_idx] = relative_rotation @ reciprocal_reference
+
+    if not reciprocal_by_frame:
+        reciprocal_by_frame[0] = reciprocal_reference
+
+    last_matrix = reciprocal_by_frame[max(reciprocal_by_frame)]
+    for frame_idx in range(n_orient_frames, int(integrate.estimated_n_frames)):
+        reciprocal_by_frame[frame_idx] = np.asarray(last_matrix, dtype=float)
+
     return gxparm, integrate, reciprocal_by_frame
 
 

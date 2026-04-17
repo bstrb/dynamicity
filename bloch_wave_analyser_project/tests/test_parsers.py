@@ -8,8 +8,10 @@ from src.parsers import (
     parse_crystfel_stream_text,
     parse_gxparm_text,
     parse_integrate_text,
+    parse_pets_project,
     parse_rprofall_text,
     parse_xds_inp_text,
+    pets_project_to_analysis_inputs,
     rprofall_to_integrate_data,
 )
 
@@ -86,6 +88,31 @@ Reflections measured after indexing
 End of reflections
 --- End crystal
 ----- End chunk -----
+"""
+
+PETS_PTS_TEXT = """\
+version 2.3
+lambda 0.01969000
+aperpixel 0.00628000
+center 244.38 249.80
+badpixels
+ 12 18 500 501
+endbadpixels
+imagelistheader imgname alpha beta domega alphaorig betaorig domegaorig xcenter ycenter intscale diffbfac magcorr elliamp elliph paraamp paraph useforcalc dataset
+imagelist
+"image/000000.tiff" -44.7000 0.1700 0.0700 -44.7000 0.0000 0.0000 244.0 250.0 1.0 0.0 -0.16 0.02 -60.0 0.0 0.0 1 1
+"image/000001.tiff" -44.6500 0.1680 0.0710 -44.6500 0.0000 0.0000 244.2 249.9 1.0 0.0 -0.16 0.02 -60.2 0.0 0.0 1 1
+"image/000002.tiff" -44.6000 0.1660 0.0720 -44.6000 0.0000 0.0000 244.4 250.1 1.0 0.0 -0.16 0.02 -60.4 0.0 0.0 1 1
+endimagelist
+celllist
+cellItem active
+ubmatrix
+ -0.025942  0.032425 -0.071809
+  0.056396 -0.045152 -0.040763
+ -0.055021 -0.061569 -0.007924
+cell 12.0553 12.0553 12.0553 90.000 90.000 90.000
+endCellItem
+endcelllist
 """
 
 
@@ -215,3 +242,31 @@ def test_crystfel_stream_to_analysis_inputs() -> None:
     assert integrate.estimated_n_frames == 2
     assert set(reciprocal_by_frame.keys()) == {0, 1}
     assert reciprocal_by_frame[0].shape == (3, 3)
+
+
+def test_parse_pets_project_and_conversion(tmp_path) -> None:
+    project_dir = tmp_path / "pets_project"
+    project_dir.mkdir()
+    (project_dir / "sample.pts2.backup").write_text(PETS_PTS_TEXT)
+    rprofall_text = (
+        "# 1\n"
+        + _rprofall_row(-1, 0, 1, 1.5, 0.001, 0.1, 120.0, 12.0, 100.0, 1, 0.0)
+        + "\n# 2\n"
+        + _rprofall_row(1, 0, -1, 1.5, -0.001, -0.1, 80.0, 10.0, 90.0, 2, 10.0)
+        + "\n"
+    )
+    (project_dir / "sample.rprofall").write_text(rprofall_text)
+
+    pets = parse_pets_project(project_dir)
+    assert np.isclose(pets.wavelength_angstrom, 0.01969)
+    assert np.isclose(pets.aperpixel_invA_per_px, 0.00628)
+    assert pets.imagelist.shape[0] == 3
+    assert pets.detector_nx >= 501
+    assert pets.detector_ny >= 502
+
+    gxparm, integrate, reciprocal_by_frame = pets_project_to_analysis_inputs(pets)
+    assert np.isclose(gxparm.wavelength_angstrom, 0.01969)
+    assert integrate.observations.shape[0] == 2
+    assert integrate.estimated_n_frames == 2
+    assert set(reciprocal_by_frame.keys()) == {0, 1}
+    assert not np.allclose(reciprocal_by_frame[0], reciprocal_by_frame[1])
