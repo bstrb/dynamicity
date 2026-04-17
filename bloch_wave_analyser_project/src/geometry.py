@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import acos, cos, pi, sqrt
-from typing import Iterable, Protocol
+from typing import Iterable, Mapping, Protocol
 
 import numpy as np
 import pandas as pd
@@ -53,6 +53,92 @@ class RotationSeriesOrientationModel:
     def rotation_matrix(self, frame_index: int, offset: float = 0.0) -> FloatArray:
         angle_deg = self.gxparm.phi0_deg + self.gxparm.dphi_deg * (frame_index + offset)
         return rodrigues_rotation_matrix(self.gxparm.rotation_axis, angle_deg)
+
+
+@dataclass(frozen=True)
+class ReciprocalMatrixOrientationModel:
+    """Orientation model from per-frame reciprocal matrices (e.g. SerialED UB tables).
+
+    Each frame stores a reciprocal matrix ``UB_frame`` that maps Miller indices to
+    laboratory reciprocal vectors. The model converts that matrix to a pure
+    rotation by comparing it to a reference reciprocal matrix.
+    """
+
+    reciprocal_by_frame: Mapping[int, FloatArray]
+    reciprocal_reference: FloatArray
+    project_to_rotation: bool = True
+
+    def rotation_matrix(self, frame_index: int, offset: float = 0.0) -> FloatArray:
+        del offset  # Snapshots can be non-continuous; no intra-frame interpolation.
+
+        if frame_index not in self.reciprocal_by_frame:
+            raise KeyError(f"Missing reciprocal matrix for frame index {frame_index}.")
+
+        ub_frame = np.asarray(self.reciprocal_by_frame[frame_index], dtype=float)
+        ub_ref = np.asarray(self.reciprocal_reference, dtype=float)
+        if ub_frame.shape != (3, 3) or ub_ref.shape != (3, 3):
+            raise ValueError("reciprocal matrices must all have shape (3, 3).")
+
+        raw = ub_frame @ np.linalg.inv(ub_ref)
+        if not self.project_to_rotation:
+            return raw
+
+        # Polar decomposition to keep only the closest proper rotation.
+        u, _, vh = np.linalg.svd(raw)
+        rotation = u @ vh
+        if np.linalg.det(rotation) < 0.0:
+            u[:, -1] *= -1.0
+            rotation = u @ vh
+        return rotation
+
+
+ORIENTATION_MATRIX_COLUMNS: tuple[str, ...] = (
+    "UB11",
+    "UB12",
+    "UB13",
+    "UB21",
+    "UB22",
+    "UB23",
+    "UB31",
+    "UB32",
+    "UB33",
+)
+
+
+def reciprocal_lookup_from_table(
+    orientation_table: pd.DataFrame,
+    frame_column: str = "frame",
+    matrix_columns: tuple[str, ...] = ORIENTATION_MATRIX_COLUMNS,
+    frame_index_base: int = 1,
+) -> dict[int, FloatArray]:
+    """Build ``frame_index -> UB`` lookup from a flat orientation table.
+
+    Parameters
+    ----------
+    orientation_table:
+        DataFrame containing one row per frame with matrix columns.
+    frame_column:
+        Column containing frame numbers from indexing output.
+    matrix_columns:
+        Nine row-major matrix columns.
+    frame_index_base:
+        Frame-number base used by the table. ``1`` means frame number 1 maps to
+        internal frame index 0.
+    """
+
+    if frame_column not in orientation_table.columns:
+        raise ValueError(f"orientation table is missing frame column '{frame_column}'.")
+    missing = [col for col in matrix_columns if col not in orientation_table.columns]
+    if missing:
+        raise ValueError(f"orientation table is missing matrix columns: {missing}")
+
+    lookup: dict[int, FloatArray] = {}
+    for _, row in orientation_table.iterrows():
+        frame_number = int(row[frame_column])
+        frame_index = frame_number - int(frame_index_base)
+        matrix = row[list(matrix_columns)].to_numpy(dtype=float).reshape(3, 3)
+        lookup[frame_index] = matrix
+    return lookup
 
 
 def rodrigues_rotation_matrix(axis: ArrayLike, angle_deg: float) -> FloatArray:

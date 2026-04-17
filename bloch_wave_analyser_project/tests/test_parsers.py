@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.parsers import parse_composition, parse_gxparm_text, parse_integrate_text, parse_xds_inp_text
+from src.parsers import (
+    crystfel_stream_to_analysis_inputs,
+    parse_composition,
+    parse_crystfel_stream_text,
+    parse_gxparm_text,
+    parse_integrate_text,
+    parse_rprofall_text,
+    parse_xds_inp_text,
+    rprofall_to_integrate_data,
+)
 
 
 GXPARM_TEXT = """\
@@ -23,6 +32,60 @@ INTEGRATE_TEXT = """\
 1 0 0 1000.0 10.0 0 0 0.2 0 0 0 0 0 0 0 0 0 0 0 0 0
 0 1 0 500.0 5.0 0 0 1.8 0 0 0 0 0 0 0 0 0 0 0 0 0
 0 0 1 250.0 4.0 0 0 3.1 0 0 0 0 0 0 0 0 0 0 0 0 0
+"""
+
+STREAM_TEXT = """\
+CrystFEL stream format 2.3
+----- Begin geometry file -----
+wavelength  = 0.019687 A
+clen = 0.485 m
+res = 17857.14285714286
+p0/min_ss = 0
+p0/max_ss = 1023
+p0/min_fs = 0
+p0/max_fs = 1023
+p0/corner_x = -512
+p0/corner_y = -512
+----- End geometry file -----
+----- Begin unit cell -----
+lattice_type = tetragonal
+unique_axis = c
+centering = I
+a = 15.12 A
+b = 15.12 A
+c = 12.08 A
+al = 90.00 deg
+be = 90.00 deg
+ga = 90.00 deg
+----- End unit cell -----
+----- Begin chunk -----
+Event: //41-1
+Image serial number: 42
+average_camera_length = 0.485000 m
+--- Begin crystal
+Cell parameters 1.48440 1.54798 1.20092 nm, 89.67116 89.75841 89.95805 deg
+astar = +0.4582728 +0.2214239 -0.4413611 nm^-1
+bstar = -0.4063016 -0.1283573 -0.4855668 nm^-1
+cstar = -0.3134916 +0.7686662 +0.0654781 nm^-1
+Reflections measured after indexing
+ -41   38  -19     -28.72      25.73      10.00      -0.37   21.2   22.8 p0
+End of reflections
+--- End crystal
+----- End chunk -----
+----- Begin chunk -----
+Event: //113-1
+Image serial number: 114
+average_camera_length = 0.485000 m
+--- Begin crystal
+Cell parameters 1.54756 1.47279 1.21759 nm, 89.05374 92.02214 90.53556 deg
+astar = -0.1314639 -0.5014330 +0.3864957 nm^-1
+bstar = -0.3840104 -0.2806239 -0.4847301 nm^-1
+cstar = +0.6592710 -0.4136830 -0.2641426 nm^-1
+Reflections measured after indexing
+ -44  -37    9       7.18      24.20      10.00       0.32  948.1 1002.5 p0
+End of reflections
+--- End crystal
+----- End chunk -----
 """
 
 
@@ -55,3 +118,100 @@ def test_parse_composition() -> None:
     assert composition.sum_fj2 > 0.0
     expected = 4 * 1.69**2 + 8 * 0.529**2 + 2 * 2.26**2
     assert np.isclose(composition.sum_fj2, expected)
+
+
+def _rprofall_row(
+    h: int,
+    k: int,
+    l: int,
+    resolution: float,
+    excitation: float,
+    rsg: float,
+    iobs: float,
+    sigma: float | str,
+    icalc: float,
+    frame: int,
+    azimuth: float,
+) -> str:
+    sigma_text = f"{sigma:14.6f}" if isinstance(sigma, float) else f"{sigma:>14}"
+    row = (
+        f"{h:4d}{k:4d}{l:4d}"
+        f"{resolution:14.6f}"
+        f"{excitation:14.6f}"
+        f"{rsg:14.6f}"
+        f"{iobs:14.6f}"
+        f"{sigma_text}"
+        f"{icalc:14.6f}"
+        f"{frame:4d}"
+        f"{azimuth:9.3f}"
+    )
+    assert len(row) == 109
+    return row
+
+
+def test_parse_rprofall_text_and_overflow() -> None:
+    row_1 = _rprofall_row(-23, -6, 1, 1.993505, -0.000895, -1.975197, 41.978603, 48.628971, 98.512764, 237, -4.194)
+    row_2 = _rprofall_row(-10, 7, 20, 1.963339, 0.000230, 0.764063, 0.0, "**************", 0.148451, 3033, -2.517)
+    text = "\r\n# 1\r\n\r\n" + row_1 + "\r\n\r\n# 2\r\n" + row_2 + "\r\n"
+
+    parsed = parse_rprofall_text(text)
+    table = parsed.rows
+    assert parsed.n_blocks == 2
+    assert list(table.columns) == [
+        "row_id",
+        "block_id",
+        "h",
+        "k",
+        "l",
+        "resolution",
+        "excitation",
+        "rsg",
+        "iobs",
+        "sigma",
+        "icalc",
+        "frame",
+        "azimuth",
+    ]
+    assert len(table) == 2
+    assert int(table.loc[0, "block_id"]) == 1
+    assert int(table.loc[1, "block_id"]) == 2
+    assert np.isnan(float(table.loc[1, "sigma"]))
+    assert np.isclose(float(table.loc[1, "icalc"]), 0.148451)
+    assert int(table.loc[1, "frame"]) == 3033
+
+
+def test_rprofall_to_integrate_data() -> None:
+    row = _rprofall_row(-22, -4, 2, 1.963339, -0.003075, -6.971740, 21.208347, 32.078842, 11.907216, 31, -4.174)
+    parsed = parse_rprofall_text("# 1\n\n" + row + "\n")
+    integrate = rprofall_to_integrate_data(parsed)
+    assert integrate.observations.shape[0] == 1
+    assert list(integrate.observations.columns) == ["h", "k", "l", "I", "sigma", "z_cal", "frame_est"]
+    assert np.isclose(float(integrate.observations.iloc[0]["I"]), 21.208347)
+    assert np.isclose(float(integrate.observations.iloc[0]["sigma"]), 32.078842)
+    assert int(integrate.estimated_n_frames) == 31
+
+
+def test_parse_crystfel_stream_text() -> None:
+    parsed = parse_crystfel_stream_text(STREAM_TEXT)
+    assert np.isclose(parsed.wavelength_angstrom, 0.019687)
+    assert np.isclose(parsed.distance_mm, 485.0)
+    assert np.isclose(parsed.pixel_x_mm, 0.056)
+    assert parsed.detector_nx == 1024
+    assert parsed.detector_ny == 1024
+    assert np.isclose(parsed.orgx_px, 512.0)
+    assert np.isclose(parsed.orgy_px, 512.0)
+    assert parsed.crystal_table.shape[0] == 2
+    assert parsed.reflections.shape[0] == 2
+    first_ub11 = float(parsed.crystal_table.iloc[0]["UB11"])
+    assert np.isclose(first_ub11, 0.04582728)
+
+
+def test_crystfel_stream_to_analysis_inputs() -> None:
+    parsed = parse_crystfel_stream_text(STREAM_TEXT)
+    gxparm, integrate, reciprocal_by_frame = crystfel_stream_to_analysis_inputs(parsed)
+    assert gxparm.detector_nx == 1024
+    assert gxparm.detector_ny == 1024
+    assert integrate.observations.shape[0] == 2
+    assert integrate.estimated_n_frames == 2
+    assert set(reciprocal_by_frame.keys()) == {0, 1}
+    assert reciprocal_by_frame[0].shape == (3, 3)

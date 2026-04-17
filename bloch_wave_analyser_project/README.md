@@ -9,9 +9,11 @@ The codebase recreates the logic of the supplied browser-based analyser while ex
 This project is aimed at method development in electron crystallography and SerialED workflows where you want to:
 
 - parse `GXPARM.XDS`, `INTEGRATE.HKL`, and optionally `XDS.INP`
+- parse CrystFEL `.stream` output directly for snapshot SerialED
 - reconstruct frame orientations from `phi0`, `dphi`, and the XDS rotation axis
 - generate candidate reciprocal-lattice vectors from the GXPARM reference basis
 - compute excitation errors and reflection-wise dynamicality proxy scores
+- compute orientation-only per-reflection uncertainty terms (`orientation_sigma_sg_invA`, `orientation_p_excited`, `S_orient`)
 - optionally propagate a Bloch-wave state through crystal thickness and study thickness sensitivity
 - export frame summaries and long-format reflection tables for downstream analysis
 
@@ -24,6 +26,9 @@ The default orientation model follows the browser prototype:
 - the original score is a coupling / dynamicality proxy rather than a full physically calibrated Bloch intensity simulation
 
 This repository preserves that behavior in **proxy mode** and adds **thickness-aware mode** as an explicit extension.
+
+For snapshot-style SerialED indexing outputs, you can supply a custom orientation
+model built from per-frame UB matrices (`ReciprocalMatrixOrientationModel`).
 
 ## Project layout
 
@@ -107,6 +112,30 @@ python examples/run_analysis.py \
   --dmax 50.0 \
   --mode proxy
 ```
+
+Using PETS2 `.rprofall` instead of `INTEGRATE.HKL`:
+
+```bash
+python examples/run_analysis.py \
+  --gxparm path/to/GXPARM.XDS \
+  --rprofall path/to/LTA_t1.rprofall \
+  --composition "24 Si, 48 O" \
+  --mode proxy
+```
+
+`--integrate` and `--rprofall` are mutually exclusive.
+
+Using CrystFEL `.stream` only (no GXPARM / INTEGRATE required):
+
+```bash
+python examples/run_analysis.py \
+  --stream path/to/indexing.stream \
+  --composition "24 Si, 48 O" \
+  --mode proxy
+```
+
+`--stream` is mutually exclusive with `--gxparm`, `--integrate`, `--rprofall`, and `--xdsinp`.
+In stream mode, each indexed crystal block is treated as one snapshot frame (ordered by appearance in the stream).
 
 Thickness-aware analysis at one thickness:
 
@@ -206,6 +235,11 @@ This reproduces the original browser logic as closely as practical:
   - two-beam score `d_2beam = 1 / (1 + (s_g * xi_g)^2)`
   - effective coupling multiplicity `N_eff`
   - combined proxy score `S_comb = d_2beam * N_eff`
+  - orientation-only uncertainty columns:
+    - `orientation_sigma_sg_invA` (sigma of `s_g` from orientation uncertainty only)
+    - `orientation_p_excited` (probability of being near excitation under orientation uncertainty)
+    - `S_orient` (orientation-only dynamical-risk proxy)
+    - `sigma_orient_scale = 1 + alpha * S_orient`
 
 ### Thickness-aware mode
 
@@ -227,18 +261,20 @@ Because the original HTML is a proxy model, absolute scaling should be treated c
 - The reciprocal basis is taken as the inverse of the GXPARM real-space reference matrix, matching the original script.
 - Untrusted detector rectangles are parsed and visualized; they are not removed from the dynamical calculation unless you extend the code.
 - The thickness-aware mode is a useful research extension, but it is still built on approximate amplitudes calibrated from Wilson-like scaling.
-- The current implementation assumes a rotation-series experiment rather than independently indexed SerialED orientations.
+- Rotation-series and snapshot SerialED are both supported; for stream-only snapshot inputs, frame order is the crystal-block order in the stream.
 
 ## Future extensions
 
 The code is intentionally structured so that it can be extended to support:
 
-- frame-specific orientation matrices from an external table
 - reflection filtering near problematic orientations
 - exporting per-reflection uncertainty terms for scaling studies
 - exclusion of ZOLZ reflections
 - orientation-aware merging experiments
 - alternate structure-factor models and more realistic scattering constants
+
+Frame-specific orientation matrices from an external table are now supported via
+`ReciprocalMatrixOrientationModel` and `reciprocal_lookup_from_table` in `src.geometry`.
 
 ## Testing
 
@@ -249,3 +285,12 @@ pytest
 ```
 
 The tests cover lightweight parsing, rotation, composition parsing, and metric sanity checks.
+
+## Orientation sigma controls (CLI)
+
+`examples/run_analysis.py` now accepts orientation-uncertainty knobs:
+
+- `--orientation-sigma-deg` isotropic orientation uncertainty (degrees)
+- `--orientation-sigma-axis-deg SX SY SZ` anisotropic uncertainty around lab axes
+- `--orientation-score-formulation {log_n_eff,linear_n_eff}`
+- `--orientation-sigma-alpha` for `sigma_orient_scale`

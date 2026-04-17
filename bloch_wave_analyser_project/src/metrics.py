@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from math import sqrt
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike, NDArray
+from scipy.special import erf
 
 from .constants import EPSILON
 
@@ -22,6 +24,115 @@ def two_beam_metric(sg_invA: ArrayLike, xi_angstrom: ArrayLike) -> FloatArray:
     sg = np.asarray(sg_invA, dtype=float)
     xi = np.asarray(xi_angstrom, dtype=float)
     return 1.0 / (1.0 + np.square(sg * xi))
+
+
+def orientation_sg_gradient(
+    g_vectors_invA: ArrayLike,
+    wavelength_angstrom: float,
+    beam_direction: ArrayLike = (0.0, 0.0, 1.0),
+) -> FloatArray:
+    """Return ``d(s_g)/d(omega)`` for each reflection.
+
+    The gradient is computed with respect to small rotation-vector perturbations
+    ``omega`` in radians around the laboratory x/y/z axes.
+    """
+
+    g = np.asarray(g_vectors_invA, dtype=float)
+    if g.ndim != 2 or g.shape[1] != 3:
+        raise ValueError("g_vectors_invA must have shape (n, 3).")
+
+    beam = np.asarray(beam_direction, dtype=float)
+    beam_norm = np.linalg.norm(beam)
+    if beam_norm <= EPSILON:
+        raise ValueError("beam_direction must be non-zero.")
+    beam_unit = beam / beam_norm
+
+    k0 = beam_unit / float(wavelength_angstrom)
+    shifted = g + k0[None, :]
+    shifted_norm = np.linalg.norm(shifted, axis=1)
+
+    n = np.zeros_like(shifted)
+    valid = shifted_norm > EPSILON
+    n[valid] = shifted[valid] / shifted_norm[valid, None]
+
+    # d s_g = (g x n) · d(omega)
+    return np.cross(g, n)
+
+
+def orientation_sg_sigma(
+    g_vectors_invA: ArrayLike,
+    wavelength_angstrom: float,
+    orientation_sigma_deg: float | tuple[float, float, float] = 0.2,
+    beam_direction: ArrayLike = (0.0, 0.0, 1.0),
+) -> FloatArray:
+    """Return per-reflection orientation-induced ``sigma(s_g)`` in 1/angstrom.
+
+    ``orientation_sigma_deg`` can be isotropic (single value) or anisotropic
+    (sx, sy, sz) for laboratory x/y/z rotation components.
+    """
+
+    grad = orientation_sg_gradient(
+        g_vectors_invA=g_vectors_invA,
+        wavelength_angstrom=wavelength_angstrom,
+        beam_direction=beam_direction,
+    )
+
+    sigma_arr = np.asarray(orientation_sigma_deg, dtype=float)
+    if sigma_arr.size == 1:
+        sigma_rad = np.deg2rad(float(sigma_arr.reshape(1)[0]))
+        return np.linalg.norm(grad, axis=1) * sigma_rad
+
+    if sigma_arr.shape != (3,):
+        raise ValueError(
+            "orientation_sigma_deg must be a scalar or a length-3 tuple/list (sx, sy, sz)."
+        )
+    sigma_rad_xyz = np.deg2rad(sigma_arr)
+    return np.sqrt(np.sum(np.square(grad * sigma_rad_xyz[None, :]), axis=1))
+
+
+def orientation_excitation_probability(
+    sg_invA: ArrayLike,
+    sg_sigma_orient_invA: ArrayLike,
+    excitation_tolerance_invA: float = 0.0,
+) -> FloatArray:
+    """Probability that the true excitation error falls within ``±tolerance``.
+
+    A Gaussian orientation uncertainty model is assumed:
+    ``s_g,true ~ N(s_g, sigma_orient)``.
+    """
+
+    sg = np.asarray(sg_invA, dtype=float)
+    sigma = np.asarray(sg_sigma_orient_invA, dtype=float)
+    tol = float(max(excitation_tolerance_invA, 0.0))
+
+    out = np.zeros_like(sg, dtype=float)
+    finite_sigma = sigma > EPSILON
+    if np.any(finite_sigma):
+        s = sigma[finite_sigma]
+        a = (tol - sg[finite_sigma]) / (sqrt(2.0) * s)
+        b = (-tol - sg[finite_sigma]) / (sqrt(2.0) * s)
+        out[finite_sigma] = 0.5 * (erf(a) - erf(b))
+
+    if np.any(~finite_sigma):
+        out[~finite_sigma] = (np.abs(sg[~finite_sigma]) <= tol).astype(float)
+
+    return np.clip(out, 0.0, 1.0)
+
+
+def orientation_proxy_score(
+    p_excited_orient: ArrayLike,
+    n_eff: ArrayLike,
+    formulation: str = "log_n_eff",
+) -> FloatArray:
+    """Orientation-only dynamical-risk proxy from excitation probability + coupling."""
+
+    p = np.asarray(p_excited_orient, dtype=float)
+    n = np.maximum(np.asarray(n_eff, dtype=float), 0.0)
+    if formulation == "log_n_eff":
+        return p * (1.0 + np.log1p(n))
+    if formulation == "linear_n_eff":
+        return p * n
+    raise ValueError(f"Unknown orientation proxy formulation: {formulation}")
 
 
 def effective_coupling_multiplicity(eigenvectors: FloatArray, beam_index: int) -> float:

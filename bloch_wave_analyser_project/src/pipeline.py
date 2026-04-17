@@ -22,6 +22,7 @@ from .constants import (
 )
 from .geometry import (
     OrientationModel,
+    ReciprocalMatrixOrientationModel,
     RotationSeriesOrientationModel,
     build_zone_axes,
     cell_volume,
@@ -38,6 +39,9 @@ from .metrics import (
     aggregate_reflection_thickness_sensitivity,
     combined_proxy_score,
     effective_coupling_multiplicity,
+    orientation_excitation_probability,
+    orientation_proxy_score,
+    orientation_sg_sigma,
     summarize_frame_proxy,
     two_beam_metric,
 )
@@ -46,10 +50,14 @@ from .parsers import (
     GXPARMData,
     IntegrateData,
     XDSInputData,
+    crystfel_stream_to_analysis_inputs,
     load_optional_xds_inp,
     parse_composition,
+    parse_crystfel_stream,
     parse_gxparm,
     parse_integrate_hkl,
+    parse_rprofall,
+    rprofall_to_integrate_data,
 )
 from .wilson import WilsonCalibration, wilson_calibrate
 
@@ -65,6 +73,9 @@ class AnalysisConfig:
     thickness_nm: float | Sequence[float] | None = None
     zone_axis_limit: int = 5
     filter_untrusted: bool = False
+    orientation_sigma_deg: float | tuple[float, float, float] = 0.2
+    orientation_sigma_alpha: float = 0.5
+    orientation_score_formulation: Literal["log_n_eff", "linear_n_eff"] = "log_n_eff"
 
     def thickness_array_nm(self) -> np.ndarray | None:
         """Return thickness values as a 1D array in nanometers."""
@@ -199,8 +210,11 @@ def run_analysis(
                     "n_excited": 0,
                     "S_2beam": 0.0,
                     "S_MB": 0.0,
+                    "S_orient": 0.0,
                     "mean_N_eff": 0.0,
                     "max_N_eff": 0.0,
+                    "mean_orientation_sigma_sg_invA": 0.0,
+                    "mean_orientation_p_excited": 0.0,
                     "eigenvalue_spread_invA": 0.0,
                 }
             )
@@ -233,9 +247,28 @@ def run_analysis(
             dtype=float,
         )
         s_comb_values = combined_proxy_score(d2beam_values, n_eff_values)
+        orientation_sigma_values = orientation_sg_sigma(
+            g_vectors_invA=g_mid[excited_mask],
+            wavelength_angstrom=gxparm.wavelength_angstrom,
+            orientation_sigma_deg=cfg.orientation_sigma_deg,
+        )
+        orientation_p_excited_values = orientation_excitation_probability(
+            sg_invA=frame_table["sg_invA"].to_numpy(dtype=float),
+            sg_sigma_orient_invA=orientation_sigma_values,
+            excitation_tolerance_invA=cfg.excitation_tolerance_invA,
+        )
+        s_orient_values = orientation_proxy_score(
+            p_excited_orient=orientation_p_excited_values,
+            n_eff=n_eff_values,
+            formulation=cfg.orientation_score_formulation,
+        )
         frame_table["d_2beam"] = d2beam_values
         frame_table["N_eff"] = n_eff_values
         frame_table["S_comb"] = s_comb_values
+        frame_table["orientation_sigma_sg_invA"] = orientation_sigma_values
+        frame_table["orientation_p_excited"] = orientation_p_excited_values
+        frame_table["S_orient"] = s_orient_values
+        frame_table["sigma_orient_scale"] = 1.0 + float(cfg.orientation_sigma_alpha) * s_orient_values
 
         if cfg.mode == "thickness" and thickness_array_nm is not None:
             amplitudes = propagate_bloch_wave(
@@ -286,8 +319,11 @@ def run_analysis(
                 "n_excited": int(frame_metrics["n_excited"]),
                 "S_2beam": float(frame_metrics["S_2beam"]),
                 "S_MB": float(frame_metrics["S_MB"]),
+                "S_orient": float(np.sum(s_orient_values)),
                 "mean_N_eff": float(frame_metrics["mean_N_eff"]),
                 "max_N_eff": float(frame_metrics["max_N_eff"]),
+                "mean_orientation_sigma_sg_invA": float(np.mean(orientation_sigma_values)),
+                "mean_orientation_p_excited": float(np.mean(orientation_p_excited_values)),
                 "eigenvalue_spread_invA": float(structure.eigenvalues.max() - structure.eigenvalues.min()),
             }
         )
@@ -323,15 +359,23 @@ def run_analysis(
 
 def run_analysis_from_paths(
     gxparm_path: str | Path,
-    integrate_path: str | Path,
+    integrate_path: str | Path | None,
     composition_text: str,
     xdsinp_path: str | Path | None = None,
     config: AnalysisConfig | None = None,
+    rprofall_path: str | Path | None = None,
 ) -> AnalysisResult:
     """Parse inputs from disk and run the pipeline."""
 
+    if bool(integrate_path) == bool(rprofall_path):
+        raise ValueError("Provide exactly one of integrate_path or rprofall_path.")
+
     gxparm = parse_gxparm(gxparm_path)
-    integrate = parse_integrate_hkl(integrate_path)
+    if integrate_path is not None:
+        integrate = parse_integrate_hkl(integrate_path)
+    else:
+        rprofall = parse_rprofall(rprofall_path)
+        integrate = rprofall_to_integrate_data(rprofall)
     composition = parse_composition(composition_text)
     xds_input = load_optional_xds_inp(xdsinp_path)
     return run_analysis(
@@ -340,4 +384,28 @@ def run_analysis_from_paths(
         composition=composition,
         xds_input=xds_input,
         config=config,
+    )
+
+
+def run_analysis_from_stream_path(
+    stream_path: str | Path,
+    composition_text: str,
+    config: AnalysisConfig | None = None,
+) -> AnalysisResult:
+    """Parse a CrystFEL ``.stream`` file and run snapshot-oriented analysis."""
+
+    stream_data = parse_crystfel_stream(stream_path)
+    gxparm, integrate, reciprocal_by_frame = crystfel_stream_to_analysis_inputs(stream_data)
+    orientation_model = ReciprocalMatrixOrientationModel(
+        reciprocal_by_frame=reciprocal_by_frame,
+        reciprocal_reference=gxparm.reciprocal_reference,
+    )
+    composition = parse_composition(composition_text)
+    return run_analysis(
+        gxparm=gxparm,
+        integrate=integrate,
+        composition=composition,
+        xds_input=None,
+        config=config,
+        orientation_model=orientation_model,
     )

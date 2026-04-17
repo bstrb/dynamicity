@@ -13,7 +13,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.parsers import parse_composition, parse_gxparm, parse_integrate_hkl, load_optional_xds_inp
+from src.parsers import (
+    crystfel_stream_to_analysis_inputs,
+    load_optional_xds_inp,
+    parse_composition,
+    parse_crystfel_stream,
+    parse_gxparm,
+    parse_integrate_hkl,
+    parse_rprofall,
+    rprofall_to_integrate_data,
+)
+from src.geometry import ReciprocalMatrixOrientationModel
 from src.pipeline import AnalysisConfig, run_analysis
 from src.visualization import plot_detector_frame, plot_frame_summary, plot_thickness_scan
 from src.wilson import wilson_calibrate
@@ -23,8 +33,10 @@ def build_parser() -> argparse.ArgumentParser:
     """Create the CLI parser."""
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gxparm", required=True, help="Path to GXPARM.XDS or XPARM.XDS")
-    parser.add_argument("--integrate", required=True, help="Path to INTEGRATE.HKL")
+    parser.add_argument("--stream", default=None, help="Optional path to CrystFEL .stream snapshot indexing output")
+    parser.add_argument("--gxparm", default=None, help="Path to GXPARM.XDS or XPARM.XDS")
+    parser.add_argument("--integrate", default=None, help="Path to INTEGRATE.HKL")
+    parser.add_argument("--rprofall", default=None, help="Optional PETS2 .rprofall path (alternative to --integrate)")
     parser.add_argument("--xdsinp", default=None, help="Optional path to XDS.INP")
     parser.add_argument("--composition", required=True, help='Composition string, e.g. "24 Si, 48 O"')
     parser.add_argument("--dmin", type=float, default=0.6, help="Minimum d-spacing in angstrom")
@@ -55,6 +67,32 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exclude reflections whose detector coordinates fall in XDS untrusted rectangles",
     )
+    parser.add_argument(
+        "--orientation-sigma-deg",
+        type=float,
+        default=0.2,
+        help="Isotropic orientation uncertainty in degrees for per-reflection orientation sigma",
+    )
+    parser.add_argument(
+        "--orientation-sigma-axis-deg",
+        type=float,
+        nargs=3,
+        default=None,
+        metavar=("SX", "SY", "SZ"),
+        help="Optional anisotropic orientation uncertainty in degrees around lab x/y/z axes",
+    )
+    parser.add_argument(
+        "--orientation-sigma-alpha",
+        type=float,
+        default=0.5,
+        help="Linear scaling factor for sigma_orient_scale = 1 + alpha * S_orient",
+    )
+    parser.add_argument(
+        "--orientation-score-formulation",
+        choices=["log_n_eff", "linear_n_eff"],
+        default="log_n_eff",
+        help="How to combine orientation excitation probability with coupling multiplicity",
+    )
     return parser
 
 
@@ -75,12 +113,34 @@ def main() -> None:
     """Run the CLI workflow."""
 
     args = build_parser().parse_args()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    gxparm = parse_gxparm(args.gxparm)
-    integrate = parse_integrate_hkl(args.integrate)
-    xds_input = load_optional_xds_inp(args.xdsinp)
+    orientation_model = None
+    xds_input = None
+    if args.stream is not None:
+        if any(value is not None for value in (args.gxparm, args.integrate, args.rprofall, args.xdsinp)):
+            raise SystemExit("When --stream is provided, do not also provide --gxparm/--integrate/--rprofall/--xdsinp.")
+        stream_data = parse_crystfel_stream(args.stream)
+        gxparm, integrate, reciprocal_by_frame = crystfel_stream_to_analysis_inputs(stream_data)
+        orientation_model = ReciprocalMatrixOrientationModel(
+            reciprocal_by_frame=reciprocal_by_frame,
+            reciprocal_reference=gxparm.reciprocal_reference,
+        )
+        print(f"Parsed {stream_data.crystal_table.shape[0]} indexed crystals from stream")
+    else:
+        if args.gxparm is None:
+            raise SystemExit("Provide --gxparm (or use --stream).")
+        if bool(args.integrate) == bool(args.rprofall):
+            raise SystemExit("Provide exactly one of --integrate or --rprofall.")
+        gxparm = parse_gxparm(args.gxparm)
+        if args.integrate is not None:
+            integrate = parse_integrate_hkl(args.integrate)
+        else:
+            rprofall = parse_rprofall(args.rprofall)
+            integrate = rprofall_to_integrate_data(rprofall)
+        xds_input = load_optional_xds_inp(args.xdsinp)
     composition = parse_composition(args.composition)
 
     thickness_nm = parse_thickness_arguments(args)
@@ -91,6 +151,13 @@ def main() -> None:
         mode=args.mode,
         thickness_nm=thickness_nm,
         filter_untrusted=args.filter_untrusted,
+        orientation_sigma_deg=(
+            tuple(float(v) for v in args.orientation_sigma_axis_deg)
+            if args.orientation_sigma_axis_deg is not None
+            else float(args.orientation_sigma_deg)
+        ),
+        orientation_sigma_alpha=float(args.orientation_sigma_alpha),
+        orientation_score_formulation=args.orientation_score_formulation,
     )
 
     calibration = wilson_calibrate(integrate.observations, composition.sum_fj2)
@@ -104,6 +171,7 @@ def main() -> None:
         composition=composition,
         xds_input=xds_input,
         config=config,
+        orientation_model=orientation_model,
     )
 
     result.frame_summary.to_csv(output_dir / "frame_summary.csv", index=False)
