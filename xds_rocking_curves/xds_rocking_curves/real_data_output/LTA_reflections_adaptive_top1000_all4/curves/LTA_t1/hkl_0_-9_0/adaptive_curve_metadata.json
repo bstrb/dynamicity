@@ -1,0 +1,15 @@
+{
+  "dataset": "LTA_t1",
+  "thickness_nm": 100.0,
+  "h": 0,
+  "k": -9,
+  "l": 0,
+  "window_half_width_used": 9,
+  "peak_at_endpoint_after_adaptive": false,
+  "x_axis": "phi",
+  "endpoint_margin_points": 1,
+  "n_points": 19,
+  "n_fit_success": 19,
+  "n_fit_failed_zeroed": 0,
+  "curve_csv": "real_data_output/LTA_reflections_adaptive_top1000_all4/curves/LTA_t1/hkl_0_-9_0/rocking_curve_zero_failed.csv"
+}

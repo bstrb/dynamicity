@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+outputs/
+*.png
+*.pdf
+*.csv

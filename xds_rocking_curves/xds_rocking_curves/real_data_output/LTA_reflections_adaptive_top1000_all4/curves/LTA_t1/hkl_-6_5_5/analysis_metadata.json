@@ -1,0 +1,43 @@
+{
+  "dataset_name": "LTA_t1",
+  "thickness_nm": 100.0,
+  "hkl": [
+    -6,
+    5,
+    5
+  ],
+  "gxparm_path": "/home/bubl3932/files/3DED-DATA/LTA/xds_uniform_thickness/LTA_t1/GXPARM.XDS",
+  "xds_inp_path": "/home/bubl3932/files/3DED-DATA/LTA/xds_uniform_thickness/LTA_t1/XDS.INP",
+  "spot_xds_path": "/home/bubl3932/files/3DED-DATA/LTA/xds_uniform_thickness/LTA_t1/SPOT.XDS",
+  "integrate_hkl_path": "/home/bubl3932/files/3DED-DATA/LTA/xds_uniform_thickness/LTA_t1/INTEGRATE.HKL",
+  "image_glob": null,
+  "image_template": "/home/bubl3932/files/3DED-DATA/LTA/LTA_t1/image/??????.tiff",
+  "rotation_sign": 1.0,
+  "rotation_sign_median_pixel_error": 1.3607471856973468,
+  "n_available_frames": 758,
+  "n_relevant_frames": 11,
+  "n_successful_fits": 11,
+  "config": {
+    "dataset_name": "LTA_t1",
+    "thickness_nm": 100.0,
+    "hkl": [
+      -6,
+      5,
+      5
+    ],
+    "relevance_mode": "window",
+    "sg_threshold": 0.02,
+    "window_half_width": 5,
+    "patch_half_size": 7,
+    "max_center_shift_px": 3.0,
+    "initial_sigma_px": 1.5,
+    "min_sigma_px": 0.5,
+    "max_sigma_px": 6.0,
+    "auto_choose_rotation_sign": true,
+    "rotation_sign": 1.0
+  },
+  "output_files": {
+    "curve": "real_data_output/LTA_reflections_adaptive_top1000_all4/curves/LTA_t1/hkl_-6_5_5/rocking_curve.csv",
+    "predictions": "real_data_output/LTA_reflections_adaptive_top1000_all4/curves/LTA_t1/hkl_-6_5_5/prediction_table.csv"
+  }
+}
