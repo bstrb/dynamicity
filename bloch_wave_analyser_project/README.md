@@ -194,6 +194,133 @@ python examples/run_analysis.py \
 
 Results are written to `analysis_output/` by default.
 
+## Observation-Level Dynamical Uncertainty (New)
+
+A new intensity-independent pipeline is available in:
+
+- `src/dynamical_uncertainty.py`
+- `examples/run_dynamical_uncertainty.py`
+
+This pipeline estimates **per-observation** dynamical uncertainty terms from:
+
+- local orientation sensitivity around the indexed orientation
+- thickness sensitivity over a user-selected thickness interval
+
+It does **not** use observed intensities (`I`) or measured `sigma(I)` as model
+inputs for risk calculation.
+
+### Run (CrystFEL stream, orientation-driven)
+
+```bash
+python examples/run_dynamical_uncertainty.py \
+  --stream /path/to/MFM300.stream \
+  --dataset-id MFM300 \
+  --orientation-axes xyz \
+  --orientation-step-deg 0.05 \
+  --orientation-n-steps 1 \
+  --thickness-min-nm 20 \
+  --thickness-max-nm 300 \
+  --n-thickness-steps 15 \
+  --dyn-sigma-form linear \
+  --dyn-sigma-alpha 1.0 \
+  --output-dir analysis_output_uncertainty_mfm300
+```
+
+### Run (PETS2)
+
+```bash
+python examples/run_dynamical_uncertainty.py \
+  --pets-project /path/to/lta1_new_petsdata \
+  --dataset-id lta1_new \
+  --output-dir analysis_output_uncertainty_lta1
+```
+
+### Run (XDS-style)
+
+```bash
+python examples/run_dynamical_uncertainty.py \
+  --gxparm /path/to/GXPARM.XDS \
+  --integrate /path/to/INTEGRATE.HKL \
+  --dataset-id sample_xds \
+  --output-dir analysis_output_uncertainty_xds
+```
+
+(`--gxparm` also supports `--rprofall` as an alternative to `--integrate`.)
+
+### Canonical Observation Table
+
+The new pipeline converts all supported inputs into one canonical observation table (`canonical_observations.csv`) with at least:
+
+- `obs_id`
+- `source`, `dataset_id`
+- `frame_input`, `frame_index`, `frame_number`, `event_id`
+- `h`, `k`, `l`
+- orientation matrix columns `UB11..UB33`
+- geometry metadata (`wavelength_angstrom`, unit-cell params, detector geometry)
+
+Optional column:
+
+- `sigma_exp` (carried through for optional sigma inflation output only)
+
+### Output Columns
+
+`observation_dynamical_uncertainty.csv` includes:
+
+- orientation metrics:
+  - `ori_mean`, `ori_std`, `ori_cv`, `ori_range`
+  - `ori_grad_rms`, `ori_curvature`, `ori_multipeak_score`
+  - `zone_axis_proximity`, `zone_axis_layer_density`, `zone_axis_score`
+- thickness metrics:
+  - `thick_mean`, `thick_std`, `thick_cv`, `thick_range`
+  - `thick_derivative_rms`, `thick_max_min_ratio`
+- combined risk:
+  - `risk_orientation`, `risk_thickness`, `risk_total`, `risk_total_norm`
+- uncertainty term:
+  - `dyn_sigma_rel` (alias `dyn_uncertainty_rel`)
+- optional (`--include-sigma-dyn`):
+  - `sigma_dyn = sigma_exp * dyn_sigma_rel`
+
+The CLI also writes compact summary tables in `compact_summaries/`:
+
+- `frame_risk_summary.csv`
+- `hkl_risk_summary.csv`
+- `topN_observations_by_risk.csv`
+- `frame_zone_axis_focus_summary.csv` (top-10%-zone-axis observations per frame)
+
+### Formulas (Transparent Defaults)
+
+Local response proxy for one observation uses:
+
+- excitation error `s_g` from indexed geometry
+- reciprocal length `q = |g|`
+- proxy structure factor `F_g,proxy = fg_scale / (1 + (q / q0)^2)`
+- extinction-like scale `xi = pi * V / (lambda * F_g,proxy)`
+- two-beam damping `d2 = 1 / (1 + (s_g * xi)^2)`
+- oscillation term over thickness `sin^2(pi * t / xi_eff)`, with `xi_eff = xi * sqrt(1 + (s_g*xi)^2)`
+
+Orientation screening perturbs the indexed orientation in configurable symmetric steps around chosen axes (`x/y/z`), then computes orientation metrics from local response variation.
+
+To capture strong zone-axis behavior (including ZOLZ-heavy patterns), the orientation risk also includes a zone-axis/layer-crowding term:
+
+- `zone_axis_proximity = exp(-( |g_z| / (w * |g|) )^2)`
+- `zone_axis_layer_density` from Gaussian density in `g_z` over observations in the same frame
+- `zone_axis_score = zone_axis_proximity * zone_axis_layer_density`
+
+This contributes to `risk_orientation` with configurable weight (`--zone-axis-boost-weight`).
+
+Thickness screening evaluates the same observation at indexed orientation over a configurable thickness grid, then computes thickness metrics from that response curve.
+
+Combined risk:
+
+`risk_total = sqrt((w_ori * risk_orientation)^2 + (w_thick * risk_thickness)^2)`
+
+Default uncertainty mapping:
+
+- linear: `dyn_sigma_rel = 1 + alpha * risk_total_norm`
+- exponential: `dyn_sigma_rel = exp(alpha * risk_total_norm)`
+
+`risk_total_norm` is normalized by a configurable quantile (`risk_normalization_quantile`) for numerical robustness.
+
 ## Interactive HTML visualization
 
 To generate an interactive HTML report showing predicted dynamical peaks on the detector across orientations:

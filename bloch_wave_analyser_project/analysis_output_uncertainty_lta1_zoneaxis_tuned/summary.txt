@@ -1,0 +1,8 @@
+n_observations: 654668
+mean_risk_total: 0.06639213147435503
+p95_risk_total: 0.3219069386246145
+p99_risk_total: 0.35734273382924564
+mean_dyn_sigma_rel: 1.2062463510666255
+p95_dyn_sigma_rel: 2.0
+p99_dyn_sigma_rel: 2.1100808679553005
+max_dyn_sigma_rel: 43.212902754682844
