@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 from pathlib import Path
 import re
 import shlex
@@ -80,16 +81,21 @@ class PETSProjectData:
 
     pts_path: Path
     rprofall_path: Path
+    frame_geometry: pd.DataFrame
     wavelength_angstrom: float
     aperpixel_invA_per_px: float
     unit_cell: UnitCell
     reciprocal_reference: FloatArray
+    omega_deg: float | None
+    delta_deg: float | None
     detector_nx: int
     detector_ny: int
     orgx_px: float
     orgy_px: float
     imagelist: pd.DataFrame
     rprofall: RProfallData
+    dyntmp: pd.DataFrame | None = None
+    metadata_notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -205,6 +211,47 @@ PETS_IMAGELIST_DEFAULT_HEADER: tuple[str, ...] = (
     "paraph",
     "useforcalc",
     "dataset",
+)
+
+PETS_DEFAULT_WAVELENGTH_ANGSTROM = 0.019687
+PETS_FLOAT = r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
+PETS_TO_PIPELINE_LAB_TRANSFORM = np.asarray(
+    [
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0],
+    ],
+    dtype=float,
+)
+PETS_LOGINDEX_CELL_RE = re.compile(
+    rf"Cell parameters:\s+({PETS_FLOAT})\s+({PETS_FLOAT})\s+({PETS_FLOAT})\s+({PETS_FLOAT})\s+({PETS_FLOAT})\s+({PETS_FLOAT})",
+    re.IGNORECASE,
+)
+PETS_VERBOSE_CURRENT_VALUES_RE = re.compile(
+    rf"Current values for image\s+(?P<image>\d+)\s+are\s+"
+    rf"alpha=\s*(?P<alpha>{PETS_FLOAT})\s*,\s*"
+    rf"beta=\s*(?P<beta>{PETS_FLOAT})\s*,\s*"
+    rf"domega=\s*(?P<domega>{PETS_FLOAT})\s*,\s*"
+    rf"xcenter=\s*(?P<xcenter>{PETS_FLOAT})\s*,\s*"
+    rf"ycenter=\s*(?P<ycenter>{PETS_FLOAT})",
+    re.IGNORECASE,
+)
+PETS_DYNTMP_COLUMNS: tuple[str, ...] = (
+    "h",
+    "k",
+    "l",
+    "iobs",
+    "sigma",
+    "xobs",
+    "yobs",
+    "xcalc",
+    "ycalc",
+    "frame",
+    "flag",
+    "resolution",
+    "excitation",
+    "partiality",
+    "mosaicity",
 )
 
 
@@ -342,14 +389,56 @@ def _rotation_matrix_z_deg(angle_deg: float) -> FloatArray:
 def _pets_rotation_from_angles_deg(alpha_deg: float, beta_deg: float, domega_deg: float) -> FloatArray:
     """Compose PETS per-frame angles into a 3D rotation matrix.
 
-    The convention used here is a practical approximation:
-    ``R = Rz(domega) * Ry(beta) * Rx(alpha)``.
+    PETS frame angles are interpreted as:
+    ``R = Ry(alpha) * Rx(beta) * Rz(domega)``.
     """
 
     return (
-        _rotation_matrix_z_deg(domega_deg)
-        @ _rotation_matrix_y_deg(beta_deg)
-        @ _rotation_matrix_x_deg(alpha_deg)
+        _rotation_matrix_y_deg(alpha_deg)
+        @ _rotation_matrix_x_deg(beta_deg)
+        @ _rotation_matrix_z_deg(domega_deg)
+    )
+
+
+def _rotation_matrix_axis_angle_deg(axis: FloatArray, angle_deg: float) -> FloatArray:
+    axis_array = np.asarray(axis, dtype=float)
+    axis_norm = float(np.linalg.norm(axis_array))
+    if axis_norm == 0.0:
+        raise ValueError("Rotation axis has zero norm.")
+    ux, uy, uz = (axis_array / axis_norm).tolist()
+
+    theta = np.deg2rad(float(angle_deg))
+    c = float(np.cos(theta))
+    s = float(np.sin(theta))
+    one_c = 1.0 - c
+
+    return np.asarray(
+        [
+            [c + ux * ux * one_c, ux * uy * one_c - uz * s, ux * uz * one_c + uy * s],
+            [uy * ux * one_c + uz * s, c + uy * uy * one_c, uy * uz * one_c - ux * s],
+            [uz * ux * one_c - uy * s, uz * uy * one_c + ux * s, c + uz * uz * one_c],
+        ],
+        dtype=float,
+    )
+
+
+def _pets_rotation_axis_from_omega_delta(omega_deg: float, delta_deg: float = 0.0) -> FloatArray:
+    """Build PETS rotation axis from ``omega`` and ``delta`` metadata.
+
+    ``omega`` is the in-plane angle of the projected rotation axis (degrees),
+    and ``delta`` is the out-of-plane tilt of the axis (degrees).
+    """
+
+    omega_rad = np.deg2rad(float(omega_deg))
+    delta_rad = np.deg2rad(float(delta_deg))
+    cos_delta = float(np.cos(delta_rad))
+    return np.asarray(
+        [
+            cos_delta * float(np.cos(omega_rad)),
+            -cos_delta * float(np.sin(omega_rad)),
+            float(np.sin(delta_rad)),
+        ],
+        dtype=float,
     )
 
 
@@ -826,16 +915,56 @@ def crystfel_stream_to_analysis_inputs(
     return gxparm, integrate, reciprocal_by_frame
 
 
+def _pets_prefix_candidates(path: Path) -> list[str]:
+    """Return likely PETS job-name prefixes for companion-file discovery."""
+
+    base_name = path.name
+    prefixes: list[str] = []
+    for marker in (".ptsopt", ".pts2"):
+        if marker in base_name:
+            prefixes.append(base_name.split(marker, maxsplit=1)[0])
+    prefixes.append(path.stem)
+
+    unique: list[str] = []
+    for prefix in prefixes:
+        if prefix and prefix not in unique:
+            unique.append(prefix)
+    return unique
+
+
+def _find_optional_pets_companion(
+    directory: Path,
+    prefixes: list[str],
+    suffixes: tuple[str, ...],
+) -> Path | None:
+    """Return the first matching PETS companion file, if any."""
+
+    for prefix in prefixes:
+        for suffix in suffixes:
+            candidate = directory / f"{prefix}{suffix}"
+            if candidate.exists():
+                return candidate
+    for suffix in suffixes:
+        matches = sorted(directory.glob(f"*{suffix}"))
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
 def _resolve_pets_paths(
     path: str | Path,
     rprofall_path: str | Path | None = None,
 ) -> tuple[Path, Path]:
     source = Path(path)
     if source.is_dir():
-        pts_candidates = sorted(source.glob("*.pts2.backup")) + sorted(source.glob("*.pts2"))
+        pts_candidates = (
+            sorted(source.glob("*.pts2.backup"))
+            + sorted(source.glob("*.pts2"))
+            + sorted(source.glob("*.ptsopt"))
+        )
         if not pts_candidates:
             raise ValueError(
-                f"Could not find PETS project file (*.pts2.backup or *.pts2) in directory: {source}"
+                f"Could not find PETS project file (*.ptsopt, *.pts2.backup, or *.pts2) in directory: {source}"
             )
         pts_path = pts_candidates[0]
         directory = source
@@ -844,6 +973,13 @@ def _resolve_pets_paths(
             raise ValueError(f"PETS path does not exist: {source}")
         pts_path = source
         directory = source.parent
+        refined_path = _find_optional_pets_companion(
+            directory,
+            _pets_prefix_candidates(source),
+            (".ptsopt",),
+        )
+        if refined_path is not None:
+            pts_path = refined_path
 
     if rprofall_path is not None:
         rpf = Path(rprofall_path)
@@ -857,15 +993,7 @@ def _resolve_pets_paths(
     if len(rprofall_candidates) == 1:
         return pts_path, rprofall_candidates[0]
 
-    base_name = pts_path.name
-    prefix_candidates: list[str] = []
-    if ".pts2" in base_name:
-        prefix_candidates.append(base_name.split(".pts2", maxsplit=1)[0])
-    if ".ptsopt" in base_name:
-        prefix_candidates.append(base_name.split(".ptsopt", maxsplit=1)[0])
-    prefix_candidates.append(pts_path.stem)
-
-    for prefix in prefix_candidates:
+    for prefix in _pets_prefix_candidates(pts_path):
         matched = [cand for cand in rprofall_candidates if cand.name.startswith(prefix)]
         if len(matched) == 1:
             return pts_path, matched[0]
@@ -875,6 +1003,489 @@ def _resolve_pets_paths(
         "Found multiple PETS .rprofall files and could not determine which one to use. "
         f"Pass rprofall_path explicitly. Candidates: {candidates_text}"
     )
+
+
+def _normalize_pets_frame_column_name(name: str) -> str:
+    token = re.sub(r"[^0-9a-z]+", "", str(name).strip().lower())
+    aliases = {
+        "nr": "frame_number",
+        "image": "imgname",
+        "img": "imgname",
+        "imgname": "imgname",
+        "name": "imgname",
+        "filename": "imgname",
+        "file": "imgname",
+        "frame": "frame",
+        "framenr": "frame_number",
+        "frameno": "frame_number",
+        "framenumber": "frame_number",
+        "imageno": "image_number",
+        "imagenumber": "image_number",
+        "alpha": "alpha",
+        "beta": "beta",
+        "domega": "domega",
+        "omega": "domega",
+        "xcen": "xcenter",
+        "xcenter": "xcenter",
+        "ycen": "ycenter",
+        "ycenter": "ycenter",
+    }
+    return aliases.get(token, token)
+
+
+def _coerce_pets_frame_table(table: pd.DataFrame | None) -> pd.DataFrame | None:
+    """Normalize a PETS per-frame table to the common frame schema."""
+
+    if table is None or table.empty:
+        return None
+
+    result = table.copy()
+    if "imgname" in result.columns:
+        result["imgname"] = result["imgname"].astype(str).str.strip().str.strip('"').str.strip("'")
+    if "frame" in result.columns:
+        result["frame"] = _zero_based_frame_index(result["frame"], result.shape[0])
+    elif "frame_number" in result.columns:
+        result["frame"] = _zero_based_frame_index(result["frame_number"], result.shape[0])
+    elif "image_number" in result.columns:
+        result["frame"] = _zero_based_frame_index(result["image_number"], result.shape[0])
+    else:
+        result["frame"] = np.arange(result.shape[0], dtype=float)
+
+    result["frame"] = result["frame"].astype(float)
+    if "frame_number" not in result.columns:
+        result["frame_number"] = result["frame"] + 1.0
+    if "image_number" not in result.columns:
+        if "imgname" in result.columns:
+            result["image_number"] = (
+                result["imgname"]
+                .astype(str)
+                .str.extract(r"(\d+)", expand=False)
+                .pipe(pd.to_numeric, errors="coerce")
+            )
+        else:
+            result["image_number"] = np.nan
+
+    for column in ("frame", "frame_number", "image_number", "alpha", "beta", "domega", "xcenter", "ycenter"):
+        if column not in result.columns:
+            result[column] = np.nan
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+
+    result = result.dropna(subset=["frame"]).copy()
+    result["frame"] = result["frame"].astype(int)
+    result = result.sort_values("frame").drop_duplicates("frame", keep="last").reset_index(drop=True)
+    return result
+
+
+def _parse_pets_project_scalars(lines: list[str]) -> tuple[float | None, float | None, float | None, float | None, float | None, float | None]:
+    """Parse common PETS scalar metadata from free-form text lines."""
+
+    wavelength_angstrom: float | None = None
+    aperpixel_invA_per_px: float | None = None
+    omega_deg: float | None = None
+    delta_deg: float | None = None
+    center_x: float | None = None
+    center_y: float | None = None
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        tokens = line.split()
+        key = tokens[0].lower()
+        if key == "lambda" and len(tokens) >= 2:
+            wavelength_angstrom = float(tokens[1])
+        elif key == "aperpixel" and len(tokens) >= 2:
+            aperpixel_invA_per_px = float(tokens[1])
+        elif key == "omega" and len(tokens) >= 2:
+            omega_deg = float(tokens[1])
+        elif key == "delta" and len(tokens) >= 2:
+            delta_deg = float(tokens[1])
+        elif key == "center" and len(tokens) >= 3 and tokens[1].upper() != "AUTO":
+            center_x = float(tokens[1])
+            center_y = float(tokens[2])
+
+    return wavelength_angstrom, aperpixel_invA_per_px, omega_deg, delta_deg, center_x, center_y
+
+
+def _parse_pets_verbose_current_values(path: Path) -> pd.DataFrame | None:
+    """Parse PETS verbose per-image optimization logs from ``.ptsoptlist``."""
+
+    rows: list[dict[str, float | int]] = []
+    for raw_line in path.read_text(errors="ignore").splitlines():
+        match = PETS_VERBOSE_CURRENT_VALUES_RE.search(raw_line)
+        if match is None:
+            continue
+        image_number = int(match.group("image"))
+        rows.append(
+            {
+                "image_number": image_number,
+                "frame_number": image_number,
+                "alpha": float(match.group("alpha")),
+                "beta": float(match.group("beta")),
+                "domega": float(match.group("domega")),
+                "xcenter": float(match.group("xcenter")),
+                "ycenter": float(match.group("ycenter")),
+            }
+        )
+
+    if not rows:
+        return None
+    return _coerce_pets_frame_table(pd.DataFrame.from_records(rows))
+
+
+def _parse_pets_companion_table(path: Path) -> pd.DataFrame | None:
+    """Parse a PETS companion table such as ``.ptsoptlist`` or ``.cenlocopt``."""
+
+    content_lines = [
+        raw_line.strip()
+        for raw_line in path.read_text().splitlines()
+        if raw_line.strip() and not raw_line.lstrip().startswith("#")
+    ]
+    if not content_lines:
+        return _parse_pets_verbose_current_values(path)
+
+    try:
+        table = pd.read_csv(
+            io.StringIO("\n".join(content_lines)),
+            sep=r"\s+",
+            engine="python",
+        )
+    except Exception:
+        return _parse_pets_verbose_current_values(path)
+
+    if table.empty:
+        return _parse_pets_verbose_current_values(path)
+
+    table = table.copy()
+    table.columns = [_normalize_pets_frame_column_name(column) for column in table.columns]
+    if "imgname" in table.columns:
+        table["imgname"] = table["imgname"].astype(str).str.strip().str.strip('"').str.strip("'")
+    for column in ("frame", "frame_number", "image_number", "alpha", "beta", "domega", "xcenter", "ycenter"):
+        if column in table.columns:
+            table[column] = pd.to_numeric(table[column], errors="coerce")
+
+    recognized = {"imgname", "frame", "frame_number", "image_number", "alpha", "beta", "domega", "xcenter", "ycenter"}
+    if not any(column in recognized for column in table.columns):
+        return _parse_pets_verbose_current_values(path)
+    return _coerce_pets_frame_table(table)
+
+
+def _parse_pets_ptsopt_table(path: Path) -> pd.DataFrame | None:
+    """Parse compact PETS refined frame geometry from ``.ptsopt``."""
+
+    raw_lines = path.read_text(errors="ignore").splitlines()
+    lines = [raw_line.strip() for raw_line in raw_lines if raw_line.strip()]
+    if not lines:
+        return None
+
+    # Some PETS exports use a full project-like layout with an imagelist block
+    # instead of the compact per-frame table. Reuse the normal imagelist parser
+    # in that case so we keep the refined values rather than misreading header
+    # and cell lines as geometry rows.
+    lowered_lines = {line.strip().lower() for line in raw_lines if line.strip()}
+    if "imagelist" in lowered_lines and "endimagelist" in lowered_lines:
+        try:
+            return _parse_pets_imagelist(raw_lines)
+        except ValueError:
+            pass
+
+    header_tokens = lines[0].split()
+    if not header_tokens:
+        return None
+
+    rows: list[dict[str, str | float | int]] = []
+    for raw_line in lines[1:]:
+        left_side = raw_line.split("|", maxsplit=1)[0].strip()
+        if not left_side:
+            continue
+        tokens = left_side.split()
+        if len(tokens) < 6:
+            continue
+
+        if "/" in tokens[0] or tokens[0].lower().endswith((".tiff", ".tif", ".mrc", ".cbf")):
+            imgname = tokens[0]
+            numeric_tokens = tokens[1:]
+        else:
+            imgname = None
+            numeric_tokens = tokens
+
+        row: dict[str, str | float | int] = {}
+        if imgname is not None:
+            row["imgname"] = imgname
+
+        # Real PETS ``.ptsopt`` rows can omit some trailing distortion fields.
+        known_positions = {
+            "xcenter": 0,
+            "ycenter": 1,
+            "alpha": 2,
+            "beta": 3,
+            "domega": 4,
+        }
+        for column_name, position in known_positions.items():
+            if position < len(numeric_tokens):
+                row[column_name] = numeric_tokens[position]
+
+        if len(numeric_tokens) >= 2:
+            row["RCwidth"] = numeric_tokens[-2]
+            row["mosaicity"] = numeric_tokens[-1]
+        rows.append(row)
+
+    if not rows:
+        return None
+
+    table = pd.DataFrame.from_records(rows)
+    if "imgname" in table.columns:
+        table["imgname"] = table["imgname"].astype(str)
+    for column in table.columns:
+        if column == "imgname":
+            continue
+        table[column] = pd.to_numeric(table[column], errors="coerce")
+    return _coerce_pets_frame_table(table)
+
+
+def _parse_pets_logindex(path: Path) -> tuple[UnitCell | None, FloatArray | None]:
+    """Parse refined unit-cell and orientation matrix from ``logs/*.logindex``."""
+
+    lines = path.read_text(errors="ignore").splitlines()
+    unit_cell: UnitCell | None = None
+    reciprocal_reference: FloatArray | None = None
+
+    for raw_line in lines:
+        match = PETS_LOGINDEX_CELL_RE.search(raw_line)
+        if match is None:
+            continue
+        unit_cell = UnitCell(
+            a=float(match.group(1)),
+            b=float(match.group(2)),
+            c=float(match.group(3)),
+            alpha=float(match.group(4)),
+            beta=float(match.group(5)),
+            gamma=float(match.group(6)),
+        )
+        break
+
+    for line_index, raw_line in enumerate(lines):
+        if raw_line.strip().lower() != "orientation matrix:":
+            continue
+        matrix_rows: list[list[float]] = []
+        for scan_index in range(line_index + 1, min(line_index + 6, len(lines))):
+            tokens = lines[scan_index].split()
+            if len(tokens) < 3:
+                continue
+            try:
+                matrix_rows.append([float(tokens[0]), float(tokens[1]), float(tokens[2])])
+            except ValueError:
+                continue
+            if len(matrix_rows) == 3:
+                reciprocal_reference = np.asarray(matrix_rows, dtype=float)
+                break
+        if reciprocal_reference is not None:
+            break
+
+    return unit_cell, reciprocal_reference
+
+
+def _parse_pets_logoo(path: Path) -> pd.DataFrame | None:
+    """Parse PETS per-frame refined angles from ``logs/*.logoo``."""
+
+    rows: list[dict[str, float | int | str]] = []
+    in_table = False
+    for raw_line in path.read_text(errors="ignore").splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("Nr."):
+            in_table = True
+            continue
+        if not in_table:
+            continue
+        tokens = stripped.split()
+        if len(tokens) < 6 or not tokens[0].isdigit():
+            continue
+        frame_number = int(tokens[0])
+        rows.append(
+            {
+                "frame_number": frame_number,
+                "imgname": tokens[1],
+                "alpha": float(tokens[2]),
+                "beta": float(tokens[4]),
+                "domega": float(tokens[5]),
+            }
+        )
+
+    if not rows:
+        return None
+    return _coerce_pets_frame_table(pd.DataFrame.from_records(rows))
+
+
+def _parse_pets_logps(path: Path) -> pd.DataFrame | None:
+    """Parse PETS per-frame diffraction centers from ``logs/*.logps``."""
+
+    rows: list[dict[str, float | int]] = []
+    in_table = False
+    for raw_line in path.read_text(errors="ignore").splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("Frame nr."):
+            in_table = True
+            continue
+        if not in_table:
+            continue
+        tokens = stripped.split()
+        if len(tokens) < 3 or not tokens[0].isdigit():
+            continue
+        rows.append(
+            {
+                "frame_number": int(tokens[0]),
+                "xcenter": float(tokens[1]),
+                "ycenter": float(tokens[2]),
+            }
+        )
+
+    if not rows:
+        return None
+    return _coerce_pets_frame_table(pd.DataFrame.from_records(rows))
+
+
+def _parse_pets_dyntmp(path: Path | None) -> pd.DataFrame | None:
+    """Parse PETS ``.dyntmp`` rows needed for geometry fallbacks."""
+
+    if path is None or not path.exists():
+        return None
+    try:
+        table = pd.read_csv(
+            path,
+            sep=r"\s+",
+            engine="python",
+            header=None,
+            names=PETS_DYNTMP_COLUMNS,
+            usecols=list(range(len(PETS_DYNTMP_COLUMNS))),
+        )
+    except Exception:
+        return None
+    if table.empty:
+        return None
+    for column in PETS_DYNTMP_COLUMNS:
+        table[column] = pd.to_numeric(table[column], errors="coerce")
+    return table
+
+
+def _estimate_pets_aperpixel_from_dyntmp(
+    dyntmp_table: pd.DataFrame | None,
+    frame_geometry: pd.DataFrame,
+) -> float | None:
+    """Estimate PETS reciprocal calibration from frame-resolved detector positions."""
+
+    if dyntmp_table is None or dyntmp_table.empty or frame_geometry.empty:
+        return None
+
+    centers = frame_geometry.reindex(columns=["frame", "xcenter", "ycenter"]).dropna(subset=["frame"]).copy()
+    if centers.empty:
+        return None
+    centers["frame"] = centers["frame"].astype(int)
+    centers = centers.drop_duplicates("frame", keep="last").set_index("frame")
+    if not {"xcenter", "ycenter"}.issubset(centers.columns):
+        return None
+
+    valid = dyntmp_table.dropna(subset=["frame", "resolution", "xcalc", "ycalc"]).copy()
+    if valid.empty:
+        return None
+    valid["frame"] = valid["frame"].astype(int) - 1
+    valid = valid[valid["frame"].isin(centers.index)]
+    if valid.empty:
+        return None
+
+    mapped = centers.loc[valid["frame"]]
+    radius_px = np.sqrt(
+        (valid["xcalc"].to_numpy(dtype=float) - mapped["xcenter"].to_numpy(dtype=float)) ** 2
+        + (valid["ycalc"].to_numpy(dtype=float) - mapped["ycenter"].to_numpy(dtype=float)) ** 2
+    )
+    resolution = valid["resolution"].to_numpy(dtype=float)
+    mask = np.isfinite(radius_px) & np.isfinite(resolution) & (radius_px > 1.0) & (resolution > 0.0)
+    if not mask.any():
+        return None
+
+    ratios = resolution[mask] / radius_px[mask]
+    lo, hi = np.quantile(ratios, [0.10, 0.90])
+    trimmed = ratios[(ratios >= lo) & (ratios <= hi)]
+    if trimmed.size == 0:
+        trimmed = ratios
+    estimate = float(np.median(trimmed))
+    return estimate if estimate > 0.0 else None
+
+
+def _zero_based_frame_index(values: pd.Series, n_frames: int) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce")
+    if numeric.dropna().empty:
+        return numeric
+    minimum = float(numeric.min())
+    maximum = float(numeric.max())
+    if minimum >= 1.0 and maximum <= float(n_frames):
+        return numeric - 1.0
+    return numeric
+
+
+def _overlay_pets_frame_geometry(
+    base_table: pd.DataFrame,
+    override_table: pd.DataFrame | None,
+    *,
+    columns: tuple[str, ...],
+) -> pd.DataFrame:
+    """Overlay refined PETS per-frame values onto the base imagelist table."""
+
+    if override_table is None or override_table.empty:
+        return base_table
+
+    result = base_table.copy()
+    override = override_table.copy()
+    available = [column for column in columns if column in override.columns]
+    if not available:
+        return result
+
+    if "imgname" in override.columns and "imgname" in result.columns:
+        keyed = override.dropna(subset=["imgname"]).drop_duplicates("imgname", keep="last").set_index("imgname")
+        common = result["imgname"].astype(str).isin(keyed.index)
+        if common.any():
+            mapped_keys = result.loc[common, "imgname"].astype(str)
+            for column in available:
+                result.loc[common, column] = mapped_keys.map(keyed[column]).to_numpy()
+            return result
+
+    for key_column in ("frame_number", "frame"):
+        if key_column not in override.columns or key_column not in result.columns:
+            continue
+        override_frame = _zero_based_frame_index(override[key_column], result.shape[0]).dropna()
+        if override_frame.empty:
+            continue
+        keyed = override.loc[override_frame.index, available].copy()
+        keyed["__frame"] = override_frame.astype(int).to_numpy()
+        keyed = keyed[(keyed["__frame"] >= 0) & (keyed["__frame"] < result.shape[0])]
+        if keyed.empty:
+            continue
+        keyed = keyed.drop_duplicates("__frame", keep="last").set_index("__frame")
+        common = result["frame"].isin(keyed.index)
+        if common.any():
+            mapped_keys = result.loc[common, "frame"].astype(int)
+            for column in available:
+                result.loc[common, column] = mapped_keys.map(keyed[column]).to_numpy()
+            return result
+
+    if "image_number" in override.columns and "image_number" in result.columns:
+        keyed = override.dropna(subset=["image_number"]).drop_duplicates("image_number", keep="last").set_index("image_number")
+        common = result["image_number"].isin(keyed.index)
+        if common.any():
+            mapped_keys = result.loc[common, "image_number"]
+            for column in available:
+                result.loc[common, column] = mapped_keys.map(keyed[column]).to_numpy()
+            return result
+
+    count = min(result.shape[0], override.shape[0])
+    if count <= 0:
+        return result
+    for column in available:
+        result.loc[result.index[:count], column] = override[column].to_numpy()[:count]
+    return result
 
 
 def _parse_pets_badpixel_max(lines: list[str]) -> tuple[int | None, int | None]:
@@ -953,7 +1564,20 @@ def _parse_pets_imagelist(lines: list[str]) -> pd.DataFrame:
         .str.extract(r"(\d+)", expand=False)
         .pipe(pd.to_numeric, errors="coerce")
     )
-    return table
+    return _coerce_pets_frame_table(table)
+
+
+def _transform_pets_reciprocal_to_pipeline_lab(matrix: FloatArray) -> FloatArray:
+    """Map PETS reciprocal vectors into the pipeline's detector/beam frame.
+
+    PETS uses a fixed Cartesian frame with ``+z`` pointing toward the source.
+    The shared analyser assumes ``+z`` points toward the detector, and empirical
+    comparison against PETS ``.dyntmp``/XDS detector layouts for the LTA1 data
+    shows that the PETS in-plane axes are swapped relative to the pipeline's
+    detector projection convention.
+    """
+
+    return PETS_TO_PIPELINE_LAB_TRANSFORM @ np.asarray(matrix, dtype=float)
 
 
 def _parse_pets_ubmatrix(lines: list[str]) -> FloatArray:
@@ -1007,14 +1631,50 @@ def _infer_pets_detector_size(
     orgy_px: float,
     badpixel_max_x: int | None,
     badpixel_max_y: int | None,
+    observed_max_x: float | None = None,
+    observed_max_y: float | None = None,
 ) -> tuple[int, int]:
     nx_from_center = int(np.ceil(max(orgx_px, 1.0) * 2.0 + 20.0))
     ny_from_center = int(np.ceil(max(orgy_px, 1.0) * 2.0 + 20.0))
     nx_from_badpixels = 0 if badpixel_max_x is None else int(badpixel_max_x) + 1
     ny_from_badpixels = 0 if badpixel_max_y is None else int(badpixel_max_y) + 1
-    nx = max(512, nx_from_center, nx_from_badpixels)
-    ny = max(512, ny_from_center, ny_from_badpixels)
+    nx_from_positions = 0 if observed_max_x is None else int(np.ceil(float(observed_max_x))) + 2
+    ny_from_positions = 0 if observed_max_y is None else int(np.ceil(float(observed_max_y))) + 2
+    nx = max(512, nx_from_center, nx_from_badpixels, nx_from_positions)
+    ny = max(512, ny_from_center, ny_from_badpixels, ny_from_positions)
     return nx, ny
+
+
+def _find_pets_scalar_fallback(
+    project_dir: Path,
+    prefixes: list[str],
+    primary_path: Path,
+) -> tuple[Path | None, list[str] | None]:
+    """Find a nearby ``.pts2`` file to recover missing scalar metadata."""
+
+    search_dirs = [project_dir, project_dir.parent]
+    seen: set[Path] = set()
+    for directory in search_dirs:
+        if directory in seen or not directory.exists():
+            continue
+        seen.add(directory)
+        candidate = _find_optional_pets_companion(
+            directory,
+            prefixes,
+            (".pts2.backup", ".pts2"),
+        )
+        if candidate is None:
+            continue
+        try:
+            if candidate.resolve() == primary_path.resolve():
+                continue
+        except OSError:
+            if candidate == primary_path:
+                continue
+        fallback_lines = candidate.read_text(errors="ignore").splitlines()
+        if fallback_lines:
+            return candidate, fallback_lines
+    return None, None
 
 
 def parse_pets_project(
@@ -1024,47 +1684,210 @@ def parse_pets_project(
     """Parse a PETS project directory or ``.pts2(.backup)`` file.
 
     The parser keeps ``.rprofall`` observations and only the geometry/orientation
-    metadata required by the analysis pipeline.
+    metadata required by the analysis pipeline. When refined companion files such
+    as ``.ptsopt``, ``.ptsoptlist``, or ``.cenlocopt`` are present, they are
+    preferred over the raw ``imagelist`` values.
     """
 
     pts_path, resolved_rprofall_path = _resolve_pets_paths(path, rprofall_path=rprofall_path)
-    text = pts_path.read_text()
+    text = pts_path.read_text(errors="ignore")
     lines = text.splitlines()
+    companion_prefixes = _pets_prefix_candidates(pts_path)
+    project_dir = pts_path.parent
+    log_dir = project_dir / "logs"
 
-    wavelength_angstrom: float | None = None
-    aperpixel_invA_per_px: float | None = None
-    center_x: float | None = None
-    center_y: float | None = None
+    ptsopt_path = _find_optional_pets_companion(project_dir, companion_prefixes, (".ptsopt",))
+    ptsoptlist_path = _find_optional_pets_companion(project_dir, companion_prefixes, (".ptsoptlist",))
+    cenlocopt_path = _find_optional_pets_companion(project_dir, companion_prefixes, (".cenlocopt",))
+    dyntmp_path = _find_optional_pets_companion(project_dir, companion_prefixes, (".dyntmp",))
+    logindex_path = (
+        _find_optional_pets_companion(log_dir, companion_prefixes, (".logindex",))
+        if log_dir.exists()
+        else None
+    )
+    logoo_path = (
+        _find_optional_pets_companion(log_dir, companion_prefixes, (".logoo",))
+        if log_dir.exists()
+        else None
+    )
+    logps_path = (
+        _find_optional_pets_companion(log_dir, companion_prefixes, (".logps",))
+        if log_dir.exists()
+        else None
+    )
 
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        tokens = line.split()
-        key = tokens[0].lower()
-        if key == "lambda" and len(tokens) >= 2:
-            wavelength_angstrom = float(tokens[1])
-        elif key == "aperpixel" and len(tokens) >= 2:
-            aperpixel_invA_per_px = float(tokens[1])
-        elif key == "center" and len(tokens) >= 3:
-            if tokens[1].upper() != "AUTO":
-                center_x = float(tokens[1])
-                center_y = float(tokens[2])
+    metadata_notes: list[str] = []
+    (
+        wavelength_angstrom,
+        aperpixel_invA_per_px,
+        omega_deg,
+        delta_deg,
+        center_x,
+        center_y,
+    ) = _parse_pets_project_scalars(lines)
+    scalar_fallback_path: Path | None = None
+    scalar_fallback_lines: list[str] | None = None
+    if any(
+        value is None
+        for value in (
+            wavelength_angstrom,
+            aperpixel_invA_per_px,
+            omega_deg,
+            delta_deg,
+            center_x,
+            center_y,
+        )
+    ):
+        scalar_fallback_path, scalar_fallback_lines = _find_pets_scalar_fallback(
+            project_dir,
+            companion_prefixes,
+            pts_path,
+        )
+    if scalar_fallback_lines is not None:
+        (
+            fallback_wavelength,
+            fallback_aperpixel,
+            fallback_omega,
+            fallback_delta,
+            fallback_center_x,
+            fallback_center_y,
+        ) = _parse_pets_project_scalars(scalar_fallback_lines)
+        used_scalar_fallback = False
+        if wavelength_angstrom is None and fallback_wavelength is not None:
+            wavelength_angstrom = fallback_wavelength
+            used_scalar_fallback = True
+        if aperpixel_invA_per_px is None and fallback_aperpixel is not None:
+            aperpixel_invA_per_px = fallback_aperpixel
+            used_scalar_fallback = True
+        if omega_deg is None and fallback_omega is not None:
+            omega_deg = fallback_omega
+            used_scalar_fallback = True
+        if delta_deg is None and fallback_delta is not None:
+            delta_deg = fallback_delta
+            used_scalar_fallback = True
+        if center_x is None and fallback_center_x is not None:
+            center_x = fallback_center_x
+            used_scalar_fallback = True
+        if center_y is None and fallback_center_y is not None:
+            center_y = fallback_center_y
+            used_scalar_fallback = True
+        if used_scalar_fallback and scalar_fallback_path is not None:
+            metadata_notes.append(f"Using PETS scalar metadata from {scalar_fallback_path.name}.")
+
+    unit_cell: UnitCell | None
+    reciprocal_reference: FloatArray | None
+    try:
+        unit_cell = _parse_pets_cell(lines)
+    except ValueError:
+        unit_cell = None
+    try:
+        reciprocal_reference = _parse_pets_ubmatrix(lines)
+    except ValueError:
+        reciprocal_reference = None
+    if scalar_fallback_lines is not None:
+        if unit_cell is None:
+            try:
+                unit_cell = _parse_pets_cell(scalar_fallback_lines)
+                if scalar_fallback_path is not None:
+                    metadata_notes.append(f"Using unit cell from {scalar_fallback_path.name}.")
+            except ValueError:
+                pass
+        if reciprocal_reference is None:
+            try:
+                reciprocal_reference = _parse_pets_ubmatrix(scalar_fallback_lines)
+                if scalar_fallback_path is not None:
+                    metadata_notes.append(f"Using reciprocal reference from {scalar_fallback_path.name}.")
+            except ValueError:
+                pass
+
+    logindex_cell: UnitCell | None = None
+    logindex_reciprocal: FloatArray | None = None
+    if logindex_path is not None:
+        logindex_cell, logindex_reciprocal = _parse_pets_logindex(logindex_path)
+        if unit_cell is None and logindex_cell is not None:
+            unit_cell = logindex_cell
+            metadata_notes.append(f"Using unit cell from {logindex_path.name}.")
+        if reciprocal_reference is None and logindex_reciprocal is not None:
+            reciprocal_reference = logindex_reciprocal
+            metadata_notes.append(f"Using reciprocal reference from {logindex_path.name}.")
+
+    if unit_cell is None:
+        raise ValueError("Could not parse PETS unit-cell parameters from the project file or logs/*.logindex.")
+    if reciprocal_reference is None:
+        raise ValueError("Could not parse PETS reciprocal reference matrix from the project file or logs/*.logindex.")
+
+    imagelist: pd.DataFrame | None
+    try:
+        imagelist = _parse_pets_imagelist(lines)
+    except ValueError:
+        imagelist = None
+    if imagelist is None and ptsopt_path is not None:
+        imagelist = _parse_pets_ptsopt_table(ptsopt_path)
+        if imagelist is not None and pts_path.suffix == ".ptsopt":
+            metadata_notes.append(f"Using refined frame geometry from {ptsopt_path.name}.")
+    if imagelist is None and ptsoptlist_path is not None:
+        imagelist = _parse_pets_companion_table(ptsoptlist_path)
+    if imagelist is None and logoo_path is not None:
+        imagelist = _parse_pets_logoo(logoo_path)
+    if imagelist is None and logps_path is not None:
+        imagelist = _parse_pets_logps(logps_path)
+    if imagelist is None:
+        raise ValueError("Could not parse PETS frame geometry from the project file, .ptsopt, .ptsoptlist, or logs/*.logoo.")
+
+    imagelist = _coerce_pets_frame_table(imagelist)
+    frame_geometry = imagelist.copy()
+
+    frame_geometry = _overlay_pets_frame_geometry(
+        frame_geometry,
+        _parse_pets_ptsopt_table(ptsopt_path) if ptsopt_path is not None else None,
+        columns=("alpha", "beta", "domega", "xcenter", "ycenter"),
+    )
+    frame_geometry = _overlay_pets_frame_geometry(
+        frame_geometry,
+        _parse_pets_companion_table(ptsoptlist_path) if ptsoptlist_path is not None else None,
+        columns=("alpha", "beta", "domega", "xcenter", "ycenter"),
+    )
+    frame_geometry = _overlay_pets_frame_geometry(
+        frame_geometry,
+        _parse_pets_logoo(logoo_path) if logoo_path is not None else None,
+        columns=("alpha", "beta", "domega"),
+    )
+    frame_geometry = _overlay_pets_frame_geometry(
+        frame_geometry,
+        _parse_pets_companion_table(cenlocopt_path) if cenlocopt_path is not None else None,
+        columns=("xcenter", "ycenter"),
+    )
+    frame_geometry = _overlay_pets_frame_geometry(
+        frame_geometry,
+        _parse_pets_logps(logps_path) if logps_path is not None else None,
+        columns=("xcenter", "ycenter"),
+    )
+
+    dyntmp_table = _parse_pets_dyntmp(dyntmp_path)
 
     if wavelength_angstrom is None:
-        raise ValueError("Could not parse PETS wavelength ('lambda').")
+        wavelength_angstrom = PETS_DEFAULT_WAVELENGTH_ANGSTROM
+        metadata_notes.append(
+            f"Estimated PETS wavelength as {wavelength_angstrom:.6f} A (default 300 kV fallback; no lambda field found)."
+        )
+
     if aperpixel_invA_per_px is None:
-        raise ValueError("Could not parse PETS reciprocal calibration ('aperpixel').")
+        aperpixel_invA_per_px = _estimate_pets_aperpixel_from_dyntmp(dyntmp_table, frame_geometry)
+        if aperpixel_invA_per_px is not None:
+            metadata_notes.append(
+                f"Estimated PETS reciprocal calibration from {dyntmp_path.name}: aperpixel={aperpixel_invA_per_px:.6f} A^-1/px."
+            )
+    if aperpixel_invA_per_px is None:
+        raise ValueError(
+            "Could not parse PETS reciprocal calibration ('aperpixel') and could not estimate it from .dyntmp."
+        )
     if aperpixel_invA_per_px <= 0.0:
         raise ValueError("PETS 'aperpixel' must be positive.")
 
-    unit_cell = _parse_pets_cell(lines)
-    reciprocal_reference = _parse_pets_ubmatrix(lines)
-    imagelist = _parse_pets_imagelist(lines)
     rprofall = parse_rprofall(resolved_rprofall_path)
 
-    orgx_px = float(imagelist["xcenter"].dropna().median()) if "xcenter" in imagelist.columns else float("nan")
-    orgy_px = float(imagelist["ycenter"].dropna().median()) if "ycenter" in imagelist.columns else float("nan")
+    orgx_px = float(frame_geometry["xcenter"].dropna().median()) if "xcenter" in frame_geometry.columns else float("nan")
+    orgy_px = float(frame_geometry["ycenter"].dropna().median()) if "ycenter" in frame_geometry.columns else float("nan")
     if not np.isfinite(orgx_px) and center_x is not None:
         orgx_px = float(center_x)
     if not np.isfinite(orgy_px) and center_y is not None:
@@ -1074,46 +1897,66 @@ def parse_pets_project(
     if not np.isfinite(orgy_px):
         orgy_px = 256.0
 
+    observed_max_x = None if dyntmp_table is None else float(np.nanmax(dyntmp_table[["xobs", "xcalc"]].to_numpy(dtype=float)))
+    observed_max_y = None if dyntmp_table is None else float(np.nanmax(dyntmp_table[["yobs", "ycalc"]].to_numpy(dtype=float)))
     max_bad_x, max_bad_y = _parse_pets_badpixel_max(lines)
     detector_nx, detector_ny = _infer_pets_detector_size(
         orgx_px=orgx_px,
         orgy_px=orgy_px,
         badpixel_max_x=max_bad_x,
         badpixel_max_y=max_bad_y,
+        observed_max_x=observed_max_x,
+        observed_max_y=observed_max_y,
     )
 
     return PETSProjectData(
         pts_path=pts_path,
         rprofall_path=resolved_rprofall_path,
+        frame_geometry=frame_geometry,
         wavelength_angstrom=float(wavelength_angstrom),
         aperpixel_invA_per_px=float(aperpixel_invA_per_px),
         unit_cell=unit_cell,
         reciprocal_reference=reciprocal_reference,
+        omega_deg=(None if omega_deg is None else float(omega_deg)),
+        delta_deg=(None if delta_deg is None else float(delta_deg)),
         detector_nx=int(detector_nx),
         detector_ny=int(detector_ny),
         orgx_px=float(orgx_px),
         orgy_px=float(orgy_px),
         imagelist=imagelist,
         rprofall=rprofall,
+        dyntmp=dyntmp_table,
+        metadata_notes=tuple(metadata_notes),
     )
 
 
 def pets_project_to_analysis_inputs(
     pets_data: PETSProjectData,
 ) -> tuple[GXPARMData, IntegrateData, dict[int, FloatArray]]:
-    """Convert parsed PETS project data to core analysis inputs."""
+    """Convert parsed PETS project data to core analysis inputs.
+
+    PETS frame orientations use frame-resolved ``alpha`` values and, when
+    available, the dataset-level ``omega``/``delta`` tilt-axis definition. This
+    preserves PETS' per-frame orientation progression while keeping the existing
+    frame-wise UB interface used by the pipeline.
+    """
 
     integrate = rprofall_to_integrate_data(pets_data.rprofall)
-    reciprocal_reference = np.asarray(pets_data.reciprocal_reference, dtype=float)
-    if reciprocal_reference.shape != (3, 3):
+    reciprocal_reference_raw = np.asarray(pets_data.reciprocal_reference, dtype=float)
+    if reciprocal_reference_raw.shape != (3, 3):
         raise ValueError("PETS reciprocal reference must be a 3x3 matrix.")
+    reciprocal_reference = _transform_pets_reciprocal_to_pipeline_lab(reciprocal_reference_raw)
 
     real_space_reference = np.linalg.inv(reciprocal_reference)
+    # PETS provides reciprocal calibration in 1/angstrom per pixel. The detector
+    # projection in this pipeline only needs the ratio distance/pixel, so we keep
+    # the calculation in pixel-like units instead of pretending to know a
+    # physical camera length without a detector pixel size.
     distance_over_pixel = 1.0 / (
         float(pets_data.aperpixel_invA_per_px) * float(pets_data.wavelength_angstrom)
     )
     pixel_size_mm = 1.0
-    distance_mm = distance_over_pixel * pixel_size_mm
+    distance_mm = distance_over_pixel
 
     gxparm = GXPARMData(
         phi0_deg=0.0,
@@ -1133,33 +1976,56 @@ def pets_project_to_analysis_inputs(
         distance_mm=float(distance_mm),
     )
 
-    if pets_data.imagelist.empty:
-        raise ValueError("PETS imagelist is empty.")
+    if pets_data.frame_geometry.empty:
+        raise ValueError("PETS frame geometry table is empty.")
 
-    angle_table = pets_data.imagelist.reindex(columns=["alpha", "beta", "domega"]).copy()
+    angle_table = pets_data.frame_geometry.reindex(columns=["alpha", "beta", "domega"]).copy()
+    for base_name, fallback_name in (("alpha", "alphaorig"), ("beta", "betaorig"), ("domega", "domegaorig")):
+        if base_name in angle_table.columns and angle_table[base_name].notna().any():
+            continue
+        if fallback_name in pets_data.frame_geometry.columns:
+            angle_table[base_name] = pets_data.frame_geometry[fallback_name]
+        elif base_name not in angle_table.columns:
+            angle_table[base_name] = 0.0
+
     for column in ("alpha", "beta", "domega"):
         angle_table[column] = pd.to_numeric(angle_table[column], errors="coerce")
     angle_table = angle_table.ffill().bfill().fillna(0.0)
 
-    first_angles = angle_table.iloc[0]
-    first_rotation = _pets_rotation_from_angles_deg(
-        alpha_deg=float(first_angles["alpha"]),
-        beta_deg=float(first_angles["beta"]),
-        domega_deg=float(first_angles["domega"]),
-    )
-    inverse_first_rotation = np.linalg.inv(first_rotation)
-
     reciprocal_by_frame: dict[int, FloatArray] = {}
     n_orient_frames = min(int(integrate.estimated_n_frames), angle_table.shape[0])
-    for frame_idx in range(n_orient_frames):
-        row = angle_table.iloc[frame_idx]
-        current_rotation = _pets_rotation_from_angles_deg(
-            alpha_deg=float(row["alpha"]),
-            beta_deg=float(row["beta"]),
-            domega_deg=float(row["domega"]),
+    use_axis_angle_scan = pets_data.omega_deg is not None and "alpha" in angle_table.columns
+    if use_axis_angle_scan:
+        scan_axis = _pets_rotation_axis_from_omega_delta(
+            float(pets_data.omega_deg),
+            0.0 if pets_data.delta_deg is None else float(pets_data.delta_deg),
         )
-        relative_rotation = current_rotation @ inverse_first_rotation
-        reciprocal_by_frame[frame_idx] = relative_rotation @ reciprocal_reference
+        alpha_values = pd.to_numeric(angle_table["alpha"], errors="coerce").ffill().bfill().fillna(0.0)
+        first_rotation = _rotation_matrix_axis_angle_deg(scan_axis, float(alpha_values.iloc[0]))
+        for frame_idx in range(n_orient_frames):
+            current_rotation = _rotation_matrix_axis_angle_deg(scan_axis, float(alpha_values.iloc[frame_idx]))
+            relative_rotation = np.linalg.inv(current_rotation) @ first_rotation
+            reciprocal_by_frame[frame_idx] = _transform_pets_reciprocal_to_pipeline_lab(
+                relative_rotation @ reciprocal_reference_raw
+            )
+    else:
+        first_angles = angle_table.iloc[0]
+        first_rotation = _pets_rotation_from_angles_deg(
+            alpha_deg=float(first_angles["alpha"]),
+            beta_deg=float(first_angles["beta"]),
+            domega_deg=float(first_angles["domega"]),
+        )
+        for frame_idx in range(n_orient_frames):
+            row = angle_table.iloc[frame_idx]
+            current_rotation = _pets_rotation_from_angles_deg(
+                alpha_deg=float(row["alpha"]),
+                beta_deg=float(row["beta"]),
+                domega_deg=float(row["domega"]),
+            )
+            relative_rotation = np.linalg.inv(current_rotation) @ first_rotation
+            reciprocal_by_frame[frame_idx] = _transform_pets_reciprocal_to_pipeline_lab(
+                relative_rotation @ reciprocal_reference_raw
+            )
 
     if not reciprocal_by_frame:
         reciprocal_by_frame[0] = reciprocal_reference
@@ -1303,13 +2169,18 @@ def rprofall_to_integrate_data(data: RProfallData | pd.DataFrame) -> IntegrateDa
     obs["l"] = obs["l"].astype(int)
     obs["I"] = obs["iobs"].astype(float)
     obs["sigma"] = obs["sigma"].astype(float)
-    obs["z_cal"] = obs["frame"].astype(float)
+
+    # PETS frame numbers are 1-based in .rprofall; normalize to the
+    # pipeline's 0-based frame convention used by orientation lookups.
+    frame_values = obs["frame"].astype(float)
+    if float(frame_values.min()) >= 1.0:
+        frame_values = frame_values - 1.0
+    obs["z_cal"] = frame_values
     obs["frame_est"] = np.floor(obs["z_cal"]).astype(int)
     observations = obs[["h", "k", "l", "I", "sigma", "z_cal", "frame_est"]].reset_index(drop=True)
 
-    min_frame = int(observations["frame_est"].min())
     max_frame = int(observations["frame_est"].max())
-    estimated_n_frames = max_frame + 1 if min_frame <= 0 else max_frame
+    estimated_n_frames = max_frame + 1
     return IntegrateData(observations=observations, estimated_n_frames=estimated_n_frames)
 
 

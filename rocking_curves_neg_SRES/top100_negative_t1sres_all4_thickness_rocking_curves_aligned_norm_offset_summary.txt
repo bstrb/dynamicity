@@ -1,0 +1,13 @@
+Top negative T1-SRES reflections across all thicknesses
+T1 SRES input: /home/bubl3932/files/3DED-DATA/LTA/LTA1/pets/LTA_shelx_sres_all_hkl_mapped_MADscale.csv
+SRES column: SRES_from_hkl_madscale
+Selected reflections: 100
+display_align_peaks=True
+display_normalize_max=True
+display_offset_step=1.15
+
+Per-dataset index transform (applied to T1 HKL before lookup):
+- t1 (100 nm): perm=(0, 1, 2), signs=(1, 1, 1), coverage=100/100
+- t2 (200 nm): perm=(0, 1, 2), signs=(-1, -1, 1), coverage=100/100
+- t3 (350 nm): perm=(0, 1, 2), signs=(1, 1, 1), coverage=98/100
+- t4 (600 nm): perm=(0, 1, 2), signs=(1, 1, 1), coverage=98/100

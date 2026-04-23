@@ -79,6 +79,7 @@ class AnalysisConfig:
     orientation_sigma_deg: float | tuple[float, float, float] = 0.2
     orientation_sigma_alpha: float = 0.5
     orientation_score_formulation: Literal["log_n_eff", "linear_n_eff"] = "log_n_eff"
+    detector_xy_swapped: bool = False
 
     def thickness_array_nm(self) -> np.ndarray | None:
         """Return thickness values as a 1D array in nanometers."""
@@ -196,7 +197,16 @@ def run_analysis(
         sg_end = excitation_error(g_end, gxparm.wavelength_angstrom)
 
         x_px, y_px, positive_sz = project_to_detector(g_mid, gxparm)
-        within_detector = inside_detector(x_px, y_px, gxparm)
+        if cfg.detector_xy_swapped:
+            x_px, y_px = y_px.copy(), x_px.copy()
+            within_detector = (
+                (x_px >= 0.0)
+                & (x_px < gxparm.detector_ny)
+                & (y_px >= 0.0)
+                & (y_px < gxparm.detector_nx)
+            )
+        else:
+            within_detector = inside_detector(x_px, y_px, gxparm)
         in_untrusted = mark_untrusted_rectangles(x_px, y_px, rectangles)
 
         excited_mask = (

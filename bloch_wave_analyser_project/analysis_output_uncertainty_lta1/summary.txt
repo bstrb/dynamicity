@@ -1,4 +1,0 @@
-n_observations: 654668
-mean_risk_total: 0.045867689352790605
-mean_dyn_sigma_rel: 1.1376030680583713
-max_dyn_sigma_rel: 22.924340650592416
