@@ -1,11 +1,8 @@
+# Parallel CrystFEL Stream Analyser
 # OriDyn Stream Parallel Project
 
 Parallel CrystFEL stream analyser for orientation-dependent dynamical-diffraction
 risk.
-
-The intended project/folder name is `oridyn_stream_parallel_project`. Some older
-paths or metadata may still say `bloch_stream_parallel_project`; that is a stale
-name from an earlier copy of the code.
 
 ## What This Project Does
 
@@ -18,31 +15,41 @@ or rewrite the stream. Instead, it produces CSV tables that answer:
 - how much an observed reflection's `sigma(I)` could be inflated by a geometry
   based risk proxy.
 
+It is meant for large SerialED/CrystFEL stream
+runs where thousands of independently indexed frames make the original serial
+pipeline too slow and too quiet.
 It is meant for large SerialED/CrystFEL stream runs where thousands of
 independently indexed crystals make a serial analysis slow. The runner
 parallelizes over frames, writes checkpoint chunk CSVs during the run, then
 concatenates those chunks into final summary tables.
 
+The runner parallelizes over frames, writes checkpoint chunk CSVs while it
+runs, and concatenates them at the end.
 ## Main Entry Point
 
+## Typical Use
 Run from inside the project folder:
 
 ```bash
+python oridyn_stream_parallel_project/run_stream_parallel.py \
 cd /Users/xiaodong/Desktop/dynamicity/oridyn_stream_parallel_project
 
 python3 run_stream_parallel.py \
   --stream /path/to/file.stream \
+  --composition "62 C, 24 H, 40 O, 8 V" \
   --dmin 0.4 \
   --dmax 20.0 \
   --excitation-tolerance 0.01 \
   --workers 0 \
   --chunk-size 5 \
+  --output-dir oridyn_stream_parallel_project/output_stream_dyn
   --output-dir output_stream_dyn \
   --skip-legacy-s-dyn
 ```
 
 `--workers 0` uses all logical CPUs. Use a smaller value if memory pressure is
 too high. `--chunk-size` controls how many frames each worker processes before
+writing a checkpoint.
 writing a checkpoint CSV.
 
 `--composition` is accepted for compatibility with the older Bloch-wave project,
@@ -154,13 +161,19 @@ sigma_dyn_rel = 1 + alpha * cluster_risk_geom
 
 where `alpha` is controlled by `--dynamical-cluster-sigma-alpha`.
 
+For the fastest geometry/two-channel screen, add:
 For observed reflections:
 
+```bash
+--skip-legacy-s-dyn
 ```text
 sigma_new = sigma_obs * sigma_dyn_rel
 weight_new = 1 / sigma_new^2
 ```
 
+That skips the older `geometry_dynamical_risk()` pathway score and keeps the
+newer two-channel columns such as `cluster_risk_geom`, `cluster_risk_iw`,
+`attenuation_risk`, `total_dynamical_risk_geom`, and `sigma_dyn_rel`.
 These columns are useful if you later want to test uncertainty inflation or
 down-weighting outside this project.
 
@@ -190,6 +203,17 @@ dynamical.
 
 ## Outputs
 
+- `frame_summary.csv`
+- `reflections_long.csv`
+- `two_channel_summary.txt`
+- `top_self_extinction_risk.csv`
+- `top_cluster_risk_geom.csv`
+- `top_cluster_risk_intensity_weighted.csv`
+- `top_observed_self_extinction_risk.csv`
+- `top_observed_cluster_risk_geom.csv`
+- `chunk_manifest.csv`
+- `chunks/frame_summary_part_*.csv`
+- `chunks/reflections_long_part_*.csv`
 The final output directory contains:
 
 ```text
