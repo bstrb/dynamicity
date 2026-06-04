@@ -1,0 +1,62 @@
+{
+  "pets_root": "/home/bubl3932/files/LTA1_PETS",
+  "pts2_path": "/home/bubl3932/files/LTA1_PETS/LTA1.pts2",
+  "ptsopt_path": "/home/bubl3932/files/LTA1_PETS/LTA1_petsdata/LTA1.ptsopt",
+  "ptsoptlist_path": "/home/bubl3932/files/LTA1_PETS/LTA1_petsdata/LTA1.ptsoptlist",
+  "n_frames_total": 3033,
+  "n_frames_selected": 3,
+  "wavelength_angstrom": 0.01969,
+  "aperpixel_invA_per_px": 0.00628,
+  "omega_deg": -81.4052,
+  "delta_deg": 0.0,
+  "center_x_px": 245.01,
+  "center_y_px": 250.55,
+  "ub_matrix": [
+    [
+      0.033075,
+      0.026588,
+      -0.07271
+    ],
+    [
+      -0.045688,
+      -0.057127,
+      -0.041674
+    ],
+    [
+      -0.062499,
+      0.055832,
+      -0.008014
+    ]
+  ],
+  "unit_cell": {
+    "a": 11.8782,
+    "b": 11.8782,
+    "c": 11.8782,
+    "alpha": 90.0,
+    "beta": 90.0,
+    "gamma": 90.0
+  },
+  "hkls_generated": 32422,
+  "settings": {
+    "dmin": 0.6,
+    "dmax": 50.0,
+    "excitation_tolerance_invA": 0.0015,
+    "ub_convention": "columns",
+    "orientation_mode": "fixed_x_alpha",
+    "angle_reference": "absolute",
+    "include_domega_in_lattice": false,
+    "projection": "full",
+    "beam_direction": "plus_z",
+    "omega_map_mode": "frame_absolute",
+    "omega_sign": 1.0,
+    "omega_offset_deg": 8.0,
+    "invert_rotation": false,
+    "swap_xy": true,
+    "flip_x": true,
+    "flip_y": true,
+    "detector_nx": 512,
+    "detector_ny": 512,
+    "debug_conventions": false,
+    "debug_top_n": 8
+  }
+}

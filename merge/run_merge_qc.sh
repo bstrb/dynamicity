@@ -10,19 +10,20 @@ set -euo pipefail
 # Hardcoded list of stream files
 #######################################
 STREAMS=(
-  "/home/bubl3932/files/LauraPacoste_Dynamical-filtering-Buster/with-refine/ReOx-WT.stream"
+  "/home/bubl3932/files/COF300/COF300.stream"
+  "/home/bubl3932/files/COF300/COF300_sigmas_div_angle_over_score.stream"
 )
 
 #######################################
 # Defaults
 #######################################
 
-THREADS=12
+THREADS=16
 SYM="mmm"
 ITERATIONS=10
 
-LOWRES=25
-HIGHRES=1.5
+LOWRES=20.0
+HIGHRES=0.6
 WILSON="--wilson"   # set to "" to skip
 
 #######################################

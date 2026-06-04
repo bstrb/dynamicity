@@ -1,0 +1,13 @@
+input_integrate: bloch_wave_analyser_project/data/LTA_t1_XDS/xds_0_03_deg/INTEGRATE.HKL
+scores: bloch_wave_analyser_project/xds_two_channel_0_03_deg_full/reflections_long.csv
+output_integrate: bloch_wave_analyser_project/data/LTA_t1_XDS/xds_0_03_deg/INTEGRATE_sigma_x_1_plus_S_dyn_ZOBS.HKL
+score_column: S_dyn
+frame_coordinate: zobs
+frame_rounding: floor
+score_aggregation: max
+n_data_rows: 15197
+n_updated: 6527
+n_unmatched: 8670
+mean_score_updated: 0.047632433763496816
+p95_score_updated: 0.14519041891774256
+mean_sigma_scale_updated: 1.157101044531897

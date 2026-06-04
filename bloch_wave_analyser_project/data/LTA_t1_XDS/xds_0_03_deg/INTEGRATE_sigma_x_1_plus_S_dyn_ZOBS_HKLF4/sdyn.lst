@@ -1,0 +1,562 @@
+
+ +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ +  SHELXL -  CRYSTAL STRUCTURE REFINEMENT  -   MULTI-CPU VERSION  +
+ +  Copyright(C) George M. Sheldrick 1993-2023     Version 2019/3  +
+ +  sdyn                       started at 14:37:58 on 19-May-2026  +
+ +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+ Command line parameters: sdyn -a50000 -b3000 -c624 -g0 -m0 -t18
+
+ -a sets the approximate maximum number of atoms including hydrogens.
+ -b sets the maximum number of full-matrix parameters (not used by CGLS).
+ For example -b9000 allows refinement of 1000 anisotropic atoms or 3000
+ with BLOC 1. For a 32-bit version, -b times the square root of the
+ number of threads should not exceed about 65500. -c sets the reflection
+ buffer size. This depends on the CPU cache size but will rarely
+ need changing.
+
+ -g sets the number of reflection groups used for calculating R_complete,
+ This must be greater than 1 but not greater than the total number of
+ reflections for refinement. -m sets the current reflection group number.
+ This may not be less than 1 nor greater than the number set by -g. These
+ command line flags override other ways of defining free-R reflections.
+ The -m value is also used as a seed for the WIGL pseudo-random shifts.
+
+ -t sets the number of threads, otherwise it is set to the apparent
+ number of CPUs. For optimal performance on hyperthreading systems,
+ -t should be set to a little more than half the number of CPUs;
+ e.g. -t4 or -t5 for an Intel i7 processor.
+
+ Running 18 threads on 24 processors
+
+ TITL sdyn_a.res in Pm-3m
+ REM Old TITL LTA Pm-3m
+ REM SHELXT solution in Pm-3m: R1 0.303, Rweak 0.137, Alpha 0.110
+ REM <I/s> 0.000 for 0 systematic absences, Orientation as input
+ REM Formula found by SHELXT: O2 Si
+ CELL 0.01968 11.9 11.9 11.9 90 90 90
+ ZERR 26 0.0013 0.0013 0.0013 0 0 0
+ LATT 1
+ SYMM -X,-Y,+Z
+ SYMM -X,+Y,-Z
+ SYMM +X,-Y,-Z
+ SYMM +Z,+X,+Y
+ SYMM +Z,-X,-Y
+ SYMM -Z,-X,+Y
+ SYMM -Z,+X,-Y
+ SYMM +Y,+Z,+X
+ SYMM -Y,+Z,-X
+ SYMM +Y,-Z,-X
+ SYMM -Y,-Z,+X
+ SYMM +Y,+X,-Z
+ SYMM -Y,-X,-Z
+ SYMM +Y,-X,+Z
+ SYMM -Y,+X,+Z
+ SYMM +X,+Z,-Y
+ SYMM -X,+Z,+Y
+ SYMM -X,-Z,-Y
+ SYMM +X,-Z,+Y
+ SYMM +Z,+Y,-X
+ SYMM +Z,-Y,+X
+ SYMM -Z,+Y,+X
+ SYMM -Z,-Y,-X
+ SFAC  O 0.143 0.305 0.51 2.268 0.937 8.262 0.392 25.665 0 0 0 0 0.63 15.999
+ SFAC  Si 0.363 0.428 0.974 3.557 2.721 19.39 1.766 64.333 0 0 0 0 1.16 28.086
+ UNIT 48 24
+
+ V =     1685.16     F(000) =     234.9     Mu =   0.00 mm-1      Cell Wt =     1442.02    Rho =  1.421
+
+  
+  
+ L.S. 10
+ PLAN  1
+ CONF
+ list 4
+ fmap 2 53
+ MORE -1
+ EXTI 2738.43823
+ WGHT 0.2419 1.66
+ FVAR 3.05217
+ REM <olex2.extras>
+ REM <Generic
+ REM  <ED
+ REM   <z "ED">
+ REM  >
+ REM >
+ REM <HklSrc "%.\\sdyn.hkl">
+ REM </olex2.extras>
+  
+ Si01  2     0.500000  0.869792  0.683461  10.50000  0.00851  0.00141 =
+  0.00222  0.00134 -0.00000 -0.00000
+ O002  1     0.500000  1.000000  0.719968  10.25000  0.02804  0.00859 =
+  0.02369  0.00000 -0.00000  0.00000
+ O003  1     0.500000  0.795466  0.795466  10.25000  0.03252  0.00641 =
+  0.00641  0.00663 -0.00000 -0.00000
+ O004  1     0.390276  0.840646  0.609724  10.50000  0.01790  0.02745 =
+  0.01790  0.00110 -0.00945 -0.00110
+ HKLF 4
+ ** Warning: DISP instructions may be required for this wavelength **
+
+ ** Warning: unusual EXTI or SWAT parameter **
+
+
+
+ Covalent radii and connectivity table for  sdyn_a.res in Pm-3m                                                        
+ O      0.630
+ SI     1.160
+
+ Si01 - O003 O002 O004 O004_$4
+ O002 - Si01 Si01_$1
+ O003 - Si01_$2 Si01
+ O004 - Si01 Si01_$3
+
+
+ Operators for generating equivalent atoms:
+ $1   -x+1, -y+2, z
+ $2   -x+1, z, y
+ $3   -z+1, y, -x+1
+ $4   -x+1, y, z
+
+
+    15197  Reflections read, of which       0  rejected
+
+ -19 =< h =< 19,    -19 =< k =< 19,    -19 =< l =< 19,   Max. 2-theta =    1.88
+
+        0  Systematic absence violations (I>3sig(I)) before merging
+
+      792  Inconsistent equivalents
+
+      877  Unique reflections, of which       0  suppressed
+
+ R(int) = 0.3307     R(sigma) = 0.1122      Friedel opposites merged
+
+ Maximum memory for data reduction =      863 /    10103
+
+
+ Reflection statistics for all twin components combined (TWST 0 set)
+ Number of data for d > 0.600A (CIF: max) and d > 0.833A (CIF: full)
+ (ignoring systematic absences):
+ Unique reflections found (point group)        877     360
+ Unique reflections possible (point group)     881     360
+ Unique reflections found (Laue group)         877     360
+ Unique reflections possible (Laue group)      881     360
+
+ Special position constraints for Si01
+ x =  0.5000   U13 = 0   U12 = 0   sof = 0.50000   
+ Input constraints retained (at least in part) for  sof
+
+ Special position constraints for O002
+ x =  0.5000   y =  1.0000   U23 = 0   U13 = 0   U12 = 0   
+ sof = 0.25000   
+ Input constraints retained (at least in part) for  sof
+
+ Special position constraints for O003
+ x =  0.5000   z =  1.0 * y + 0.0000   U33 = 1.0 * U22   U13 = 0   U12 = 0   
+ sof = 0.25000   
+ Input constraints retained (at least in part) for  sof
+
+ Special position constraints for O004
+ z = -1.0 * x + 1.0000   U33 = 1.0 * U11   U12 =-1.0 * U23   sof = 0.50000   
+ Input constraints retained (at least in part) for  sof
+
+
+ Least-squares cycle   1   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+
+ wR2 =  0.5431 before cycle   1 for     877 data and     22 /     22 parameters
+
+ GooF = S =     1.254;     Restrained GooF =      1.254 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.05476     0.05957     0.044    OSF
+     2  2772.09937     9.99999     0.544   EXTI    
+
+ Mean shift/esd =   0.032  Maximum =     0.544 for EXTI          
+
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle   2   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+
+ wR2 =  0.5429 before cycle   2 for     877 data and     22 /     22 parameters
+
+ GooF = S =     1.253;     Restrained GooF =      1.253 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.05828     0.05958     0.059    OSF
+     2  2816.35010     9.99999     0.715   EXTI    
+
+ Mean shift/esd =   0.043  Maximum =     0.715 for EXTI          
+
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle   3   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+
+ wR2 =  0.5427 before cycle   3 for     877 data and     22 /     22 parameters
+
+ GooF = S =     1.252;     Restrained GooF =      1.252 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.06167     0.05959     0.057    OSF
+     2  2859.79053     9.99999     0.702   EXTI    
+
+ Mean shift/esd =   0.042  Maximum =     0.702 for EXTI          
+
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle   4   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+
+ wR2 =  0.5425 before cycle   4 for     877 data and     22 /     22 parameters
+
+ GooF = S =     1.251;     Restrained GooF =      1.251 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.06497     0.05961     0.055    OSF
+     2  2902.46069     9.99999     0.690   EXTI    
+
+ Mean shift/esd =   0.041  Maximum =     0.690 for EXTI          
+
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle   5   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+
+ wR2 =  0.5423 before cycle   5 for     877 data and     22 /     22 parameters
+
+ GooF = S =     1.249;     Restrained GooF =      1.249 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.06819     0.05962     0.054    OSF
+     2  2944.39624     9.99999     0.678   EXTI    
+
+ Mean shift/esd =   0.040  Maximum =     0.678 for EXTI          
+
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle   6   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+
+ wR2 =  0.5421 before cycle   6 for     877 data and     22 /     22 parameters
+
+ GooF = S =     1.248;     Restrained GooF =      1.248 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.07134     0.05964     0.053    OSF
+     2  2985.62939     9.99999     0.667   EXTI    
+
+ Mean shift/esd =   0.039  Maximum =     0.667 for EXTI          
+
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle   7   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+
+ wR2 =  0.5420 before cycle   7 for     877 data and     22 /     22 parameters
+
+ GooF = S =     1.247;     Restrained GooF =      1.247 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.07442     0.05965     0.052    OSF
+     2  3026.19116     9.99999     0.657   EXTI    
+
+ Mean shift/esd =   0.039  Maximum =     0.657 for EXTI          
+
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle   8   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+
+ wR2 =  0.5418 before cycle   8 for     877 data and     22 /     22 parameters
+
+ GooF = S =     1.246;     Restrained GooF =      1.246 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.07743     0.05967     0.050    OSF
+     2  3066.10938     9.99999     0.646   EXTI    
+
+ Mean shift/esd =   0.038  Maximum =     0.646 for EXTI          
+
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle   9   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+
+ wR2 =  0.5416 before cycle   9 for     877 data and     22 /     22 parameters
+
+ GooF = S =     1.245;     Restrained GooF =      1.245 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.08037     0.05968     0.049    OSF
+     2  3105.41064     9.99999     0.637   EXTI    
+
+ Mean shift/esd =   0.037  Maximum =     0.637 for EXTI          
+
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle  10   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+
+ wR2 =  0.5414 before cycle  10 for     877 data and     22 /     22 parameters
+
+ GooF = S =     1.244;     Restrained GooF =      1.244 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.08326     0.05969     0.048    OSF
+     2  3144.11987     9.99999     0.627   EXTI    
+
+ Mean shift/esd =   0.037  Maximum =     0.627 for EXTI          
+
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
+
+ No correlation matrix elements larger than  0.500
+
+
+
+  sdyn_a.res in Pm-3m                                                        
+
+ ATOM           x        y        z         sof        U11      U22      U33      U23      U13      U12       Ueq
+
+ Si01        0.50000  0.86980  0.68346    0.50000    0.00877  0.00167  0.00249  0.00135  0.00000  0.00000   0.00431
+   0.00496   0.00000  0.00028  0.00028    0.00000    0.00144  0.00124  0.00121  0.00095  0.00000  0.00000   0.00077
+
+ O002        0.50000  1.00000  0.72000    0.25000    0.02834  0.00885  0.02407  0.00000  0.00000  0.00000   0.02042
+   0.01180   0.00000  0.00000  0.00099    0.00000    0.00516  0.00357  0.00478  0.00000  0.00000  0.00000   0.00200
+
+ O003        0.50000  0.79545  0.79545    0.25000    0.03271  0.00675  0.00675  0.00668  0.00000  0.00000   0.01541
+   0.01298   0.00000  0.00055  0.00055    0.00000    0.00504  0.00206  0.00206  0.00267  0.00000  0.00000   0.00181
+
+ O004        0.39027  0.84064  0.60973    0.50000    0.01818  0.02783  0.01818  0.00115 -0.00947 -0.00115   0.02140
+   0.00847   0.00050  0.00071  0.00050    0.00000    0.00194  0.00356  0.00194  0.00212  0.00252  0.00212   0.00156
+
+
+
+ Final Structure Factor Calculation for  sdyn_a.res in Pm-3m                                                        
+
+ Total number of l.s. parameters =    22  Maximum vector length =  623   Memory required =     15 /    911 /    25543
+
+ wR2 =  0.5413 before cycle  11 for     877 data and      0 /     22 parameters
+
+ GooF = S =     1.243;     Restrained GooF =      1.243 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2419 * P )^2 +   1.66 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+ wR2 = 0.5413, GooF = S = 1.243, Restrained GooF = 1.243 for all data
+ R1 = 0.2318 for 873 Fo > 4sig(Fo) and 0.2328 for all 877 data
+
+ Occupancy sum of asymmetric unit =     1.50 for non-hydrogen and     0.00 for H and D atoms
+
+
+
+ Principal mean square atomic displacements U
+
+   0.0088   0.0035   0.0007   Si01  
+   0.0283   0.0241   0.0088   O002  
+   0.0327   0.0134   0.0001   O003  
+   0.0294   0.0261   0.0087   O004  
+
+     0  atoms may be split and     0  atoms NPD
+
+
+
+ Analysis of variance for reflections employed in refinement      K = Mean[Fo^2] / Mean[Fc^2]  for group
+
+
+ Fc/Fc(max)       0.000    0.008    0.015    0.023    0.031    0.041    0.051    0.062    0.086    0.152    1.000
+
+ Number in group        97.      81.      92.      81.      93.      91.      85.      82.      87.      88.
+
+            GooF      1.887    1.608    1.187    1.722    0.897    0.713    0.653    0.588    0.783    1.477
+
+             K       49.667    9.161    3.025    4.917    1.660    1.304    1.081    0.988    1.050    0.765
+
+
+ Resolution(A)    0.60     0.62     0.65     0.69     0.73     0.78     0.84     0.94     1.10     1.44     inf
+
+ Number in group        90.      87.      86.      92.      84.      89.      86.      88.      87.      88.
+
+            GooF      0.757    0.868    1.001    0.985    0.995    1.024    1.275    1.596    1.094    2.179
+
+             K        0.935    1.209    1.119    0.922    0.963    1.089    1.165    1.013    1.011    0.784
+
+             R1       0.269    0.303    0.280    0.245    0.224    0.197    0.251    0.288    0.122    0.262
+
+
+ Recommended weighting scheme:  WGHT    0.2000    0.0000
+ [Weight parameters refined to    0.2088        1.25  but appear excessive]
+
+
+ Most Disagreeable Reflections (* if suppressed or used for Rfree).
+ Error/esd is calculated as sqrt(wD^2/<wD^2>) where w is given by the weight
+ formula, D = Fo^2-Fc^2 and <> refers to the average over all reflections.
+
+     h   k   l          Fo^2          Fc^2    Error/esd  Fc/Fc(max)  Resolution(A)
+
+     2   2   2        351.93          1.56       7.93       0.024       3.44
+     4   4   4        127.84          2.53       6.52       0.030       1.72
+     0   0  12         58.10          0.51       4.36       0.014       0.99
+     0   0  11         33.51        368.11       4.17       0.366       1.08
+     0   0   3        279.00       1516.37       3.72       0.744       3.97
+     0   0   6        332.34       1710.58       3.65       0.790       1.98
+     0   1   1        279.61       1464.22       3.36       0.731       8.41
+     0   0   1        782.59       2743.03       3.10       1.000      11.90
+     1   4   7         14.25          0.01       2.83       0.001       1.46
+     0   0   2        345.84        149.54       2.82       0.233       5.95
+     0   7   7         61.23          5.10       2.68       0.043       1.20
+     0   0  13         11.19          1.11       2.65       0.020       0.92
+     3   3   3        591.87        273.33       2.60       0.316       2.29
+     0   5   5        271.08        742.32       2.60       0.520       1.68
+     0   6   6        199.57         72.22       2.43       0.162       1.40
+     2   2   6        137.06         63.06       2.39       0.152       1.79
+     2   5  10          6.78          0.08       2.36       0.005       1.05
+     0   0   7         58.30          3.50       2.29       0.036       1.70
+     1   6  10          7.03          0.28       2.26       0.010       1.02
+     7   7  11          6.21          0.00       2.25       0.001       0.80
+     3   7   8          6.99          0.58       2.23       0.015       1.08
+     2   3   4          9.15          0.44       2.21       0.013       2.21
+     4   8   8          9.97          0.02       2.20       0.003       0.99
+     4   9  10          5.62          0.09       2.17       0.006       0.85
+     1   3  13          4.94          0.01       2.17       0.002       0.89
+     0   6   7          8.93          0.01       2.15       0.002       1.29
+     0   0  17         20.11         56.16       2.14       0.143       0.70
+     0   2   4        244.83        128.20       2.14       0.216       2.66
+     2   3  10          6.29          0.42       2.08       0.012       1.12
+     5   7   8          4.23          0.00       2.08       0.000       1.01
+     4   6   8          4.84          0.02       2.07       0.003       1.10
+     0   3   4          5.16          0.26       2.05       0.010       2.38
+     9  11  11          4.80          0.12       2.05       0.007       0.66
+     3   9   9         13.27          0.02       2.05       0.003       0.91
+     0   2  11          7.03          0.80       2.04       0.017       1.06
+     1   2  11          5.24          0.29       2.01       0.010       1.06
+     1   3   6         13.96          0.04       1.98       0.004       1.75
+     1   6  13          4.17          0.04       1.97       0.004       0.83
+     5   7  11          4.63          0.15       1.97       0.007       0.85
+     4   5   9          7.57          0.93       1.96       0.018       1.08
+     0   7  13          4.16          0.00       1.94       0.001       0.81
+     3   8  10          4.98          0.33       1.94       0.011       0.90
+     3  10  12          4.65          0.16       1.92       0.008       0.75
+     1   1   6          7.75          0.32       1.89       0.011       1.93
+     3   4   5         17.00          5.10       1.89       0.043       1.68
+     0   8  15          4.69          0.05       1.86       0.004       0.70
+     2   4  12          7.49          1.15       1.86       0.020       0.93
+     1   1  12          6.43          0.19       1.85       0.008       0.98
+     2   9  10          3.88          0.05       1.84       0.004       0.87
+     6   9   9          5.03          0.01       1.82       0.002       0.85
+
+
+
+ Selected torsion angles
+
+   180.00 ( 0.00)  O003 - Si01 - O002 - Si01_$1
+   -60.09 ( 0.36)  O004 - Si01 - O002 - Si01_$1
+    60.10 ( 0.36)  O004_$4 - Si01 - O002 - Si01_$1
+   180.00 ( 0.01)  O002 - Si01 - O003 - Si01_$2
+    59.33 ( 0.38)  O004 - Si01 - O003 - Si01_$2
+   -59.33 ( 0.38)  O004_$4 - Si01 - O003 - Si01_$2
+   175.13 ( 1.00)  O003 - Si01 - O004 - Si01_$3
+    56.21 ( 1.24)  O002 - Si01 - O004 - Si01_$3
+   -65.43 ( 1.35)  O004_$4 - Si01 - O004 - Si01_$3
+
+ R1 =  0.2328 for    877 unique reflections after merging for Fourier
+
+
+ Electron density synthesis with coefficients Fo-Fc
+
+ Highest peak    0.53  at  0.0788  0.0788  1.0000  [  5.55 A from O002 ]
+ Deepest hole   -0.92  at  0.5000  0.5000  0.5000  [  4.45 A from O004 ]
+
+
+ Fourier peaks appended to .res file
+
+              x       y       z       sof     U      Peak   Distances to nearest atoms (including eq.)
+
+ Q1    1   0.9212  1.0000  0.9212   0.25000  0.05    0.53   5.55 O002  5.57 O004  5.77 O003  5.96 SI01
+
+ Shortest distances between peaks (including symmetry equivalents)
+
+      1   1  1.33      1   1  1.88      1   1  2.30      1   1  2.65
+
+
+ Time profile in seconds
+ -----------------------
+
+      0.00: Read and process instructions
+      0.00: Fit rigid groups
+      0.00: Interpret restraints etc.
+      0.00: Generate connectivity array
+      0.00: Analyse DFIX and DANG restraints
+      0.00: Analyse SAME, SADI and NCSY restraints
+      0.00: Generate CHIV restraints
+      0.00: Check if bonds in residues restrained
+      0.00: Generate DELU and RIGU restraints
+      0.00: Generate SIMU restraints
+      0.00: Generate ISOR restraints
+      0.00: Analyse electron density
+      0.00: Analyse other restraints etc.
+      0.03: Read intensity data, sort/merge etc.
+      0.00: Set up constraints
+      0.00: OSF, H-atoms from difference map
+      0.00: Set up l.s. refinement
+      0.00: Generate idealized H-atoms
+      0.02: Structure factors and derivatives
+      0.00: Sum l.s. matrices
+      0.00: Generate and apply antibumping restraints
+      0.00: Apply other restraints
+      0.00: Solve l.s. equations
+      0.00: Generate HTAB table
+      0.01: Other dependent quantities, CIF, tables
+      0.00: Analysis of variance
+      0.00: Merge reflections for Fourier and .fcf
+      0.01: Fourier summations
+      0.01: Peaksearch
+      0.00: Analyse peaklist
+
+ ** WARNING: These times are only approximate for multiple threads.
+             To get better estimates run with -t1 **
+
+   Please cite: G.M. Sheldrick (2015) "Crystal structure refinement with
+   SHELXL", Acta Cryst., C71, 3-8 (Open Access) if SHELXL proves useful.
+
+ +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ +  sdyn          finished at 14:37:58   Total elapsed time:      0.12 secs  +
+ +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

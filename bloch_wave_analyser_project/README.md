@@ -10,11 +10,11 @@ This project is aimed at method development in electron crystallography and Seri
 
 - parse `GXPARM.XDS`, `INTEGRATE.HKL`, and optionally `XDS.INP`
 - parse CrystFEL `.stream` output directly for snapshot SerialED
-- parse PETS project outputs (`.pts2/.pts2.backup` + `.rprofall`) directly
+- parse PETS2 project outputs (`.pts2` + `.ptsopt` + `.rprofall`)
 - reconstruct frame orientations from `phi0`, `dphi`, and the XDS rotation axis
 - generate candidate reciprocal-lattice vectors from the GXPARM reference basis
 - compute excitation errors and reflection-wise dynamicality proxy scores
-- compute orientation-only per-reflection uncertainty terms (`orientation_sigma_sg_invA`, `orientation_p_excited`, `S_orient`)
+- compute orientation-only per-reflection uncertainty/risk terms (`orientation_sigma_sg_invA`, `orientation_p_excited`, `S_dyn`, `S_orient`)
 - optionally run a pure orientation-only mode that skips Wilson/coupling terms
 - optionally propagate a Bloch-wave state through crystal thickness and study thickness sensitivity
 - export frame summaries and long-format reflection tables for downstream analysis
@@ -115,37 +115,6 @@ python examples/run_analysis.py \
   --mode proxy
 ```
 
-Using PETS2 `.rprofall` instead of `INTEGRATE.HKL`:
-
-```bash
-python examples/run_analysis.py \
-  --gxparm path/to/GXPARM.XDS \
-  --rprofall path/to/LTA_t1.rprofall \
-  --composition "24 Si, 48 O" \
-  --mode proxy
-```
-
-`--integrate` and `--rprofall` are mutually exclusive.
-
-Using PETS project files only (no GXPARM / INTEGRATE needed):
-
-```bash
-python examples/run_analysis.py \
-  --pets-project path/to/pets_project_folder \
-  --composition "64 C, 8 H, 40 O, 8 V" \
-  --mode proxy
-```
-
-Optional explicit `.rprofall` override in PETS mode:
-
-```bash
-python examples/run_analysis.py \
-  --pets-project path/to/lta1_new.pts2.backup \
-  --pets-rprofall path/to/lta1_new.rprofall \
-  --composition "64 C, 8 H, 40 O, 8 V" \
-  --mode proxy
-```
-
 Using CrystFEL `.stream` only (no GXPARM / INTEGRATE required):
 
 ```bash
@@ -155,15 +124,39 @@ python examples/run_analysis.py \
   --mode proxy
 ```
 
-`--stream` is mutually exclusive with `--pets-project`, `--pets-rprofall`, `--gxparm`, `--integrate`, `--rprofall`, and `--xdsinp`.
+`--stream` is mutually exclusive with `--gxparm`, `--integrate`, and `--xdsinp`.
 In stream mode, each indexed crystal block is treated as one snapshot frame (ordered by appearance in the stream).
+
+Using PETS2 project files:
+
+```bash
+python examples/run_analysis.py \
+  --pets-project /path/to/LTA1_PETS/LTA1_petsdata \
+  --composition "24 Si, 48 O" \
+  --dmin 0.6 \
+  --orientation-only \
+  --output-dir analysis_output_pets
+```
+
+Optional explicit PETS files:
+
+```bash
+python examples/run_analysis.py \
+  --pets-project /path/to/LTA1_PETS \
+  --pets-pts2 /path/to/LTA1_PETS/LTA1.pts2 \
+  --pets-ptsopt /path/to/LTA1_PETS/LTA1_petsdata/LTA1.ptsopt \
+  --pets-rprofall /path/to/LTA1_PETS/LTA1_petsdata/LTA1.rprofall \
+  --composition "24 Si, 48 O" \
+  --output-dir analysis_output_pets
+```
 
 Pure orientation-only scoring (no Wilson scaling, no Bloch coupling terms):
 
 ```bash
 python examples/run_analysis.py \
-  --pets-project path/to/pets_project_folder \
-  --composition "64 C, 8 H, 40 O, 8 V" \
+  --gxparm path/to/GXPARM.XDS \
+  --integrate path/to/INTEGRATE.HKL \
+  --composition "24 Si, 48 O" \
   --mode proxy \
   --orientation-only
 ```
@@ -226,15 +219,6 @@ python examples/run_dynamical_uncertainty.py \
   --output-dir analysis_output_uncertainty_mfm300
 ```
 
-### Run (PETS2)
-
-```bash
-python examples/run_dynamical_uncertainty.py \
-  --pets-project /path/to/lta1_new_petsdata \
-  --dataset-id lta1_new \
-  --output-dir analysis_output_uncertainty_lta1
-```
-
 ### Run (XDS-style)
 
 ```bash
@@ -244,8 +228,6 @@ python examples/run_dynamical_uncertainty.py \
   --dataset-id sample_xds \
   --output-dir analysis_output_uncertainty_xds
 ```
-
-(`--gxparm` also supports `--rprofall` as an alternative to `--integrate`.)
 
 ### Canonical Observation Table
 
@@ -396,8 +378,16 @@ This reproduces the original browser logic as closely as practical:
   - orientation-only uncertainty columns:
     - `orientation_sigma_sg_invA` (sigma of `s_g` from orientation uncertainty only)
     - `orientation_p_excited` (probability of being near excitation under orientation uncertainty)
-    - `S_orient` (orientation-only dynamical-risk proxy)
+    - `S_dyn` (geometry-only dynamical-risk score from the coupling environment)
+    - `S_orient` (alias of `S_dyn` in `--orientation-only` runs, retained for existing plots)
     - `sigma_orient_scale = 1 + alpha * S_orient`
+
+In `--orientation-only` runs, target `s_g` is treated mainly as a visibility/relevance gate.
+The dynamical-risk score is instead driven by low-index strength, ZOLZ proximity to low-index
+zone axes, excited-neighbor density, reciprocal-row coupling, two-step pathways `0 -> h -> g`,
+and local reciprocal-space crowding. Component columns such as `strength_proxy`,
+`ZOLZ_zone_axis_risk`, `neighbor_density`, `row_coupling`, `pathway_risk`, and
+`local_crowding` are written to `reflections_long.csv`.
 
 ### Thickness-aware mode
 
@@ -415,9 +405,7 @@ Because the original HTML is a proxy model, absolute scaling should be treated c
 ## Limitations and assumptions
 
 - `GXPARM.XDS` parsing follows the line layout used by the supplied analyser and typical XDS exports.
-- PETS-only mode uses `.rprofall` for observations and reads geometry/orientation essentials from `.pts2/.pts2.backup` (`lambda`, `aperpixel`, unit cell, `ubmatrix`, and `imagelist` angles/centers).
-- PETS frame rotations are reconstructed from `alpha`, `beta`, and `domega` in the order `Rz(domega) * Ry(beta) * Rx(alpha)`; this is an explicit approximation for interoperability.
-- In `--orientation-only` mode, `S_orient` is set directly to `orientation_p_excited` and coupling-derived columns (`S_MB`, `S_comb`, `N_eff`) are set to zero.
+- In `--orientation-only` mode, `S_orient` is the geometry-only `S_dyn` score and coupling-derived columns (`S_MB`, `S_comb`, `N_eff`) are set to zero.
 - Equivalent-reflection merging uses the deliberately simple absolute-value sorting key inherited from the HTML prototype.
 - The reciprocal basis is taken as the inverse of the GXPARM real-space reference matrix, matching the original script.
 - Untrusted detector rectangles are parsed and visualized; they are not removed from the dynamical calculation unless you extend the code.

@@ -1,0 +1,48 @@
+snum {
+  current_process_diagnostics = 'refinement'
+  hkl {
+    hkl_stat_file = '\\wsl.localhost\\Ubuntu\\home\\bubl3932\\projects\\dynamicity\\bloch_wave_analyser_project\\data\\LTA_t1_XDS\\XDS_FIXED_FRAME_SCALE\\INTEGRATE_sigma_x_S_orient_HKLF4\\INTEGRATE_sigma_x_S_orient_HKLF4.hkl'
+    d_min = 0.6007
+  }
+  smtbx {
+    atomic_form_factor_table = it1992 wk1995 n_gaussian *electron neutron
+    electron_table_name = None Custom 'Peng-1996' '*Peng-1999' 'UCLA-2022' \
+                          'CAP-2022'
+  }
+  solution {
+    program = ShelXS ShelXS-1997 ShelXS-1986 XS XT *ShelXT 'olex2.solve' XM \
+              ShelXD ShelXD-1997 SIR2002 SIR2004 SIR2008 SIR2011 SIR2014 \
+              SIR2019 Superflip Unknown ShelXS-2013 ShelXS86 ShelXD-2013
+    method = 'Dual Space' 'Charge Flipping' 'Direct Methods' \
+             'Patterson Method' 'Structure Expansion' '*Intrinsic Phasing' \
+             Unknown
+    current_atomic_volume = '23.5'
+  }
+  refinement {
+    data_parameter_ratio = 0
+    parameters = '22.0'
+    data = '877'
+    max_shift_over_esd = '0.001'
+    max_shift_site = '0'
+    max_shift_site_atom = 'Si01'
+    max_shift_u = '0'
+    max_shift_u_atom = 'O002'
+    max_peak = '0.45'
+    max_hole = '-0.86'
+    goof = '1.410'
+    flack_str = 'ED'
+    hooft_str = 'ED'
+    last_R1 = '0.2142'
+    last_wR2 = '0.4823'
+    program = XL XH ShelXH-1997 *ShelXL ShelXL-1997 'olex2.refine' Unknown
+    method = '*Least Squares' CGLS 'Gauss-Newton' 'Levenberg-Marquardt' \
+             'Full Matrix' Unknown
+    max_cycles = '100'
+    max_peaks = '1'
+    suggested_weight = '0.1922 0.4975'
+    refine_extinction_tickbox = 'True'
+  }
+  history {
+    current_node = '80ce02baf40393c46649ca30d1fc3f64'
+  }
+}

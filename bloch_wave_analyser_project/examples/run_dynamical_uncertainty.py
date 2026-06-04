@@ -12,7 +12,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.dynamical_uncertainty import (
     DynamicalUncertaintyConfig,
-    run_dynamical_uncertainty_from_pets,
     run_dynamical_uncertainty_from_stream,
     run_dynamical_uncertainty_from_xds,
 )
@@ -38,19 +37,8 @@ def _parse_axes(text: str) -> tuple[str, ...]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stream", default=None, help="Path to CrystFEL .stream input")
-    parser.add_argument(
-        "--pets-project",
-        default=None,
-        help="Path to PETS project directory or .pts2/.pts2.backup",
-    )
-    parser.add_argument(
-        "--pets-rprofall",
-        default=None,
-        help="Optional PETS .rprofall path (used with --pets-project)",
-    )
     parser.add_argument("--gxparm", default=None, help="Path to GXPARM/XPARM file for XDS-style input")
     parser.add_argument("--integrate", default=None, help="Path to INTEGRATE.HKL for XDS-style input")
-    parser.add_argument("--rprofall", default=None, help="Optional rprofall path (XDS-style with gxparm)")
     parser.add_argument("--dataset-id", default=None, help="Optional dataset id in output tables")
 
     parser.add_argument("--orientation-axes", default="xyz", help="Orientation perturbation axes, e.g. xyz or xy")
@@ -106,6 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also output sigma_dyn = sigma_exp * dyn_sigma_rel when sigma_exp is available",
     )
     parser.add_argument(
+        "--beam-direction",
+        choices=["plus_z", "minus_z"],
+        default="plus_z",
+        help="Beam direction used for excitation and Laue-layer coordinates",
+    )
+    parser.add_argument(
         "--top-observations-n",
         type=int,
         default=2000,
@@ -120,14 +114,12 @@ def main() -> None:
 
     mode_count = sum(
         value is not None
-        for value in (args.stream, args.pets_project, args.gxparm)
+        for value in (args.stream, args.gxparm)
     )
     if mode_count != 1:
-        raise SystemExit("Provide exactly one of --stream, --pets-project, or --gxparm.")
-    if args.pets_rprofall is not None and args.pets_project is None:
-        raise SystemExit("--pets-rprofall requires --pets-project.")
-    if args.gxparm is not None and (bool(args.integrate) == bool(args.rprofall)):
-        raise SystemExit("With --gxparm, provide exactly one of --integrate or --rprofall.")
+        raise SystemExit("Provide exactly one of --stream or --gxparm.")
+    if args.gxparm is not None and args.integrate is None:
+        raise SystemExit("With --gxparm, provide --integrate.")
 
     config = DynamicalUncertaintyConfig(
         orientation_axes=_parse_axes(args.orientation_axes),
@@ -150,6 +142,7 @@ def main() -> None:
         dyn_sigma_form=args.dyn_sigma_form,
         dyn_sigma_alpha=float(args.dyn_sigma_alpha),
         include_sigma_dyn=bool(args.include_sigma_dyn),
+        beam_direction=(0.0, 0.0, -1.0) if args.beam_direction == "minus_z" else (0.0, 0.0, 1.0),
     )
 
     if args.stream is not None:
@@ -158,18 +151,10 @@ def main() -> None:
             dataset_id=args.dataset_id,
             config=config,
         )
-    elif args.pets_project is not None:
-        result = run_dynamical_uncertainty_from_pets(
-            pets_project_path=args.pets_project,
-            pets_rprofall_path=args.pets_rprofall,
-            dataset_id=args.dataset_id,
-            config=config,
-        )
     else:
         result = run_dynamical_uncertainty_from_xds(
             gxparm_path=args.gxparm,
             integrate_path=args.integrate,
-            rprofall_path=args.rprofall,
             dataset_id=args.dataset_id,
             config=config,
         )

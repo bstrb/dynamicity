@@ -7,6 +7,7 @@ from src.geometry import (
     ReciprocalMatrixOrientationModel,
     build_zone_axes,
     nearest_zone_axis,
+    nearest_zone_axis_from_reciprocal_matrix,
     reciprocal_lookup_from_table,
     rodrigues_rotation_matrix,
 )
@@ -24,6 +25,21 @@ def test_nearest_zone_axis_identity() -> None:
     match = nearest_zone_axis(zone_axes, real_space_reference, np.eye(3))
     assert match.axis == (0, 0, 1)
     assert np.isclose(match.angle_deg, 0.0)
+
+
+def test_nearest_zone_axis_from_reciprocal_matrix_matches_real_space_convention() -> None:
+    zone_axes = build_zone_axes(limit=2)
+    real_space_reference = np.diag([10.0, 11.0, 12.0])
+    reciprocal_reference = np.linalg.inv(real_space_reference)
+    rotation = rodrigues_rotation_matrix([0.0, 1.0, 0.0], 90.0)
+    reciprocal_frame = rotation @ reciprocal_reference
+
+    from_rotation = nearest_zone_axis(zone_axes, real_space_reference, rotation)
+    from_reciprocal = nearest_zone_axis_from_reciprocal_matrix(zone_axes, reciprocal_frame)
+
+    assert from_rotation.axis == (1, 0, 0)
+    assert from_reciprocal.axis == from_rotation.axis
+    assert np.isclose(from_reciprocal.angle_deg, from_rotation.angle_deg, atol=1e-12)
 
 
 def test_reciprocal_orientation_model_from_table() -> None:

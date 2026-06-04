@@ -1,0 +1,56 @@
+snum {
+  current_process_diagnostics = "refinement"
+  hkl {
+    hkl_stat_file = '\\wsl.localhost\\Ubuntu\\home\\bubl3932\\projects\\dynamicity\\bloch_wave_analyser_project\\data\\LTA_t1\\xds_0_03_deg\\shelx\\shelx.hkl'
+  }
+  smtbx {
+    atomic_form_factor_table = it1992 wk1995 n_gaussian *electron neutron
+    electron_table_name = None Custom 'Peng-1996' '*Peng-1999' 'UCLA-2022' \
+                          'CAP-2022'
+  }
+  solution {
+    program = ShelXS ShelXS-1997 ShelXS-1986 XS XT *ShelXT 'olex2.solve' XM \
+              ShelXD ShelXD-1997 SIR2002 SIR2004 SIR2008 SIR2011 SIR2014 \
+              SIR2019 Superflip Unknown ShelXS-2013 ShelXS86 ShelXD-2013
+    method = 'Dual Space' 'Charge Flipping' 'Direct Methods' \
+             'Patterson Method' 'Structure Expansion' '*Intrinsic Phasing' \
+             Unknown
+    current_atomic_volume = 23.4
+  }
+  refinement {
+    data_parameter_ratio = 0
+    parameters = 11
+    data = 877
+    max_shift_over_esd = '0.000'
+    max_shift_over_esd_atom = "Si01"
+    max_shift_site = 0
+    max_shift_site_atom = "Si01"
+    max_shift_u = 0
+    max_shift_u_atom = "O002"
+    max_peak = '0.49'
+    max_hole = '-0.77'
+    goof = '2.531'
+    flack_str = "ED"
+    hooft_str = "ED"
+    last_R1 = '0.2427'
+    last_wR2 = '0.4624'
+    program = XL XH ShelXH-1997 *ShelXL ShelXL-1997 'olex2.refine' Unknown
+    method = '*Least Squares' CGLS 'Gauss-Newton' 'Levenberg-Marquardt' \
+             'Full Matrix' Unknown
+    max_cycles = '100'
+    max_peaks = '1'
+    update_weight = False
+    suggested_weight = 0.2 0
+    refine_extinction = 0
+  }
+  history {
+    current_node = '4149b177508351ccee4a9fcb48211ef5'
+  }
+  xgrid {
+    scale = -1.321
+  }
+  map {
+    source = olex fcf *cctbx
+    type = diff fcalc *tomc fobs fcfmc PDF mask
+  }
+}

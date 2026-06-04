@@ -1,0 +1,32 @@
+snum {
+  hkl {
+    hkl_stat_file = 'C:\\Users\\bubl3932\\Desktop\\LTA_0.12deg\\XDS\\shelx\\shelx.hkl'
+    d_min = 0.6007
+  }
+  smtbx {
+    atomic_form_factor_table = it1992 wk1995 n_gaussian *electron neutron
+    electron_table_name = None Custom 'Peng-1996' '*Peng-1999' 'UCLA-2022' \
+                          'CAP-2022'
+  }
+  solution {
+    program = ShelXS ShelXS-1997 ShelXS-1986 XS XT *ShelXT 'olex2.solve' XM \
+              ShelXD ShelXD-1997 SIR2002 SIR2004 SIR2008 SIR2011 SIR2014 \
+              SIR2019 Superflip Unknown ShelXS-2013 ShelXS86 ShelXD-2013
+    method = 'Dual Space' 'Charge Flipping' 'Direct Methods' \
+             'Patterson Method' 'Structure Expansion' '*Intrinsic Phasing' \
+             Unknown
+    current_atomic_volume = '23.5'
+  }
+  refinement {
+    data_parameter_ratio = '0'
+    flack_str = "ED"
+    hooft_str = "ED"
+    program = XL XH ShelXH-1997 *ShelXL ShelXL-1997 'olex2.refine' Unknown
+    method = '*Least Squares' CGLS 'Gauss-Newton' 'Levenberg-Marquardt' \
+             'Full Matrix' Unknown
+    max_peaks = '2'
+  }
+  history {
+    current_node = "92dc4c2e91dd3b0a45d0399d251dcb45"
+  }
+}

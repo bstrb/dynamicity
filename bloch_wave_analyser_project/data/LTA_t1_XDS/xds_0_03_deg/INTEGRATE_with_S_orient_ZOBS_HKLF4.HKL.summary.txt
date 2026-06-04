@@ -1,0 +1,17 @@
+input_integrate: bloch_wave_analyser_project/data/LTA_t1_XDS/xds_0_03_deg/INTEGRATE.HKL
+frame_summary: bloch_wave_analyser_project/xds_two_channel_0_03_deg/frame_summary.csv
+output_hkl: bloch_wave_analyser_project/data/LTA_t1_XDS/xds_0_03_deg/INTEGRATE_with_S_orient_ZOBS_HKLF4.HKL
+score_column: S_orient
+frame_coordinate: zobs
+frame_rounding: floor
+sort_by: d_spacing
+n_data_rows: 15197
+n_written: 15197
+n_unmatched: 0
+frame_min_zero_based: 0
+frame_max_zero_based: 3025
+score_mean: 3.421776093561076
+score_min: 0.7332049694156882
+score_max: 17.42614791194375
+score_p05: 1.173029653128261
+score_p95: 11.681859305843702

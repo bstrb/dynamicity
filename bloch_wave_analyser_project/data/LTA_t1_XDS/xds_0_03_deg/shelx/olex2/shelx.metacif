@@ -1,0 +1,17 @@
+data_shelx
+_olex2_submission_special_instructions 'No special instructions were received'
+_audit_creation_date              2026-05-18
+_audit_creation_method            
+;
+Olex2 1.5
+(compiled 2026.04.10 svn.r48fbca5a for OlexSys, GUI svn.r7537)
+;
+
+_computing_molecular_graphics     'Olex2 1.5 (Dolomanov et al., 2009)'
+_computing_publication_material   'Olex2 1.5 (Dolomanov et al., 2009)'
+_publ_contact_author_email        ?
+_publ_contact_author_phone        ?
+_publ_contact_author_address      ?
+_publ_contact_author_id_orcid     ?
+_publ_contact_author_name         ''
+
