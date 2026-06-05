@@ -1,303 +1,622 @@
-# Parallel CrystFEL Stream Analyser
 # OriDyn Stream Parallel Project
 
-Parallel CrystFEL stream analyser for orientation-dependent dynamical-diffraction
-risk.
+OriDyn is a first-version, geometry-only, orientation-aware dynamical-risk
+pipeline for continuous SerialED / CrystFEL stream data. It estimates which
+indexed frames and which observed/indexed HKLs are less reliable for later
+kinematical scaling and merging because their orientation and local
+reciprocal-space environment make dynamical scattering more plausible.
 
-## What This Project Does
+The primary score, `S_dyn_geom`, does not use observed intensities, merged
+intensities, refined structure factors, an atomic model, peak/background
+statistics, detector-edge proximity, panel boundaries, spot overlap, or
+integration quality. Observed `sigma` is used only after scoring to compute an
+optional sigma inflation output.
 
-This project analyses a CrystFEL `.stream` file frame by frame. It does not sort
-or rewrite the stream. Instead, it produces CSV tables that answer:
+## 1. Workflow Overview
 
-- which indexed frames are close to low-index zone axes;
-- which reflections are excited and land on the detector for each frame;
-- which reflections look most vulnerable to dynamical diffraction;
-- how much an observed reflection's `sigma(I)` could be inflated by a geometry
-  based risk proxy.
+1. Parse a CrystFEL `.stream` file for unit cell, wavelength, indexed
+   reciprocal matrices, frame identifiers, and observed HKLs.
+2. Convert each crystal's `astar`, `bstar`, and `cstar` vectors into a
+   lab-frame reciprocal basis matrix.
+3. Generate candidate HKLs from the cell inside a configurable d-spacing range.
+4. Predict problematic low-index zone axes in cell mode from ZOLZ density and a
+   smooth low-order prior.
+5. Score each frame for closeness to predicted risky axes and summarize its
+   candidate-beam excitation environment.
+6. Score observed/indexed reflections for center-orientation excitation.
+7. Add self-coupling, sparse graph-crowding, Laue-zone, and systematic-row
+   geometry terms.
+8. Normalize terms within resolution shells where appropriate.
+9. Combine normalized terms into `S_dyn_geom`.
+10. Convert `S_dyn_geom` to `sigma_dyn_rel`, and to `sigma_dyn` / `weight_dyn`
+    only when stream `sigma` is present.
+11. Write CSV outputs, metadata, and standard plots.
 
-It is meant for large SerialED/CrystFEL stream
-runs where thousands of independently indexed frames make the original serial
-pipeline too slow and too quiet.
-It is meant for large SerialED/CrystFEL stream runs where thousands of
-independently indexed crystals make a serial analysis slow. The runner
-parallelizes over frames, writes checkpoint chunk CSVs during the run, then
-concatenates those chunks into final summary tables.
-
-The runner parallelizes over frames, writes checkpoint chunk CSVs while it
-runs, and concatenates them at the end.
-## Main Entry Point
-
-## Typical Use
-Run from inside the project folder:
-
-```bash
-python oridyn_stream_parallel_project/run_stream_parallel.py \
-cd /Users/xiaodong/Desktop/dynamicity/oridyn_stream_parallel_project
-
-python3 run_stream_parallel.py \
-  --stream /path/to/file.stream \
-  --composition "62 C, 24 H, 40 O, 8 V" \
-  --dmin 0.4 \
-  --dmax 20.0 \
-  --excitation-tolerance 0.01 \
-  --workers 0 \
-  --chunk-size 5 \
-  --output-dir oridyn_stream_parallel_project/output_stream_dyn
-  --output-dir output_stream_dyn \
-  --skip-legacy-s-dyn
-```
-
-`--workers 0` uses all logical CPUs. Use a smaller value if memory pressure is
-too high. `--chunk-size` controls how many frames each worker processes before
-writing a checkpoint.
-writing a checkpoint CSV.
-
-`--composition` is accepted for compatibility with the older Bloch-wave project,
-but this stream-only geometry screen does not use composition for the main
-two-channel risk scores.
-
-## Inputs Read From The Stream
-
-The parser reads:
-
-- wavelength;
-- detector distance, pixel size, detector size, and beam center;
-- unit-cell parameters;
-- per-crystal `astar`, `bstar`, and `cstar` reciprocal vectors;
-- per-crystal detector shifts and camera length when present;
-- measured reflection rows with `h k l I sigma peak background fs ss panel`.
-
-Each indexed crystal block is treated as one independent frame.
-
-## How The Analysis Works
-
-For each frame, the runner:
-
-1. Builds all candidate HKLs in the requested d-spacing range:
-
-   ```text
-   --dmin <= d <= --dmax
-   ```
-
-2. Uses the frame's `astar/bstar/cstar` matrix to place those HKLs in laboratory
-   reciprocal space.
-
-3. Computes excitation error `sg` for each candidate reflection.
-
-4. Projects each candidate reflection to detector pixels.
-
-5. Keeps reflections that are both:
-
-   ```text
-   abs(sg) < --excitation-tolerance
-   ```
-
-   and on the detector.
-
-6. Finds the nearest low-index zone axis for the frame.
-
-7. Computes reflection-level dynamical-risk proxy columns.
-
-8. Merges in the actually observed stream intensity and sigma when that HKL was
-   observed in the frame.
-
-The calculation is intentionally a screening proxy. It is not a full refinement
-or a replacement for dynamical diffraction simulation. It is designed to flag
-frames/reflections where geometry suggests stronger multi-beam coupling,
-self-extinction, or local reciprocal-space crowding.
-
-## Main Risk Columns
-
-The most useful per-reflection columns in `reflections_long.csv` are:
+## 2. Data Flow
 
 ```text
-sg_invA
+CrystFEL stream
+  |
+  v
+stream_parser.py
+  |-- UnitCell, wavelength
+  |-- crystal_table: frame -> reciprocal matrix
+  |-- reflections: observed frame/HKL/sigma (+ optional fs/ss for plotting)
+  |
+  +--> hkl_generation.py -> candidate HKLs
+  |                         |
+  |                         v
+  |                  axis_prediction.py -> problematic_axes.csv
+  |
+  +--> frame_scoring.py -------------------------------> frame_summary.csv
+  |
+  +--> excitation.py -> observed target excitation
+                           |
+                           +--> self_risk.py
+                           +--> graph_crowding.py
+                           +--> laue_zone.py
+                           +--> systematic_rows.py
+                           +--> normalization.py
+                           +--> sigma_model.py
+                                      |
+                                      v
+                              reflection_scores.csv
+                                      |
+                                      v
+                         score_terms_summary.csv + top-risk tables + plots
 ```
 
-Excitation error for the candidate reflection in `1/Angstrom`.
+## 3. Scientific Scoring Design
+
+### Candidate and Orientation Conventions
+
+The reciprocal matrix stores columns:
 
 ```text
-self_extinction_score
-attenuation_risk
+B = [astar bstar cstar] in lab-frame A^-1
+g_lab = B @ [h, k, l]
 ```
 
-Risk from the target reflection itself being strongly excited. `attenuation_risk`
-is a bounded transformed version of the self score.
+The direct basis used for zone-axis angles is:
 
 ```text
-same_zone_cluster_score_geom
-systematic_row_cluster_score_geom
-cluster_risk_geom
+A = inv(B).T
+axis_lab = A @ [u, v, w]
 ```
 
-Geometry-only multi-beam risk from nearby excited beams in the same zone/layer
-and along systematic reciprocal rows.
+### Axis Prediction
+
+For every primitive low-index zone axis `[u v w]` up to `--uvw-max`, candidate
+reflections satisfying the zone law are counted:
 
 ```text
-cluster_risk_iw
+laue_n = h*u + k*v + l*w
+ZOLZ: laue_n = 0
 ```
 
-Similar to `cluster_risk_geom`, but weighted by an empirical intensity-derived
-strength proxy from observed reflections.
+Low-order ZOLZ candidates are weighted:
 
 ```text
-total_dynamical_risk_geom
-total_dynamical_risk_iw
+low_order_prior(q) = 1 / (1 + (q / g0)^p)
+axis_score = zolz_weighted_count / max(zolz_weighted_count)
 ```
 
-Combined self and cluster risk estimates.
+Output columns include:
 
 ```text
-sigma_dyn_rel
-sigma_new
-weight_new
+u, v, w, axis_label, zolz_count, zolz_weighted_count,
+min_zolz_q_invA, axis_complexity, axis_score, axis_rank
 ```
 
-`sigma_dyn_rel` is the relative sigma inflation factor:
+### Frame Axis Risk
+
+For each frame:
 
 ```text
-sigma_dyn_rel = 1 + alpha * cluster_risk_geom
+axis_closeness = exp(-(axis_angle_deg / axis_sigma_deg)^2)
+frame_axis_risk_raw = max_axis(axis_score * axis_closeness)
 ```
 
-where `alpha` is controlled by `--dynamical-cluster-sigma-alpha`.
+The selected axis is exported as `assigned_risky_axis`. The nearest low-index
+zone axis is also computed independently as `nearest_zone_axis`.
 
-For the fastest geometry/two-channel screen, add:
-For observed reflections:
-
-```bash
---skip-legacy-s-dyn
-```text
-sigma_new = sigma_obs * sigma_dyn_rel
-weight_new = 1 / sigma_new^2
-```
-
-That skips the older `geometry_dynamical_risk()` pathway score and keeps the
-newer two-channel columns such as `cluster_risk_geom`, `cluster_risk_iw`,
-`attenuation_risk`, `total_dynamical_risk_geom`, and `sigma_dyn_rel`.
-These columns are useful if you later want to test uncertainty inflation or
-down-weighting outside this project.
-
-## Frame Summary
-
-`frame_summary.csv` has one row per analysed frame. Useful columns include:
+Frame excitation statistics are computed from candidate HKLs only:
 
 ```text
-frame_number
-zone_axis
-zone_axis_angle_deg
 n_excited
-sum_self_extinction_score
-mean_attenuation_risk
-sum_cluster_score_geom
-mean_cluster_risk_geom
-p95_cluster_risk_geom
-sum_cluster_score_iw
-mean_cluster_risk_iw
-p95_cluster_risk_iw
-mean_sigma_dyn_rel
-n_observed_targets
+sum_excitation_weight
+excitation_density
+resolution_normalized_excitation_density
 ```
 
-Use this table to find whole frames/orientations that look especially
-dynamical.
+### Reflection Excitation
 
-## Outputs
-
-- `frame_summary.csv`
-- `reflections_long.csv`
-- `two_channel_summary.txt`
-- `top_self_extinction_risk.csv`
-- `top_cluster_risk_geom.csv`
-- `top_cluster_risk_intensity_weighted.csv`
-- `top_observed_self_extinction_risk.csv`
-- `top_observed_cluster_risk_geom.csv`
-- `chunk_manifest.csv`
-- `chunks/frame_summary_part_*.csv`
-- `chunks/reflections_long_part_*.csv`
-The final output directory contains:
+Default target reflections are the observed/indexed HKLs in the stream. Candidate
+HKLs define the local excited-beam environment and are not exported per frame
+unless `--export-candidates` is used.
 
 ```text
+sg = |g_lab + k0| - |k0|
+excitation_weight = exp(-(sg / sg0)^2)
+```
+
+For `--excitation-kernel lorentzian`:
+
+```text
+excitation_weight = 1 / (1 + abs(sg / sg0)^p)
+```
+
+Output columns include:
+
+```text
+sg
+excitation_weight
+excitation_center
+excitation_mean
+excitation_max
+excitation_integrated
+```
+
+The exposure-integrated interface is present. In this first version the center
+orientation is fully implemented and the mean/max/integrated columns mirror the
+center value unless a future exposure sampler is added.
+
+### Self-Coupling Proxy
+
+This is a geometry-only two-beam-like proxy, not a dynamical calculation:
+
+```text
+coupling_prior = low_order_prior(|g|)
+self_excitation_score = excitation_weight * coupling_prior
+xi_proxy = 1 / (sg0 * max(coupling_prior, eps))
+two_beam_proxy_risk = coupling_prior / (1 + (sg * xi_proxy)^2)
+self_risk_raw = 0.5 * (self_excitation_score + two_beam_proxy_risk)
+```
+
+Output columns:
+
+```text
+coupling_prior
+xi_proxy
+self_excitation_score
+two_beam_proxy_risk
+self_risk_raw
+```
+
+### Sparse Graph Crowding
+
+For each frame, excited candidate beams are selected by `excitation_weight`.
+For each target reflection, only nearby HKLs in a sparse local cube are used:
+
+```text
+delta_hkl = hkl_neighbor - hkl_target
+delta_prior = 1 / (1 + (|delta_hkl| / 1.5)^p)
+edge_weight = excitation_weight_neighbor * delta_prior
+graph_crowding_raw = log1p(sum(edge_weight))
+effective_neighbor_count = sum(edge_weight)^2 / sum(edge_weight^2)
+```
+
+Output columns:
+
+```text
+graph_crowding_raw
+sum_neighbor_excitation
+effective_neighbor_count
+max_neighbor_edge_weight
+top_neighbor_summary
+```
+
+### Laue-Zone Terms
+
+Using the assigned risky axis:
+
+```text
+laue_n = h*u + k*v + l*w
+is_zolz = laue_n == 0
+is_folz = abs(laue_n) == 1
+near_zone_law = abs(laue_n) <= 1
+same_laue_zone_crowding_raw = log1p(sum excitation for candidate beams with same laue_n)
+laue_zone_risk_raw = same_laue_zone_crowding_raw / (1 + abs(laue_n))
+```
+
+Output columns:
+
+```text
+assigned_zone_axis
+laue_n
+abs_laue_n
+is_zolz
+is_folz
+near_zone_law
+same_laue_zone_crowding_raw
+laue_zone_risk_raw
+```
+
+### Systematic-Row Terms
+
+The first version assigns HKLs to their primitive integer row direction:
+
+```text
+nearest_row_direction = primitive(h, k, l)
+systematic_row_risk_raw = log1p(row_excitation_sum) * low_order_row_prior
+```
+
+Output columns:
+
+```text
+nearest_row_direction
+row_excited_count
+row_excitation_sum
+systematic_row_risk_raw
+```
+
+### Normalization and Final Score
+
+Reflection terms are normalized within resolution shells:
+
+```text
+self_risk_norm
+graph_crowding_norm
+same_laue_zone_crowding_norm
+systematic_row_risk_norm
+frame_axis_risk_norm
+```
+
+The default method is robust median/MAD normalization clipped at
+`--normalization-clip` internally. CLI-exposed methods are:
+
+```text
+median_mad
+percentile
+rank
+none
+```
+
+Use `--frame-normalization` to override the normalization method for
+`frame_axis_risk_norm` only. This is useful when the raw frame-axis risk spans
+many orders of magnitude and median/MAD normalization becomes almost binary.
+
+The final score is:
+
+```text
+S_dyn_geom =
+    w_self * self_risk_norm
+  + w_graph * graph_crowding_norm
+  + w_zone * same_laue_zone_crowding_norm
+  + w_row * systematic_row_risk_norm
+  + w_frame * frame_axis_risk_norm
+  + w_interaction * self_risk_norm * graph_crowding_norm
+```
+
+Each contribution is exported:
+
+```text
+S_self_component
+S_graph_component
+S_zone_component
+S_row_component
+S_frame_component
+S_interaction_component
+S_dyn_geom
+```
+
+Sigma conversion:
+
+```text
+sigma_dyn_rel = exp(0.5 * alpha * S_dyn_geom)
+sigma_dyn = sigma * sigma_dyn_rel
+weight_dyn = 1 / sigma_dyn^2
+```
+
+## 4. Project Structure
+
+```text
+pyproject.toml
+README.md
+oridyn/
+  __init__.py
+  config.py
+  stream_parser.py
+  geometry.py
+  hkl_generation.py
+  axis_prediction.py
+  frame_scoring.py
+  excitation.py
+  self_risk.py
+  graph_crowding.py
+  laue_zone.py
+  systematic_rows.py
+  parallel_scoring.py
+  normalization.py
+  sigma_model.py
+outputs.py
+plots.py
+pipeline.py
+cli.py
+summaries.py
+tests/
+  test_geometry.py
+  test_hkl_generation.py
+  test_axis_prediction.py
+  test_excitation.py
+  test_self_risk.py
+  test_graph_crowding.py
+  test_laue_zone.py
+  test_systematic_rows.py
+  test_normalization.py
+  test_sigma_model.py
+  test_stream_parser_minimal.py
+  test_pipeline_smoke.py
+examples/
+  minimal_example.stream
+```
+
+## 5. CLI Design
+
+From this directory:
+
+```bash
+python -m oridyn.cli run \
+  --stream examples/minimal_example.stream \
+  --output output_oridyn \
+  --dmin 2.0 \
+  --dmax 10.0 \
+  --uvw-max 2
+```
+
+Requested subcommands are present:
+
+```bash
+python -m oridyn.cli axes \
+  --stream input.stream \
+  --output output_axes \
+  --dmin 0.6 \
+  --dmax 20 \
+  --uvw-max 5
+
+python -m oridyn.cli frames \
+  --stream input.stream \
+  --output output_frames
+
+python -m oridyn.cli score-reflections \
+  --stream input.stream \
+  --output output_scores
+
+python -m oridyn.cli plot \
+  --scores output_oridyn/reflection_scores.csv \
+  --frames output_oridyn/frame_summary.csv \
+  --output output_oridyn/plots
+
+python -m oridyn.cli plot-residuals \
+  --scores output_oridyn/reflection_scores.csv \
+  --residuals external_residuals.csv \
+  --output output_oridyn/plots
+
+python -m oridyn.cli rewrite-sigmas \
+  --stream input.stream \
+  --scores output_oridyn/reflection_scores.csv \
+  --output output_oridyn_sigma_dyn.stream
+```
+
+The first version keeps `run` as the reliable complete unit of work. The
+`frames` and `score-reflections` commands currently run the complete path so the
+outputs remain mutually consistent.
+
+Important options:
+
+```text
+--dmin, --dmax, --hkl-limit, --max-candidates
+--uvw-max, --axis-sigma-deg
+--max-problematic-axes, --axis-score-min
+--sg0, --excitation-kernel gaussian|lorentzian
+--neighbor-excitation-min, --neighbor-hkl-radius
+--max-neighbors-per-reflection, --max-excited-nodes-per-frame
+--row-direction-limit, --row-max-steps
+--normalization median_mad|percentile|rank|none, --frame-normalization inherit|median_mad|percentile|rank|none
+--normalization-clip
+--resolution-shells
+--alpha
+--w-self, --w-graph, --w-zone, --w-row, --w-frame, --w-interaction
+--export-candidates
+--workers, --chunk-size, --seed
+--quiet
+```
+
+The main frame/reflection scoring phase is parallelized over indexed frames.
+Use `--workers N` to choose a process count, or `--workers 0` to use all logical
+CPUs. Progress messages are printed to stderr by default; add `--quiet` to
+suppress them. `--chunk-size` is currently recorded in metadata for future
+checkpointed execution.
+
+`problematic_axes.csv` keeps the full ranked axis list. Only axes marked
+`used_for_scoring = True` can drive `assigned_risky_axis`, frame-axis risk, and
+Laue-zone scoring. By default this is capped to the top 50 ranked axes; use
+`--max-problematic-axes 0` to disable the cap.
+
+## 6. Modules, Classes, and Functions
+
+Core dataclasses:
+
+```text
+config.ScoreWeights
+config.OridynConfig
+stream_parser.UnitCell
+stream_parser.StreamData
+```
+
+Main functions:
+
+```text
+stream_parser.parse_crystfel_stream
+stream_parser.reciprocal_matrix_from_row
+geometry.direct_matrix_from_cell
+geometry.reciprocal_matrix_from_cell
+geometry.hkl_lab_vectors
+geometry.excitation_error
+geometry.axis_angle_deg
+hkl_generation.generate_candidate_hkls
+axis_prediction.predict_problematic_axes
+frame_scoring.compute_frame_scores
+excitation.score_observed_reflections
+excitation.score_candidate_reflections
+self_risk.add_self_risk_terms
+graph_crowding.add_graph_crowding_terms
+laue_zone.add_laue_zone_terms
+systematic_rows.add_systematic_row_terms
+parallel_scoring.score_frames_and_reflections
+normalization.normalize_reflection_terms
+normalization.normalize_frame_terms
+sigma_model.combine_score_terms
+sigma_model.add_sigma_model
+outputs.write_outputs
+plots.make_standard_plots
+plots.plot_residuals
+pipeline.run_pipeline
+pipeline.run_axes
+cli.main
+```
+
+## 7. Tests
+
+The current test set covers:
+
+```text
+minimal stream parsing
+reciprocal/direct geometry conventions
+HKL generation and centering rules
+cell-mode axis prediction
+observed reflection excitation without intensity columns
+self-coupling proxy columns
+sparse graph crowding
+Laue-zone classification
+systematic-row scoring
+resolution-shell normalization
+score combination and sigma conversion
+complete pipeline smoke output
+```
+
+Run:
+
+```bash
+pytest -q
+```
+
+## 8. Staged Implementation Plan
+
+Completed in this first version:
+
+1. Clean package and CLI scaffold.
+2. Stream parser for unit cell, wavelength, per-crystal reciprocal matrices, and
+   observed HKLs.
+3. Candidate HKL generation with centering rules and candidate caps.
+4. Cell-mode problematic axis prediction.
+5. Frame-level axis risk and excitation summaries.
+6. Observed-target excitation scoring.
+7. Self, graph, Laue-zone, and row geometry terms.
+8. Shell normalization and transparent score combination.
+9. Sigma inflation conversion.
+10. Required CSV outputs, metadata, top-risk tables, and plots.
+11. Minimal example stream and automated tests.
+12. Frame-parallel raw scoring with command-line progress feedback.
+
+Deferred cleanly:
+
+```text
+stream-mode axis reweighting
+true exposure-integrated orientation sampling
+checkpointed chunk writing for very large streams
+full validation framework
+intervention, filtering, random removal, or stream rewriting modes
+detector-coordinate maps beyond optional plotting
+```
+
+## 9. Failure Modes and Guards
+
+Large unit cells can generate too many candidates.
+
+```text
+Guard: --hkl-limit and --max-candidates; metadata records truncation.
+```
+
+Stream conventions can vary.
+
+```text
+Guard: parser raises on missing indexed crystal reciprocal vectors; metadata
+records reciprocal-matrix handedness, determinant range, and basis norms.
+```
+
+A frame can have few or no excited candidate beams.
+
+```text
+Guard: graph, Laue, and row terms return zero-risk rows with valid columns.
+```
+
+Normalization can be unstable in tiny shells.
+
+```text
+Guard: safe scales use epsilon fallbacks; normalized terms are clipped.
+```
+
+Scores can be misread as intensity predictions.
+
+```text
+Guard: names and metadata state that S_dyn_geom estimates geometry-conditioned
+dynamical unreliability, not whether an intensity is too strong or too weak.
+```
+
+Detector-derived bias can leak into scoring.
+
+```text
+Guard: scoring modules do not read fs/ss/panel, detector edges, spot overlap,
+panel boundaries, peak, background, or observed intensity.
+```
+
+Residuals can accidentally train the score.
+
+```text
+Guard: residual plotting is a separate command and only joins completed scores
+for visualization.
+```
+
+## 10. Implementation Status
+
+The codebase is implemented under `oridyn/`, with tests under `tests/` and a
+small CrystFEL-style example at `examples/minimal_example.stream`.
+
+Required outputs from `oridyn run`:
+
+```text
+problematic_axes.csv
 frame_summary.csv
-reflections_long.csv
-two_channel_summary.txt
-top_self_extinction_risk.csv
-top_cluster_risk_geom.csv
-top_cluster_risk_intensity_weighted.csv
-top_observed_self_extinction_risk.csv
-top_observed_cluster_risk_geom.csv
-chunk_manifest.csv
+reflection_scores.csv
+score_terms_summary.csv
 run_metadata.json
-chunks/frame_summary_part_*.csv
-chunks/reflections_long_part_*.csv
+top_self_risk.csv
+top_graph_crowding_risk.csv
+top_systematic_row_risk.csv
+top_laue_zone_risk.csv
+plots/score_distributions.png
+plots/score_distributions.pdf
+plots/frame_risk_trace.png
+plots/frame_risk_trace.pdf
+plots/score_term_correlations.png
+plots/score_term_correlations.pdf
+summary_close_risky_axis_frames.csv
+summary_high_dynamical_frames.csv
+summary_frame_metric_correlations.csv
+summary_axis_group_metrics.csv
+summary_top_reflections_in_high_dynamical_frames.csv
 ```
 
-The chunk files are kept by default so an interrupted run still leaves useful
-partial results. Use `--remove-chunks` to delete them after final concatenation.
-
-## Useful Options
+Optional output:
 
 ```text
---analysis-frame N
+candidate_reflection_scores.csv
 ```
 
-Analyse one one-based frame number. Can be repeated.
+This is written only when `--export-candidates` is supplied.
 
-```text
---analysis-frame-range START END
---analysis-frame-step N
-```
-
-Analyse a subset of frames.
-
-```text
---skip-legacy-s-dyn
-```
-
-Skip the older `geometry_dynamical_risk()` pathway score. This is usually the
-fastest mode and keeps the newer two-channel columns such as
-`cluster_risk_geom`, `cluster_risk_iw`, `attenuation_risk`,
-`total_dynamical_risk_geom`, and `sigma_dyn_rel`.
-
-```text
---beam-direction plus_z|minus_z
-```
-
-Set the beam direction used for excitation and projection.
-
-```text
---stream-det-shift-sign -1|1
---stream-mirror-x-axis
---no-stream-mirror-x-axis
---detector-xy-swapped
-```
-
-Adjust how stream detector shifts/projections are mapped into detector
-coordinates.
-
-```text
---orientation-sigma-deg FLOAT
-```
-
-Set the assumed orientation uncertainty used for orientation excitation
-probability columns.
-
-```text
---dynamical-environment-tolerance FLOAT
---dynamical-neighbor-radius FLOAT
---dynamical-zone-sigma FLOAT
---dynamical-row-direction-limit N
---dynamical-row-max-steps N
---dynamical-cluster-sigma-alpha FLOAT
-```
-
-Tune the local multi-beam environment and sigma inflation behavior.
-
-## Relationship To The Orientation-Sorting Scripts
-
-The scripts in `sort_by_orientation/` predict a list of risky axes and then sort,
-split, filter, or rewrite streams based on closeness to those axes.
-
-This project is more detailed and more diagnostic. It keeps the stream intact
-and writes analysis tables instead. It scores individual candidate reflections
-inside every frame, including local neighbor beams and systematic-row coupling,
-then reports both reflection-level and frame-level risk summaries.
+The `rewrite-sigmas` command writes a stream copy whose indexed reflection
+sigma column is replaced by `sigma_dyn` from `reflection_scores.csv`. Add
+`--sigma-dyn-rel-cap N` to cap the applied relative sigma inflation during
+rewriting without rerunning the scoring pipeline.
