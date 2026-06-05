@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oridyn-stream-parallel"
+version = "0.1.0"
+description = "Geometry-only orientation-aware dynamical-risk scoring for CrystFEL streams."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pandas",
+  "matplotlib",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+oridyn = "oridyn.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["oridyn*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

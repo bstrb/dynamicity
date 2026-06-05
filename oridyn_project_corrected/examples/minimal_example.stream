@@ -1,0 +1,51 @@
+wavelength = 0.0251 A
+clen = 0.50 m
+res = 10000000
+lattice_type = cubic
+centering = P
+a = 10.0 A
+b = 10.0 A
+c = 10.0 A
+al = 90.0 deg
+be = 90.0 deg
+ga = 90.0 deg
+p0/min_fs = 0
+p0/max_fs = 1023
+p0/min_ss = 0
+p0/max_ss = 1023
+p0/corner_x = -512
+p0/corner_y = -512
+
+----- Begin chunk -----
+Event: frame-0001
+Image serial number: 1
+--- Begin crystal
+Cell parameters 1.0 1.0 1.0 nm, 90.0 90.0 90.0 deg
+astar = 1.0 0.0 0.0 nm^-1
+bstar = 0.0 1.0 0.0 nm^-1
+cstar = 0.0 0.0 1.0 nm^-1
+Reflections measured after indexing
+  h    k    l          I    sigma   peak background      fs      ss panel
+  1    0    0      100.0     10.0   30.0        1.0   520.0   512.0 p0
+  0    1    0       80.0      9.0   28.0        1.0   512.0   520.0 p0
+  1    1    0       60.0      8.0   20.0        1.0   530.0   530.0 p0
+End of reflections
+--- End crystal
+----- End chunk -----
+
+----- Begin chunk -----
+Event: frame-0002
+Image serial number: 2
+--- Begin crystal
+Cell parameters 1.0 1.0 1.0 nm, 90.0 90.0 90.0 deg
+astar = 0.70710678 0.70710678 0.0 nm^-1
+bstar = -0.70710678 0.70710678 0.0 nm^-1
+cstar = 0.0 0.0 1.0 nm^-1
+Reflections measured after indexing
+  h    k    l          I    sigma   peak background      fs      ss panel
+  1    0    0       90.0      9.5   30.0        1.0   522.0   522.0 p0
+  0    1    0       70.0      8.5   27.0        1.0   502.0   522.0 p0
+  1    1    0       55.0      7.5   19.0        1.0   512.0   532.0 p0
+End of reflections
+--- End crystal
+----- End chunk -----
