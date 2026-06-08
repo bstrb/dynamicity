@@ -59,13 +59,13 @@ def build_parser() -> argparse.ArgumentParser:
     reweight.add_argument("--scores", required=True, help="reflection_scores.csv or hkl_frame_trajectories.csv")
     reweight.add_argument("--output", required=True)
     reweight.add_argument("--weights", help="JSON file with one flat weight dict or named weight presets.")
-    reweight.add_argument("--alpha", type=float, default=1.0)
+    reweight.add_argument("--alpha", type=float, default=0.1)
     reweight.add_argument("--preset-name", default="cli")
     reweight.add_argument("--w-self", type=float, default=1.0)
-    reweight.add_argument("--w-graph", type=float, default=1.0)
-    reweight.add_argument("--w-zone", type=float, default=0.75)
-    reweight.add_argument("--w-row", type=float, default=0.75)
-    reweight.add_argument("--w-frame", type=float, default=0.75)
+    reweight.add_argument("--w-graph", type=float, default=0.50)
+    reweight.add_argument("--w-zone", type=float, default=0.5)
+    reweight.add_argument("--w-row", type=float, default=0.5)
+    reweight.add_argument("--w-frame", type=float, default=1.0)
     reweight.add_argument("--w-interaction", type=float, default=0.25)
     reweight.add_argument(
         "--no-overwrite-single",
@@ -111,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_common_config(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--dmin", type=float, default=0.6)
+    parser.add_argument("--dmin", type=float, default=0.5)
     parser.add_argument("--dmax", type=float, default=20.0)
     parser.add_argument("--hkl-limit", type=int, default=None)
     parser.add_argument("--max-candidates", type=int, default=200_000)
@@ -119,7 +119,7 @@ def _add_common_config(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--max-problematic-axes",
         type=int,
-        default=50,
+        default=100,
         help="Only the top N ranked problematic axes are allowed to drive scoring; use 0 for no cap.",
     )
     parser.add_argument("--axis-score-min", type=float, default=0.0)
@@ -136,20 +136,20 @@ def _add_common_config(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--frame-normalization",
         choices=["inherit", "median_mad", "percentile", "rank", "none"],
-        default="inherit",
+        default="rank",
         help="Frame-axis normalization only; 'inherit' uses --normalization.",
     )
-    parser.add_argument("--normalization-clip", type=float, default=6.0)
-    parser.add_argument("--resolution-shells", type=int, default=10)
-    parser.add_argument("--alpha", type=float, default=1.0)
+    parser.add_argument("--normalization-clip", type=float, default=10.0)
+    parser.add_argument("--resolution-shells", type=int, default=20)
+    parser.add_argument("--alpha", type=float, default=0.10)
     parser.add_argument("--w-self", type=float, default=1.0)
-    parser.add_argument("--w-graph", type=float, default=1.0)
-    parser.add_argument("--w-zone", type=float, default=0.75)
-    parser.add_argument("--w-row", type=float, default=0.75)
-    parser.add_argument("--w-frame", type=float, default=0.75)
+    parser.add_argument("--w-graph", type=float, default=0.5)
+    parser.add_argument("--w-zone", type=float, default=0.5)
+    parser.add_argument("--w-row", type=float, default=0.5)
+    parser.add_argument("--w-frame", type=float, default=1.0)
     parser.add_argument("--w-interaction", type=float, default=0.25)
     parser.add_argument("--export-candidates", action="store_true")
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--chunk-size", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--quiet", action="store_true", help="Suppress progress messages.")

@@ -2,7 +2,7 @@
  +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  +  SHELXL -  CRYSTAL STRUCTURE REFINEMENT  -   MULTI-CPU VERSION  +
  +  Copyright(C) George M. Sheldrick 1993-2023     Version 2019/3  +
- +  integrate_sigma_x_s_orien  started at 12:54:21 on 20-May-2026  +
+ +  integrate_sigma_x_s_orien  started at 16:33:11 on 08-Jun-2026  +
  +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
  Command line parameters: integrate_sigma_x_s_orient_hklf4 -a50000 -b3000 -c624 -g0 -m0 -t18
@@ -74,9 +74,9 @@
  LIST 6
  MORE -1
  fmap 2 53
- EXTI 24013.65625
- WGHT 0.1922 0.4975
- FVAR 4.21522
+ MERG 0
+ WGHT 0.2989 2.88
+ FVAR 3.20701
  REM <olex2.extras>
  REM <Generic
  REM  <ED
@@ -86,18 +86,16 @@
  REM <HklSrc "%.\\INTEGRATE_sigma_x_S_orient_HKLF4.hkl">
  REM </olex2.extras>
   
- Si01  2     0.500000  0.869589  0.683609  10.50000  0.01573  0.00814 =
-  0.00899  0.00111 -0.00000 -0.00000
- O002  1     0.500000  1.000000  0.720501  10.25000  0.03880  0.01557 =
-  0.03048  0.00000 -0.00000 -0.00000
- O003  1     0.500000  0.795388  0.795388  10.25000  0.03710  0.01460 =
-  0.01460  0.00722 -0.00000 -0.00000
- O004  1     0.390126  0.840543  0.609874  10.50000  0.02551  0.03710 =
-  0.02551  0.00479 -0.01039 -0.00479
+ Si01  2     0.500000  0.869843  0.683670  10.50000  0.00835  0.00308 =
+  0.00471  0.00142 -0.00000 -0.00000
+ O002  1     0.500000  1.000000  0.719712  10.25000  0.03094  0.01020 =
+  0.02163  0.00000 -0.00000 -0.00000
+ O003  1     0.500000  0.795316  0.795316  10.25000  0.02795  0.00698 =
+  0.00698  0.00595 -0.00000 -0.00000
+ O004  1     0.389848  0.841209  0.610152  10.50000  0.01902  0.03045 =
+  0.01902  0.00342 -0.01065 -0.00342
  HKLF 4
  ** Warning: DISP instructions may be required for this wavelength **
-
- ** Warning: unusual EXTI or SWAT parameter **
 
 
 
@@ -105,9 +103,9 @@
  O      0.630
  SI     1.160
 
- Si01 - O003 O004_$4 O004 O002
- O002 - Si01_$1 Si01
- O003 - Si01 Si01_$2
+ Si01 - O003 O002 O004 O004_$4
+ O002 - Si01 Si01_$1
+ O003 - Si01_$2 Si01
  O004 - Si01 Si01_$3
 
 
@@ -124,14 +122,9 @@
 
         0  Systematic absence violations (I>3sig(I)) before merging
 
-      470  Inconsistent equivalents
+       0  Data suppressed,     R(sigma) = 0.1060
 
-      877  Unique reflections, of which       0  suppressed
-
- R(int) = 0.3054     R(sigma) = 0.1029      Friedel opposites merged
-
- Maximum memory for data reduction =      863 /    10103
-
+ Maximum memory for data reduction =      863 /        4
 
  Reflection statistics for all twin components combined (TWST 0 set)
  Number of data for d > 0.601A (CIF: max) and d > 0.833A (CIF: full)
@@ -160,1904 +153,328 @@
  Input constraints retained (at least in part) for  sof
 
 
- Least-squares cycle   1   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+ Least-squares cycle   1   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
- wR2 =  0.4823 before cycle   1 for     877 data and     22 /     22 parameters
+ wR2 =  0.6133 before cycle   1 for   15192 data and     21 /     21 parameters
 
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21523     0.06975     0.000    OSF
-     2 24013.69141     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.001  Maximum =    -0.002 for  U23 Si01     
-
- Max. shift = 0.000 A for O003        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle   2   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle   2 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21522     0.06975     0.000    OSF
-     2 24013.73828     9.99999     0.001   EXTI    
+     1     3.20617     0.07905    -0.011    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.002  Maximum =    -0.011 for  OSF          
 
- Max. shift = 0.000 A for O004        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle   3   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle   3 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Max. shift = 0.000 A for O004        Max. dU = 0.000 for O002     
 
 
-     N      value        esd    shift/esd  parameter
+ Least-squares cycle   2   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
-     1     4.21522     0.06975     0.000    OSF
-     2 24013.78516     9.99999     0.001   EXTI    
+ wR2 =  0.6133 before cycle   2 for   15192 data and     21 /     21 parameters
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Max. shift = 0.000 A for O004        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle   4   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle   4 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21522     0.06975     0.000    OSF
-     2 24013.83203     9.99999     0.001   EXTI    
+     1     3.20593     0.07904    -0.003    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.001  Maximum =    -0.003 for  OSF          
 
- Max. shift = 0.000 A for O004        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle   5   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle   5 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Max. shift = 0.000 A for O004        Max. dU = 0.000 for O002     
 
 
-     N      value        esd    shift/esd  parameter
+ Least-squares cycle   3   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
-     1     4.21523     0.06975     0.000    OSF
-     2 24013.87891     9.99999     0.001   EXTI    
+ wR2 =  0.6133 before cycle   3 for   15192 data and     21 /     21 parameters
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Max. shift = 0.000 A for O004        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle   6   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle   6 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21523     0.06975     0.000    OSF
-     2 24013.92773     9.99999     0.001   EXTI    
+     1     3.20590     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for  U22 O002     
 
- Max. shift = 0.000 A for O004        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle   7   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle   7 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Max. shift = 0.000 A for O004        Max. dU = 0.000 for O002     
 
 
-     N      value        esd    shift/esd  parameter
+ Least-squares cycle   4   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
-     1     4.21523     0.06975     0.000    OSF
-     2 24013.97461     9.99999     0.001   EXTI    
+ wR2 =  0.6133 before cycle   4 for   15192 data and     21 /     21 parameters
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Max. shift = 0.000 A for O004        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle   8   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle   8 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21523     0.06975     0.000    OSF
-     2 24014.02148     9.99999     0.001   EXTI    
+     1     3.20589     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   z  Si01     
 
- Max. shift = 0.000 A for O004        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle   9   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle   9 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Max. shift = 0.000 A for O004        Max. dU = 0.000 for O002     
 
 
-     N      value        esd    shift/esd  parameter
+ Least-squares cycle   5   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
-     1     4.21523     0.06975     0.000    OSF
-     2 24014.06836     9.99999     0.001   EXTI    
+ wR2 =  0.6133 before cycle   5 for   15192 data and     21 /     21 parameters
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
-
-
- Least-squares cycle  10   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  10 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21523     0.06975     0.000    OSF
-     2 24014.11523     9.99999     0.001   EXTI    
+     1     3.20590     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
 
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  11   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  11 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Max. shift = 0.000 A for O002        Max. dU = 0.000 for O004     
 
 
-     N      value        esd    shift/esd  parameter
+ Least-squares cycle   6   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
-     1     4.21523     0.06975     0.000    OSF
-     2 24014.16211     9.99999     0.001   EXTI    
+ wR2 =  0.6133 before cycle   6 for   15192 data and     21 /     21 parameters
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Max. shift = 0.000 A for O004        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  12   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  12 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21524     0.06975     0.000    OSF
-     2 24014.21094     9.99999     0.001   EXTI    
+     1     3.20590     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  13   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  13 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21524     0.06975     0.000    OSF
-     2 24014.25781     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  14   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  14 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21524     0.06975     0.000    OSF
-     2 24014.30469     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
-
-
- Least-squares cycle  15   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  15 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21524     0.06975     0.000    OSF
-     2 24014.35156     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  16   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  16 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21524     0.06975     0.000    OSF
-     2 24014.39844     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  17   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  17 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21524     0.06975     0.000    OSF
-     2 24014.44531     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  18   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  18 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21524     0.06975     0.000    OSF
-     2 24014.49219     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  19   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  19 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21524     0.06975     0.000    OSF
-     2 24014.53906     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  20   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  20 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21525     0.06975     0.000    OSF
-     2 24014.58594     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  21   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  21 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21525     0.06975     0.000    OSF
-     2 24014.63281     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  22   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  22 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21525     0.06975     0.000    OSF
-     2 24014.67969     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  23   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  23 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21525     0.06975     0.000    OSF
-     2 24014.72656     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  24   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  24 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21525     0.06975     0.000    OSF
-     2 24014.77344     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  25   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  25 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21525     0.06975     0.000    OSF
-     2 24014.82031     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  26   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  26 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21525     0.06975     0.000    OSF
-     2 24014.86719     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  27   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  27 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21526     0.06975     0.000    OSF
-     2 24014.91406     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
 
  Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
 
 
- Least-squares cycle  28   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+ Least-squares cycle   7   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
- wR2 =  0.4823 before cycle  28 for     877 data and     22 /     22 parameters
+ wR2 =  0.6133 before cycle   7 for   15192 data and     21 /     21 parameters
 
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21526     0.06975     0.000    OSF
-     2 24014.96094     9.99999     0.001   EXTI    
+     1     3.20589     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
+
+ Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle   8   Maximum vector length =  623   Memory required =     15 /    932 /    51982
+
+ wR2 =  0.6133 before cycle   8 for   15192 data and     21 /     21 parameters
+
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.20589     0.07904     0.000    OSF
+
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
+
+ Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle   9   Maximum vector length =  623   Memory required =     15 /    932 /    51982
+
+ wR2 =  0.6133 before cycle   9 for   15192 data and     21 /     21 parameters
+
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.20589     0.07904     0.000    OSF
+
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
 
  Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
 
 
- Least-squares cycle  29   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+ Least-squares cycle  10   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
- wR2 =  0.4823 before cycle  29 for     877 data and     22 /     22 parameters
+ wR2 =  0.6133 before cycle  10 for   15192 data and     21 /     21 parameters
 
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21526     0.06975     0.000    OSF
-     2 24015.00781     9.99999     0.001   EXTI    
+     1     3.20589     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
 
  Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
 
 
- Least-squares cycle  30   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+ Least-squares cycle  11   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
- wR2 =  0.4823 before cycle  30 for     877 data and     22 /     22 parameters
+ wR2 =  0.6133 before cycle  11 for   15192 data and     21 /     21 parameters
 
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21526     0.06975     0.000    OSF
-     2 24015.05469     9.99999     0.001   EXTI    
+     1     3.20589     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
+
+ Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle  12   Maximum vector length =  623   Memory required =     15 /    932 /    51982
+
+ wR2 =  0.6133 before cycle  12 for   15192 data and     21 /     21 parameters
+
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.20590     0.07904     0.000    OSF
+
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
 
  Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
 
 
- Least-squares cycle  31   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+ Least-squares cycle  13   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
- wR2 =  0.4823 before cycle  31 for     877 data and     22 /     22 parameters
+ wR2 =  0.6133 before cycle  13 for   15192 data and     21 /     21 parameters
 
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21526     0.06975     0.000    OSF
-     2 24015.10156     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  32   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  32 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21526     0.06975     0.000    OSF
-     2 24015.14844     9.99999     0.001   EXTI    
+     1     3.20589     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
 
  Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
 
 
- Least-squares cycle  33   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+ Least-squares cycle  14   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
- wR2 =  0.4823 before cycle  33 for     877 data and     22 /     22 parameters
+ wR2 =  0.6133 before cycle  14 for   15192 data and     21 /     21 parameters
 
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21526     0.06975     0.000    OSF
-     2 24015.19531     9.99999     0.001   EXTI    
+     1     3.20589     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
 
  Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
 
 
- Least-squares cycle  34   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+ Least-squares cycle  15   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
- wR2 =  0.4823 before cycle  34 for     877 data and     22 /     22 parameters
+ wR2 =  0.6133 before cycle  15 for   15192 data and     21 /     21 parameters
 
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21526     0.06975     0.000    OSF
-     2 24015.24219     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  35   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  35 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21526     0.06975     0.000    OSF
-     2 24015.28906     9.99999     0.001   EXTI    
+     1     3.20589     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle  36   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  36 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21526     0.06975     0.000    OSF
-     2 24015.33594     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  37   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  37 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21527     0.06975     0.000    OSF
-     2 24015.38281     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  38   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  38 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21527     0.06975     0.000    OSF
-     2 24015.42969     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  39   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  39 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21527     0.06975     0.000    OSF
-     2 24015.47656     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle  40   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  40 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21527     0.06975     0.000    OSF
-     2 24015.52344     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  41   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  41 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21527     0.06975     0.000    OSF
-     2 24015.57031     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  42   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  42 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21527     0.06975     0.000    OSF
-     2 24015.61719     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  43   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  43 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21527     0.06975     0.000    OSF
-     2 24015.66406     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  44   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  44 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21527     0.06975     0.000    OSF
-     2 24015.71094     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  45   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  45 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21528     0.06975     0.000    OSF
-     2 24015.75781     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  46   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  46 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21528     0.06975     0.000    OSF
-     2 24015.80469     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for O002        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  47   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  47 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21528     0.06975     0.000    OSF
-     2 24015.85156     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  48   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  48 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21528     0.06975     0.000    OSF
-     2 24015.89844     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  49   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  49 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21528     0.06975     0.000    OSF
-     2 24015.94531     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
 
  Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
 
 
- Least-squares cycle  50   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+ Least-squares cycle  16   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
- wR2 =  0.4823 before cycle  50 for     877 data and     22 /     22 parameters
+ wR2 =  0.6133 before cycle  16 for   15192 data and     21 /     21 parameters
 
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21528     0.06975     0.000    OSF
-     2 24015.99219     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle  51   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  51 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21528     0.06975     0.000    OSF
-     2 24016.03906     9.99999     0.001   EXTI    
+     1     3.20590     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
+
+ Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
+
+
+ Least-squares cycle  17   Maximum vector length =  623   Memory required =     15 /    932 /    51982
+
+ wR2 =  0.6133 before cycle  17 for   15192 data and     21 /     21 parameters
+
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
+
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+
+
+     N      value        esd    shift/esd  parameter
+
+     1     3.20589     0.07904     0.000    OSF
+
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
 
  Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
 
 
- Least-squares cycle  52   Maximum vector length =  623   Memory required =     15 /    933 /    53252
+ Least-squares cycle  18   Maximum vector length =  623   Memory required =     15 /    932 /    51982
 
- wR2 =  0.4823 before cycle  52 for     877 data and     22 /     22 parameters
+ wR2 =  0.6133 before cycle  18 for   15192 data and     21 /     21 parameters
 
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21529     0.06975     0.000    OSF
-     2 24016.08594     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  53   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  53 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
 
      N      value        esd    shift/esd  parameter
 
-     1     4.21529     0.06975     0.000    OSF
-     2 24016.13281     9.99999     0.001   EXTI    
+     1     3.20589     0.07904     0.000    OSF
 
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle  54   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  54 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21529     0.06975     0.000    OSF
-     2 24016.17969     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle  55   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  55 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21529     0.06975     0.000    OSF
-     2 24016.22656     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  56   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  56 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21529     0.06975     0.000    OSF
-     2 24016.27344     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  57   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  57 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21529     0.06975     0.000    OSF
-     2 24016.32031     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
-
-
- Least-squares cycle  58   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  58 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21529     0.06975     0.000    OSF
-     2 24016.36719     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  59   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  59 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21529     0.06975     0.000    OSF
-     2 24016.41406     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  60   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  60 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21529     0.06975     0.000    OSF
-     2 24016.46094     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
+ Mean shift/esd =   0.000  Maximum =     0.000 for   y  Si01     
 
  Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  61   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  61 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21530     0.06975     0.000    OSF
-     2 24016.50781     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle  62   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  62 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21530     0.06975     0.000    OSF
-     2 24016.55469     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  63   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  63 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21530     0.06975     0.000    OSF
-     2 24016.60156     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  64   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  64 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21530     0.06975     0.000    OSF
-     2 24016.64844     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  65   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  65 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21530     0.06975     0.000    OSF
-     2 24016.69531     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  66   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  66 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21530     0.06975     0.000    OSF
-     2 24016.74219     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  67   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  67 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21530     0.06975     0.000    OSF
-     2 24016.78906     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
-
-
- Least-squares cycle  68   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  68 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21530     0.06975     0.000    OSF
-     2 24016.83594     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  69   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  69 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21531     0.06975     0.000    OSF
-     2 24016.88281     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
-
-
- Least-squares cycle  70   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  70 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21531     0.06975     0.000    OSF
-     2 24016.92969     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
-
-
- Least-squares cycle  71   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  71 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21531     0.06975     0.000    OSF
-     2 24016.97656     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle  72   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  72 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21531     0.06975     0.000    OSF
-     2 24017.02344     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  73   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  73 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21531     0.06975     0.000    OSF
-     2 24017.07031     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  74   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  74 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21531     0.06975     0.000    OSF
-     2 24017.11719     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  75   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  75 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21531     0.06975     0.000    OSF
-     2 24017.16406     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  76   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  76 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21531     0.06975     0.000    OSF
-     2 24017.21094     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  77   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  77 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21531     0.06975     0.000    OSF
-     2 24017.25781     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  78   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  78 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21532     0.06975     0.000    OSF
-     2 24017.30469     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  79   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  79 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21532     0.06975     0.000    OSF
-     2 24017.35156     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  80   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  80 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21532     0.06975     0.000    OSF
-     2 24017.39844     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  81   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  81 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21532     0.06975     0.000    OSF
-     2 24017.44531     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle  82   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  82 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21532     0.06975     0.000    OSF
-     2 24017.49219     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  83   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  83 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21532     0.06975     0.000    OSF
-     2 24017.53906     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  84   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  84 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21532     0.06975     0.000    OSF
-     2 24017.58594     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
-
-
- Least-squares cycle  85   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  85 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21533     0.06975     0.000    OSF
-     2 24017.63281     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  86   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  86 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21533     0.06975     0.000    OSF
-     2 24017.67969     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  87   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  87 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21533     0.06975     0.000    OSF
-     2 24017.72656     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  88   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  88 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21533     0.06975     0.000    OSF
-     2 24017.77344     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  89   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  89 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21533     0.06975     0.000    OSF
-     2 24017.82031     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
-
-
- Least-squares cycle  90   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  90 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21533     0.06975     0.000    OSF
-     2 24017.86719     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  91   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  91 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21533     0.06975     0.000    OSF
-     2 24017.91406     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  92   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  92 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21533     0.06975     0.000    OSF
-     2 24017.96094     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
-
-
- Least-squares cycle  93   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  93 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21533     0.06975     0.000    OSF
-     2 24018.00781     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  94   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  94 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21534     0.06975     0.000    OSF
-     2 24018.05469     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  95   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  95 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21534     0.06975     0.000    OSF
-     2 24018.10156     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O003     
-
-
- Least-squares cycle  96   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  96 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21534     0.06975     0.000    OSF
-     2 24018.14844     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
-
-
- Least-squares cycle  97   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  97 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21534     0.06975     0.000    OSF
-     2 24018.19531     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O004     
-
-
- Least-squares cycle  98   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  98 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21534     0.06975     0.000    OSF
-     2 24018.24219     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle  99   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle  99 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21534     0.06975     0.000    OSF
-     2 24018.28906     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for Si01     
-
-
- Least-squares cycle 100   Maximum vector length =  623   Memory required =     15 /    933 /    53252
-
- wR2 =  0.4823 before cycle 100 for     877 data and     22 /     22 parameters
-
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
-
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
-
-
-     N      value        esd    shift/esd  parameter
-
-     1     4.21534     0.06975     0.000    OSF
-     2 24018.33594     9.99999     0.001   EXTI    
-
- Mean shift/esd =   0.000  Maximum =     0.001 for EXTI          
-
- Max. shift = 0.000 A for Si01        Max. dU = 0.000 for O002     
 
  No correlation matrix elements larger than  0.500
 
@@ -2067,32 +484,32 @@
 
  ATOM           x        y        z         sof        U11      U22      U33      U23      U13      U12       Ueq
 
- Si01        0.50000  0.86959  0.68361    0.50000    0.01573  0.00814  0.00899  0.00111  0.00000  0.00000   0.01095
-   0.00409   0.00000  0.00024  0.00023    0.00000    0.00124  0.00107  0.00104  0.00080  0.00000  0.00000   0.00068
+ Si01        0.50000  0.86984  0.68367    0.50000    0.00834  0.00307  0.00470  0.00142  0.00000  0.00000   0.00537
+   0.00590   0.00000  0.00034  0.00034    0.00000    0.00175  0.00155  0.00156  0.00118  0.00000  0.00000   0.00098
 
- O002        0.50000  1.00000  0.72050    0.25000    0.03880  0.01557  0.03048  0.00000  0.00000  0.00000   0.02828
-   0.00973   0.00000  0.00000  0.00082    0.00000    0.00462  0.00304  0.00395  0.00000  0.00000  0.00000   0.00172
+ O002        0.50000  1.00000  0.71971    0.25000    0.03092  0.01017  0.02162  0.00000  0.00000  0.00000   0.02091
+   0.01286   0.00000  0.00000  0.00108    0.00000    0.00620  0.00422  0.00509  0.00000  0.00000  0.00000   0.00236
 
- O003        0.50000  0.79539  0.79539    0.25000    0.03710  0.01461  0.01461  0.00722  0.00000  0.00000   0.02210
-   0.01095   0.00000  0.00046  0.00046    0.00000    0.00402  0.00179  0.00179  0.00227  0.00000  0.00000   0.00150
+ O003        0.50000  0.79532  0.79532    0.25000    0.02795  0.00697  0.00697  0.00595  0.00000  0.00000   0.01396
+   0.01441   0.00000  0.00060  0.00060    0.00000    0.00530  0.00234  0.00234  0.00297  0.00000  0.00000   0.00200
 
- O004        0.39013  0.84054  0.60987    0.50000    0.02552  0.03710  0.02552  0.00479 -0.01039 -0.00479   0.02938
-   0.00713   0.00041  0.00060  0.00041    0.00000    0.00167  0.00310  0.00167  0.00183  0.00214  0.00183   0.00137
+ O004        0.38985  0.84121  0.61015    0.50000    0.01900  0.03044  0.01900  0.00342 -0.01064 -0.00342   0.02282
+   0.01014   0.00058  0.00085  0.00058    0.00000    0.00243  0.00441  0.00243  0.00252  0.00301  0.00252   0.00193
 
 
 
  Final Structure Factor Calculation for  integrate_sigma_x_s_orient_hklf4_a.res in Pm-3m                            
 
- Total number of l.s. parameters =    22  Maximum vector length =  623   Memory required =     15 /    911 /    25543
+ Total number of l.s. parameters =    21  Maximum vector length =  623   Memory required =     15 /    911 /    25543
 
- wR2 =  0.4823 before cycle 101 for     877 data and      0 /     22 parameters
+ wR2 =  0.6133 before cycle  19 for   15192 data and      0 /     21 parameters
 
- GooF = S =     1.410;     Restrained GooF =      1.410 for       0 restraints
+ GooF = S =     1.086;     Restrained GooF =      1.086 for       0 restraints
 
- Weight = 1 / [ sigma^2(Fo^2) + ( 0.1922 * P )^2 +   0.50 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
+ Weight = 1 / [ sigma^2(Fo^2) + ( 0.2989 * P )^2 +   2.88 * P ]   where  P = ( Max ( Fo^2, 0 ) + 2 * Fc^2 ) / 3
 
- wR2 = 0.4823, GooF = S = 1.410, Restrained GooF = 1.410 for all data
- R1 = 0.2142 for 862 Fo > 4sig(Fo) and 0.2167 for all 877 data
+ wR2 = 0.6133, GooF = S = 1.086, Restrained GooF = 1.086 for all data
+ R1 = 0.2724 for 12711 Fo > 4sig(Fo) and 0.2834 for all 15192 data
 
  Occupancy sum of asymmetric unit =     1.50 for non-hydrogen and     0.00 for H and D atoms
 
@@ -2100,10 +517,10 @@
 
  Principal mean square atomic displacements U
 
-   0.0157   0.0097   0.0074   Si01  
-   0.0388   0.0305   0.0156   O002  
-   0.0371   0.0218   0.0074   O003  
-   0.0433   0.0297   0.0151   O004  
+   0.0083   0.0055   0.0022   Si01  
+   0.0309   0.0216   0.0102   O002  
+   0.0279   0.0129   0.0010   O003  
+   0.0349   0.0252   0.0084   O004  
 
      0  atoms may be split and     0  atoms NPD
 
@@ -2112,27 +529,30 @@
  Analysis of variance for reflections employed in refinement      K = Mean[Fo^2] / Mean[Fc^2]  for group
 
 
- Fc/Fc(max)       0.000    0.006    0.012    0.018    0.025    0.032    0.040    0.051    0.072    0.139    1.000
+ Fc/Fc(max)       0.000    0.007    0.014    0.022    0.029    0.038    0.046    0.055    0.073    0.117    1.000
 
- Number in group        96.      83.      93.      85.      84.      89.      86.      87.      88.      86.
+ Number in group      1519.    1632.    1526.    1433.    1579.    1490.    1451.    1576.    1487.    1499.
 
-            GooF      2.167    1.686    1.287    1.578    1.292    0.745    0.658    0.721    0.885    2.016
+            GooF      1.428    1.200    0.960    0.989    0.995    1.026    0.987    0.957    1.073    1.144
 
-             K       37.288    7.082    2.604    3.738    1.755    1.265    1.061    0.902    0.908    1.107
-
-
- Resolution(A)    0.60     0.63     0.65     0.69     0.73     0.78     0.85     0.94     1.10     1.44     inf
-
- Number in group        90.      87.      86.      92.      84.      89.      86.      88.      87.      88.
-
-            GooF      0.878    0.975    1.182    1.195    1.159    1.248    1.424    1.744    1.170    2.448
-
-             K        1.062    1.260    1.189    0.966    0.969    1.002    1.010    0.884    1.075    1.140
-
-             R1       0.235    0.262    0.247    0.214    0.186    0.178    0.222    0.253    0.115    0.260
+             K       71.932    8.826    3.278    2.515    1.782    1.574    1.363    1.195    1.196    0.784
 
 
- Recommended weighting scheme:  WGHT    0.1922    0.4975
+ Resolution(A)    0.60     0.63     0.66     0.69     0.73     0.77     0.83     0.91     1.04     1.31     inf
+
+ Number in group      1519.    1526.    1579.    1474.    1523.    1583.    1457.    1508.    1493.    1530.
+
+            GooF      0.632    0.727    0.787    0.870    0.874    0.972    1.105    1.387    1.426    1.626
+
+             K        1.049    1.304    1.182    1.088    1.110    1.206    1.287    1.430    1.106    0.800
+
+             R1       0.340    0.380    0.319    0.311    0.275    0.264    0.296    0.325    0.237    0.262
+
+
+ ** Extinction (EXTI) or solvent water (SWAT) correction may be required **
+
+ Recommended weighting scheme:  WGHT    0.2000    0.0000
+ [Weight parameters refined to    0.3010        2.87  but appear excessive]
 
 
  Most Disagreeable Reflections (* if suppressed or used for Rfree).
@@ -2141,89 +561,89 @@
 
      h   k   l          Fo^2          Fc^2    Error/esd  Fc/Fc(max)  Resolution(A)
 
-     2   2   2        209.24          1.24       6.89       0.021       3.44
-     4   4   4         70.29          1.91       6.10       0.026       1.72
-     0   0  11         33.08        291.19       4.52       0.326       1.08
-     0   0  12         35.63          0.28       4.29       0.010       0.99
-     0   0   3        453.54       1493.75       3.19       0.739       3.97
-     0   0   6        514.71       1598.26       3.09       0.764       1.98
-     3   3   3        650.25        267.17       3.07       0.313       2.29
-     0   6   6        171.17         63.15       2.91       0.152       1.40
-     1   2   2       1073.38        469.66       2.88       0.414       3.97
-     0   2   4        251.60        121.43       2.81       0.211       2.66
-     2   3   3       1383.55        654.69       2.80       0.489       2.54
-     2   2   6        120.12         57.67       2.70       0.145       1.80
-     0   2   3        979.35        490.40       2.65       0.423       3.30
-     7   7  11          3.85          0.00       2.60       0.000       0.80
-     0   3   4          3.18          0.05       2.58       0.004       2.38
-     0   0   2        452.09        142.66       2.56       0.228       5.95
-     0   1   1        454.79       1452.98       2.52       0.729       8.42
-     2   5  10          3.78          0.09       2.48       0.006       1.05
-     5   7   8          2.44          0.01       2.41       0.002       1.01
-     1   6  13          2.76          0.01       2.41       0.002       0.83
-     6   7   9          2.60          0.04       2.37       0.004       0.92
-     3   7   8          4.03          0.50       2.37       0.013       1.08
-     0   1   4       1388.75        710.81       2.34       0.510       2.89
-     1   1   3       1835.46        963.90       2.34       0.594       3.59
-     0   7   7         40.97          4.76       2.28       0.042       1.20
-     0   7  13          2.69          0.00       2.26       0.001       0.81
-     0   8   9          3.64          0.14       2.23       0.007       0.99
-     1   4   7          5.96          0.00       2.18       0.000       1.47
-     2   2  13          1.82          0.00       2.17       0.001       0.90
-     0   0  13          6.62          0.91       2.16       0.018       0.92
-     0   0  17         13.24         32.08       2.12       0.108       0.70
-     1   3  13          2.30          0.03       2.12       0.003       0.89
-     2   4  12          5.17          0.98       2.06       0.019       0.93
-     2   6  11          2.14          0.02       2.06       0.003       0.94
-     1   2   3        544.64        322.03       2.04       0.343       3.18
-     4   6   8          2.21          0.00       2.03       0.001       1.11
-     4   8   8          5.19          0.01       2.03       0.002       0.99
-     1   6  10          2.95          0.09       2.01       0.006       1.02
-     1   2  11          3.08          0.39       2.00       0.012       1.06
-     2   6  13          1.89          0.09       1.98       0.006       0.82
-     9  11  11          2.07          0.04       1.98       0.004       0.66
-     3   6  14          1.80          0.11       1.97       0.006       0.77
-     2  10  15          2.01          0.04       1.95       0.004       0.66
-     1   8  10          2.06          0.14       1.94       0.007       0.93
-     6   7  13          2.02          0.10       1.91       0.006       0.75
-     1   1  12          3.71          0.14       1.91       0.007       0.99
-     0   2  11          4.09          0.93       1.89       0.018       1.07
-     3   6  10          2.04          0.17       1.89       0.008       0.99
-     3  11  12          1.73          0.09       1.88       0.006       0.72
-     2   3   4          4.45          0.52       1.88       0.014       2.21
+    -7   6   7        113.54          0.00       6.56       0.001       1.03
+    -1  -3   6        105.87          0.08       6.42       0.005       1.76
+     1   3  -6        102.14          0.08       6.35       0.005       1.76
+     2  -7  -1        252.85         14.76       6.28       0.074       1.62
+     4  -5 -10        184.36         13.47       5.94       0.070       1.00
+   -10  -6  -2        113.11          3.21       5.94       0.034       1.01
+    -7  -2   1        197.50         14.76       5.79       0.074       1.62
+     4   0 -10         83.81          1.32       5.73       0.022       1.11
+    -1   8  -7         87.61          1.44       5.67       0.023       1.12
+    -2   2   2        346.47          1.42       5.63       0.023       3.44
+    -1   6  -1         74.41          0.44       5.61       0.013       1.93
+    -4 -12   4         64.06          0.65       5.52       0.015       0.90
+     7   6  -7         79.16          0.00       5.46       0.001       1.03
+     4   5  -2        104.49          7.43       5.43       0.052       1.78
+    -4   6   9         84.59          1.85       5.40       0.026       1.03
+    -5  -4  -2        105.14          7.43       5.30       0.052       1.78
+     6   4 -15         87.00          6.11       5.22       0.047       0.72
+     8   2  -7         89.94          4.29       5.17       0.040       1.10
+    -2  -2   2        350.04          1.42       5.13       0.023       3.44
+     4  -4  -4        106.20          1.01       5.10       0.019       1.72
+   -12  -1   5         73.28          4.77       5.10       0.042       0.91
+     6   1 -11         64.75          3.16       5.09       0.034       0.95
+     2   2  -2        373.56          1.42       5.05       0.023       3.44
+     2   7  -2         49.25          0.27       5.03       0.010       1.58
+    -4   4   4        129.36          1.01       5.02       0.019       1.72
+    -5  -4  10        113.30         13.47       4.97       0.070       1.00
+     8  -8  -5         41.46          0.03       4.94       0.003       0.96
+     1  12  -1         40.47          0.05       4.92       0.004       0.99
+    -8  -7  -2         65.87          4.29       4.90       0.040       1.10
+    -1  -7   8         49.96          1.44       4.89       0.023       1.12
+    -2  12   4         44.72          1.14       4.86       0.020       0.93
+     6   4  -6         68.72          3.41       4.81       0.035       1.27
+     7   2  -1        116.22         14.76       4.76       0.074       1.62
+    -2  -7   2         38.90          0.27       4.76       0.010       1.58
+    -6  -1  11         52.62          3.16       4.70       0.034       0.95
+     1   7  -4         39.97          0.01       4.65       0.002       1.47
+     0  -7   7        127.40          4.92       4.63       0.042       1.20
+    -4   7   8        115.03         15.82       4.61       0.076       1.05
+    -7   2   2         35.33          0.27       4.60       0.010       1.58
+    -4   3  11         52.20          3.46       4.58       0.036       0.99
+     4   4  -4        136.17          1.01       4.57       0.019       1.72
+     2  -9   3         57.98          5.21       4.54       0.044       1.23
+     3   4  -2         71.52          0.42       4.53       0.012       2.21
+   -11  -3   4         49.05          3.46       4.52       0.036       0.99
+     0   1  -1         42.45       1470.67       4.35       0.734       8.42
+    -6  -8   6         43.44          0.36       4.35       0.012       1.02
+     0  -1   1         47.12       1470.67       4.33       0.734       8.42
+     3 -11  -1         87.33         13.15       4.33       0.069       1.04
+    -3  -4   2         53.99          0.42       4.33       0.012       2.21
+   -10   0   2         63.18          7.13       4.32       0.051       1.17
 
 
 
  Selected torsion angles
 
    180.00 ( 0.00)  O003 - Si01 - O002 - Si01_$1
-    60.15 ( 0.30)  O004_$4 - Si01 - O002 - Si01_$1
-   -60.15 ( 0.29)  O004 - Si01 - O002 - Si01_$1
-   -59.40 ( 0.32)  O004_$4 - Si01 - O003 - Si01_$2
-    59.40 ( 0.32)  O004 - Si01 - O003 - Si01_$2
-   180.00 ( 0.00)  O002 - Si01 - O003 - Si01_$2
-   175.31 ( 0.86)  O003 - Si01 - O004 - Si01_$3
-   -65.17 ( 1.16)  O004_$4 - Si01 - O004 - Si01_$3
-    56.54 ( 1.06)  O002 - Si01 - O004 - Si01_$3
+   -60.15 ( 0.42)  O004 - Si01 - O002 - Si01_$1
+    60.15 ( 0.42)  O004_$4 - Si01 - O002 - Si01_$1
+   180.00 ( 0.01)  O002 - Si01 - O003 - Si01_$2
+    59.60 ( 0.45)  O004 - Si01 - O003 - Si01_$2
+   -59.60 ( 0.45)  O004_$4 - Si01 - O003 - Si01_$2
+   176.13 ( 1.19)  O003 - Si01 - O004 - Si01_$3
+    57.04 ( 1.48)  O002 - Si01 - O004 - Si01_$3
+   -64.23 ( 1.65)  O004_$4 - Si01 - O004 - Si01_$3
 
- R1 =  0.2167 for    877 unique reflections after merging for Fourier
+ R1 =  0.2574 for    877 unique reflections after merging for Fourier
 
 
  Electron density synthesis with coefficients Fo-Fc
 
- Highest peak    0.45  at  0.0000  0.9268  1.0000  [  6.08 A from O002 ]
- Deepest hole   -0.86  at  0.5000  0.5000  0.5000  [  4.46 A from O004 ]
+ Highest peak    0.57  at  0.0000  0.0788  1.0000  [  6.03 A from O002 ]
+ Deepest hole   -0.98  at  0.3169  0.5000  0.5000  [  2.64 A from O004 ]
 
 
  Fourier peaks appended to .res file
 
               x       y       z       sof     U      Peak   Distances to nearest atoms (including eq.)
 
- Q1    1   0.9268  1.0000  1.0000   0.12500  0.05    0.45   6.08 O002  6.14 O003  6.28 O004  6.44 O002
+ Q1    1   0.0788  1.0000  1.0000   0.12500  0.05    0.57   6.03 O002  6.09 O003  6.23 O004  6.42 O002
 
  Shortest distances between peaks (including symmetry equivalents)
 
-      1   1  1.23      1   1  1.74
+      1   1  1.33      1   1  1.88
 
 
  Time profile in seconds
@@ -2241,22 +661,22 @@
       0.00: Generate SIMU restraints
       0.00: Generate ISOR restraints
       0.00: Analyse electron density
-      0.01: Analyse other restraints etc.
-      0.03: Read intensity data, sort/merge etc.
+      0.02: Analyse other restraints etc.
+      0.02: Read intensity data, sort/merge etc.
       0.00: Set up constraints
       0.00: OSF, H-atoms from difference map
-      0.15: Set up l.s. refinement
+      0.00: Set up l.s. refinement
       0.00: Generate idealized H-atoms
-      0.37: Structure factors and derivatives
+      0.09: Structure factors and derivatives
       0.00: Sum l.s. matrices
       0.00: Generate and apply antibumping restraints
-      0.46: Apply other restraints
-      0.00: Solve l.s. equations
+      0.01: Apply other restraints
+      0.01: Solve l.s. equations
       0.00: Generate HTAB table
-      0.58: Other dependent quantities, CIF, tables
-      0.00: Analysis of variance
+      0.07: Other dependent quantities, CIF, tables
+      0.02: Analysis of variance
       0.00: Merge reflections for Fourier and .fcf
-      0.00: Fourier summations
+      0.01: Fourier summations
       0.01: Peaksearch
       0.00: Analyse peaklist
 
@@ -2267,5 +687,5 @@
    SHELXL", Acta Cryst., C71, 3-8 (Open Access) if SHELXL proves useful.
 
  +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- +  integrate_sig finished at 12:54:22   Total elapsed time:      1.62 secs  +
+ +  integrate_sig finished at 16:33:12   Total elapsed time:      0.31 secs  +
  +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

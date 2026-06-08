@@ -10,20 +10,24 @@ set -euo pipefail
 # Hardcoded list of stream files
 #######################################
 STREAMS=(
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/runs_20251201_110132/only_done_events_oridyn_sigma_dyn_alpha0p1_wzone0p25_clip10.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300-VIII_cut_20-0_3_sigma_dyn.stream"
 )
-
+#COF300
+#--model=offset -y 4/m --iterations=25 --polarisation=none --min-measurements=2 --no-Bscale -j 8
 #######################################
 # Defaults
 #######################################
 
-THREADS=16
+THREADS=24
 SYM="mmm"
-ITERATIONS=10
+ITERATIONS=25
+MIN_MEASUREMENTS=2
+PUSH_RES=inf
 
+# LOWRES & HIGHRES only used for qc report and is not a resolution cutoff & Wilson scaling can be unstable for some datasets, so it's optional
 LOWRES=20.0
 HIGHRES=0.4
-WILSON="--wilson"   # set to "" to skip
+WILSON=""   # set to "" to skip
 
 #######################################
 # Helpers
@@ -96,12 +100,10 @@ process_stream() (
     -o "$CRYSTFEL_HKL"
     -y "$SYM"
     --polarisation=none
-    # --min-measurements=2
-    --min-measurements=4
+    --min-measurements="$MIN_MEASUREMENTS"
     --max-adu=inf
     --min-res=inf
-    # --push-res=inf
-    --push-res=3
+    --push-res="$PUSH_RES"
     --no-Bscale
     --no-pr
     --iterations="$ITERATIONS"
