@@ -252,7 +252,14 @@ systematic_row_risk_raw
 
 ### Normalization and Final Score
 
-Reflection terms are normalized within resolution shells:
+The default normalization is global min-max scaling over the whole score table:
+
+```text
+term_norm = (term_raw - global_min(term_raw)) / (global_max(term_raw) - global_min(term_raw))
+```
+
+This mode does not use resolution shells and does not clip values. It is meant
+to keep all score components on a common `0..1` scale before weighting:
 
 ```text
 self_risk_norm
@@ -262,19 +269,21 @@ systematic_row_risk_norm
 frame_axis_risk_norm
 ```
 
-The default method is robust median/MAD normalization clipped at
-`--normalization-clip` internally. CLI-exposed methods are:
+CLI-exposed methods are:
 
 ```text
+global_minmax
 median_mad
 percentile
 rank
 none
 ```
 
-Use `--frame-normalization` to override the normalization method for
-`frame_axis_risk_norm` only. This is useful when the raw frame-axis risk spans
-many orders of magnitude and median/MAD normalization becomes almost binary.
+The older `median_mad`, `percentile`, and `rank` methods keep their original
+resolution-shell behavior and use `--normalization-clip`. Use
+`--frame-normalization` to override the normalization method for
+`frame_axis_risk_norm` only; the default `inherit` uses the same method as
+reflection terms.
 
 The final score is:
 
@@ -288,6 +297,15 @@ S_dyn_geom =
   + w_interaction * self_risk_norm * graph_crowding_norm
 ```
 
+By default the weighted sum is divided by the active positive weight sum,
+including the interaction weight:
+
+```text
+S_dyn_geom = S_dyn_geom_weighted_sum / S_dyn_geom_weight_denominator
+```
+
+Add `--no-score-rescale-by-weights` to keep the unscaled weighted sum.
+
 Each contribution is exported:
 
 ```text
@@ -297,16 +315,29 @@ S_zone_component
 S_row_component
 S_frame_component
 S_interaction_component
+S_dyn_geom_weighted_sum
+S_dyn_geom_weight_denominator
 S_dyn_geom
 ```
 
 Sigma conversion:
 
 ```text
-sigma_dyn_rel = exp(0.5 * alpha * S_dyn_geom)
+if sigma_tail_quantile == 0:
+    sigma_tail_score = max(S_dyn_geom, 0)
+else:
+    threshold = quantile(S_dyn_geom, sigma_tail_quantile)
+    sigma_tail_score = max(S_dyn_geom - threshold, 0) / (max(S_dyn_geom) - threshold)
+
+linear:      sigma_dyn_rel = 1 + alpha * sigma_tail_score
+exponential: sigma_dyn_rel = exp(alpha * sigma_tail_score)
 sigma_dyn = sigma * sigma_dyn_rel
 weight_dyn = 1 / sigma_dyn^2
 ```
+
+Use `--sigma-tail-quantile 0` for no percentile gate. Positive values inflate
+only the upper score tail; for example `--sigma-tail-quantile 0.9` leaves the
+lower 90% at `sigma_dyn_rel = 1`.
 
 ## 4. Project Structure
 
@@ -412,10 +443,11 @@ Important options:
 --neighbor-excitation-min, --neighbor-hkl-radius
 --max-neighbors-per-reflection, --max-excited-nodes-per-frame
 --row-direction-limit, --row-max-steps
---normalization median_mad|percentile|rank|none, --frame-normalization inherit|median_mad|percentile|rank|none
+--normalization global_minmax|median_mad|percentile|rank|none, --frame-normalization inherit|global_minmax|median_mad|percentile|rank|none
 --normalization-clip
 --resolution-shells
---alpha
+--alpha, --sigma-map exponential|linear, --sigma-tail-quantile
+--no-score-rescale-by-weights
 --w-self, --w-graph, --w-zone, --w-row, --w-frame, --w-interaction
 --export-candidates
 --workers, --chunk-size, --seed
@@ -751,11 +783,18 @@ bash examples/run_trace_hkls.sh
 ### Recommended first-pass settings
 
 For visual exploration of a small HKL set, rank normalization is usually easier
-to interpret than median/MAD normalization:
+to interpret than median/MAD normalization, while the default global min-max
+path is cleaner for absolute geometry-risk scoring:
 
 ```bash
 --normalization rank --frame-normalization rank
 ```
 
-For final batch scoring, use the normalization strategy you want to test during
-merging and refinement.
+For final batch scoring, start with the default:
+
+```bash
+--normalization global_minmax --frame-normalization inherit --sigma-tail-quantile 0
+```
+
+Then compare `--sigma-map linear` and `--sigma-map exponential` during merging
+and refinement.

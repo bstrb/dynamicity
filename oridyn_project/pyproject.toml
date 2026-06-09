@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "oridyn-stream-parallel"
+name = "oridyn-project"
 version = "0.1.0"
 description = "Geometry-only orientation-aware dynamical-risk scoring for CrystFEL streams."
 readme = "README.md"

@@ -59,7 +59,14 @@ def build_parser() -> argparse.ArgumentParser:
     reweight.add_argument("--scores", required=True, help="reflection_scores.csv or hkl_frame_trajectories.csv")
     reweight.add_argument("--output", required=True)
     reweight.add_argument("--weights", help="JSON file with one flat weight dict or named weight presets.")
-    reweight.add_argument("--alpha", type=float, default=0.1)
+    reweight.add_argument("--alpha", type=float, default=1.0)
+    reweight.add_argument("--sigma-map", choices=["exponential", "linear"], default="exponential")
+    reweight.add_argument(
+        "--sigma-tail-quantile",
+        type=float,
+        default=0.0,
+        help="Use 0 for no percentile gate; otherwise inflate only scores above this quantile.",
+    )
     reweight.add_argument("--preset-name", default="cli")
     reweight.add_argument("--w-self", type=float, default=1.0)
     reweight.add_argument("--w-graph", type=float, default=0.50)
@@ -71,6 +78,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-overwrite-single",
         action="store_true",
         help="For a single preset, do not overwrite canonical S_dyn_geom/sigma_dyn_rel columns.",
+    )
+    reweight.add_argument(
+        "--no-score-rescale-by-weights",
+        dest="score_rescale_by_weights",
+        action="store_false",
+        default=True,
+        help="Do not divide recombined scores by the active weight sum.",
     )
 
     plot = sub.add_parser("plot", help="Create standard plots from existing score tables.")
@@ -132,16 +146,31 @@ def _add_common_config(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-excited-nodes-per-frame", type=int, default=2000)
     parser.add_argument("--row-direction-limit", type=int, default=5)
     parser.add_argument("--row-max-steps", type=int, default=12)
-    parser.add_argument("--normalization", choices=["median_mad", "percentile", "rank", "none"], default="median_mad")
+    normalization_choices = ["global_minmax", "median_mad", "percentile", "rank", "none"]
+    parser.add_argument("--normalization", choices=normalization_choices, default="global_minmax")
     parser.add_argument(
         "--frame-normalization",
-        choices=["inherit", "median_mad", "percentile", "rank", "none"],
-        default="rank",
+        choices=["inherit", *normalization_choices],
+        default="inherit",
         help="Frame-axis normalization only; 'inherit' uses --normalization.",
     )
     parser.add_argument("--normalization-clip", type=float, default=10.0)
     parser.add_argument("--resolution-shells", type=int, default=20)
-    parser.add_argument("--alpha", type=float, default=0.10)
+    parser.add_argument("--alpha", type=float, default=1.0)
+    parser.add_argument("--sigma-map", choices=["exponential", "linear"], default="exponential")
+    parser.add_argument(
+        "--sigma-tail-quantile",
+        type=float,
+        default=0.0,
+        help="Use 0 for no percentile gate; otherwise inflate only scores above this quantile.",
+    )
+    parser.add_argument(
+        "--no-score-rescale-by-weights",
+        dest="score_rescale_by_weights",
+        action="store_false",
+        default=True,
+        help="Do not divide S_dyn_geom by the active weight sum.",
+    )
     parser.add_argument("--w-self", type=float, default=1.0)
     parser.add_argument("--w-graph", type=float, default=0.5)
     parser.add_argument("--w-zone", type=float, default=0.5)
@@ -186,6 +215,9 @@ def config_from_args(args: argparse.Namespace) -> OridynConfig:
         normalization_clip=args.normalization_clip,
         resolution_shells=args.resolution_shells,
         alpha=args.alpha,
+        sigma_map=args.sigma_map,
+        sigma_tail_quantile=args.sigma_tail_quantile,
+        score_rescale_by_weights=args.score_rescale_by_weights,
         weights=weights,
         export_candidates=args.export_candidates,
         workers=args.workers,
@@ -230,6 +262,9 @@ def main(argv: list[str] | None = None) -> None:
             args.output,
             presets,
             alpha=args.alpha,
+            sigma_map=args.sigma_map,
+            sigma_tail_quantile=args.sigma_tail_quantile,
+            score_rescale_by_weights=args.score_rescale_by_weights,
             overwrite_single=not args.no_overwrite_single,
         )
         print(f"wrote {len(out)} reweighted rows to {args.output}")

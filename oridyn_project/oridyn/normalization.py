@@ -1,4 +1,4 @@
-"""Resolution-shell and robust normalization helpers."""
+"""Global and resolution-shell normalization helpers."""
 
 from __future__ import annotations
 
@@ -32,13 +32,28 @@ def assign_resolution_shells(scores: pd.DataFrame, n_shells: int) -> pd.Series:
 
 
 def normalize_reflection_terms(scores: pd.DataFrame, config: OridynConfig) -> tuple[pd.DataFrame, list[dict[str, object]]]:
-    """Normalize raw reflection terms within resolution shells."""
+    """Normalize raw reflection terms.
+
+    ``global_minmax`` is deliberately whole-table and unclipped. The older
+    methods keep their original resolution-shell behavior for comparison runs.
+    """
 
     out = scores.copy()
     if out.empty:
         return out, []
-    out["resolution_shell"] = assign_resolution_shells(out, config.resolution_shells)
     metadata: list[dict[str, object]] = []
+    if config.normalization == "global_minmax":
+        for raw_col, norm_col in REFLECTION_RAW_TO_NORM.items():
+            if raw_col not in out:
+                out[norm_col] = 0.0
+                continue
+            normalized, params = _normalize_values(out[raw_col].to_numpy(dtype=float), config)
+            out[norm_col] = normalized
+            params.update({"column": raw_col, "normalized_column": norm_col, "scope": "global"})
+            metadata.append(params)
+        return out, metadata
+
+    out["resolution_shell"] = assign_resolution_shells(out, config.resolution_shells)
     for raw_col, norm_col in REFLECTION_RAW_TO_NORM.items():
         if raw_col not in out:
             out[norm_col] = 0.0
@@ -76,6 +91,15 @@ def _normalize_values(values: np.ndarray, config: OridynConfig) -> tuple[np.ndar
     finite = values[np.isfinite(values)]
     if finite.size == 0:
         return np.zeros_like(values, dtype=float), {"method": config.normalization, "empty": True}
+    if config.normalization == "global_minmax":
+        vmin = float(np.min(finite))
+        vmax = float(np.max(finite))
+        scale = max(vmax - vmin, 1e-12)
+        normalized = (values - vmin) / scale
+        normalized = np.where(np.isfinite(normalized), normalized, 0.0)
+        if vmax == vmin:
+            normalized = np.zeros_like(values, dtype=float)
+        return normalized.astype(float), {"method": "global_minmax", "min": vmin, "max": vmax}
     clip = float(config.normalization_clip)
     if config.normalization == "percentile":
         p05 = float(np.percentile(finite, 5))

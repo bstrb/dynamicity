@@ -7,7 +7,8 @@ from typing import Literal
 
 
 KernelName = Literal["gaussian", "lorentzian"]
-NormalizationName = Literal["median_mad", "percentile", "rank", "none"]
+NormalizationName = Literal["global_minmax", "median_mad", "percentile", "rank", "none"]
+SigmaMapName = Literal["exponential", "linear"]
 
 
 @dataclass(frozen=True)
@@ -55,11 +56,14 @@ class OridynConfig:
     max_excited_nodes_per_frame: int = 2000
     row_direction_limit: int = 5
     row_max_steps: int = 12
-    normalization: NormalizationName = "median_mad"
+    normalization: NormalizationName = "global_minmax"
     frame_normalization: NormalizationName | None = None
     resolution_shells: int = 10
     normalization_clip: float = 6.0
     alpha: float = 1.0
+    sigma_map: SigmaMapName = "exponential"
+    sigma_tail_quantile: float = 0.0
+    score_rescale_by_weights: bool = True
     weights: ScoreWeights = field(default_factory=ScoreWeights)
     export_candidates: bool = False
     workers: int = 1

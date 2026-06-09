@@ -20,7 +20,9 @@ TERM_SUMMARY_COLUMNS = [
     "graph_crowding_norm",
     "same_laue_zone_crowding_norm",
     "systematic_row_risk_norm",
+    "S_dyn_geom_weighted_sum",
     "S_dyn_geom",
+    "sigma_tail_score",
     "sigma_dyn_rel",
 ]
 
