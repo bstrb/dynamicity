@@ -75,6 +75,7 @@ def build_hkl_target_table(stream: StreamData, targets: pd.DataFrame) -> pd.Data
             "frame_number": int(crystal.frame_number),
             "chunk_id": int(getattr(crystal, "chunk_id", -1)),
             "crystal_in_chunk": int(getattr(crystal, "crystal_in_chunk", -1)),
+            "source_filename": str(getattr(crystal, "source_filename", "")),
             "event": str(getattr(crystal, "event", "")),
             "image_serial": int(getattr(crystal, "image_serial", -1)),
         }
@@ -209,6 +210,7 @@ def run_hkl_trace(
         metadata,
         candidate_scores=None,
         information_summaries=None,
+        write_full_reflection_scores=config.write_full_reflection_scores,
     )
     trajectory_scores.to_csv(out / "hkl_frame_trajectories.csv", index=False)
     targets.to_csv(out / "selected_hkls.csv", index=False)

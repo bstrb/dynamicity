@@ -135,6 +135,7 @@ def run_pipeline(stream_path: str | Path, output_dir: str | Path, config: Oridyn
         metadata,
         candidate_scores=candidate_scores,
         information_summaries=information_summaries,
+        write_full_reflection_scores=config.write_full_reflection_scores,
     )
     log_progress("making plots", config.progress)
     make_standard_plots(reflection_scores, frame_scores, Path(output_dir) / "plots")

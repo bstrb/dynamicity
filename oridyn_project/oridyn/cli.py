@@ -178,6 +178,11 @@ def _add_common_config(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--w-frame", type=float, default=1.0)
     parser.add_argument("--w-interaction", type=float, default=0.25)
     parser.add_argument("--export-candidates", action="store_true")
+    parser.add_argument(
+        "--write-full-reflection-scores",
+        action="store_true",
+        help="Also write reflection_scores_full.csv with all diagnostic columns; reflection_scores.csv stays compact.",
+    )
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--chunk-size", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
@@ -220,6 +225,7 @@ def config_from_args(args: argparse.Namespace) -> OridynConfig:
         score_rescale_by_weights=args.score_rescale_by_weights,
         weights=weights,
         export_candidates=args.export_candidates,
+        write_full_reflection_scores=args.write_full_reflection_scores,
         workers=args.workers,
         chunk_size=args.chunk_size,
         seed=args.seed,

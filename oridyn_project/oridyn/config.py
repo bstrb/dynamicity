@@ -72,6 +72,7 @@ class OridynConfig:
     progress: bool = True
     beam_direction: tuple[float, float, float] = (0.0, 0.0, 1.0)
     exposure_samples: int = 1
+    write_full_reflection_scores: bool = False
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serializable representation."""

@@ -12,4 +12,6 @@ def test_parse_minimal_stream():
     assert len(stream.crystal_table) == 2
     assert len(stream.reflections) == 6
     assert set(STREAM_MATRIX_COLUMNS) <= set(stream.crystal_table.columns)
-    assert {"h", "k", "l", "sigma", "fs_px", "ss_px"} <= set(stream.reflections.columns)
+    assert {"source_filename", "h", "k", "l", "sigma", "fs_px", "ss_px"} <= set(stream.reflections.columns)
+    assert list(stream.crystal_table["source_filename"]) == ["examples/frame-0001.h5", "examples/frame-0002.h5"]
+    assert set(stream.reflections["source_filename"]) == {"examples/frame-0001.h5", "examples/frame-0002.h5"}

@@ -49,6 +49,7 @@ STREAM_CENTERING_RE = re.compile(r"^\s*centering\s*=\s*([A-Za-z])")
 STREAM_LATTICE_RE = re.compile(r"^\s*lattice_type\s*=\s*([A-Za-z_]+)")
 STREAM_PANEL_RANGE_RE = re.compile(r"^\s*(p\d+)\/(min_fs|max_fs|min_ss|max_ss)\s*=\s*(-?\d+)")
 STREAM_PANEL_CORNER_RE = re.compile(rf"^\s*(p\d+)\/corner_([xy])\s*=\s*({STREAM_FLOAT})")
+STREAM_IMAGE_FILENAME_RE = re.compile(r"^\s*Image filename:\s*(.+?)\s*$")
 STREAM_EVENT_RE = re.compile(r"^\s*Event:\s*(\S+)")
 STREAM_SERIAL_RE = re.compile(r"^\s*Image serial number:\s*(\d+)")
 STREAM_AVERAGE_CLEN_RE = re.compile(rf"^\s*average_camera_length\s*=\s*({STREAM_FLOAT})\s*m")
@@ -134,6 +135,7 @@ def parse_crystfel_stream_text(text: str, path: str | None = None) -> StreamData
     chunk_id = -1
     crystal_counter = 0
     crystal_in_chunk = 0
+    current_source_filename: str | None = None
     current_event: str | None = None
     current_serial: int | None = None
     current_clen_m: float | None = None
@@ -154,6 +156,7 @@ def parse_crystfel_stream_text(text: str, path: str | None = None) -> StreamData
             in_reflections = False
             chunk_id += 1
             crystal_in_chunk = 0
+            current_source_filename = None
             current_event = None
             current_serial = None
             current_clen_m = clen_m
@@ -196,6 +199,9 @@ def parse_crystfel_stream_text(text: str, path: str | None = None) -> StreamData
                 continue
             continue
 
+        if match := STREAM_IMAGE_FILENAME_RE.match(raw_line):
+            current_source_filename = match.group(1)
+            continue
         if match := STREAM_EVENT_RE.match(raw_line):
             current_event = match.group(1)
             continue
@@ -234,6 +240,7 @@ def parse_crystfel_stream_text(text: str, path: str | None = None) -> StreamData
                 "frame_number": frame_number,
                 "chunk_id": chunk_id,
                 "crystal_in_chunk": crystal_in_chunk,
+                "source_filename": current_source_filename or "",
                 "event": current_event or f"chunk{chunk_id}_crystal{crystal_in_chunk}",
                 "image_serial": -1 if current_serial is None else int(current_serial),
                 "distance_mm": float("nan") if current_clen_m is None else 1000.0 * float(current_clen_m),
@@ -261,6 +268,7 @@ def parse_crystfel_stream_text(text: str, path: str | None = None) -> StreamData
                         "frame_number": frame_number,
                         "chunk_id": chunk_id,
                         "crystal_in_chunk": crystal_in_chunk,
+                        "source_filename": row["source_filename"],
                         "event": row["event"],
                         "image_serial": row["image_serial"],
                     }
@@ -320,6 +328,7 @@ def parse_crystfel_stream_text(text: str, path: str | None = None) -> StreamData
                 "frame_number",
                 "chunk_id",
                 "crystal_in_chunk",
+                "source_filename",
                 "event",
                 "image_serial",
                 "h",

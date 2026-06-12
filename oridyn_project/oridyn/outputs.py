@@ -26,6 +26,38 @@ TERM_SUMMARY_COLUMNS = [
     "sigma_dyn_rel",
 ]
 
+COMPACT_REFLECTION_COLUMNS = [
+    "reflection_id",
+    "source_filename",
+    "event",
+    "frame",
+    "frame_number",
+    "chunk_id",
+    "crystal_in_chunk",
+    "image_serial",
+    "h",
+    "k",
+    "l",
+    "sigma",
+    "q_invA",
+    "d_angstrom",
+    "sg",
+    "assigned_risky_axis",
+    "assigned_axis_angle_deg",
+    "axis_match",
+    "self_risk_norm",
+    "graph_crowding_norm",
+    "same_laue_zone_crowding_norm",
+    "systematic_row_risk_norm",
+    "frame_axis_risk_norm",
+    "S_dyn_geom",
+    "sigma_dyn_rel",
+    "sigma_dyn",
+    "weight_dyn",
+]
+
+COMPACT_STRING_COLUMNS = {"source_filename", "event", "assigned_risky_axis"}
+
 
 def summarize_score_terms(scores: pd.DataFrame) -> pd.DataFrame:
     """Build a compact summary table for score terms."""
@@ -60,6 +92,7 @@ def write_outputs(
     metadata: dict[str, object],
     candidate_scores: pd.DataFrame | None = None,
     information_summaries: dict[str, pd.DataFrame] | None = None,
+    write_full_reflection_scores: bool = False,
 ) -> None:
     """Write required and optional outputs."""
 
@@ -67,7 +100,9 @@ def write_outputs(
     out.mkdir(parents=True, exist_ok=True)
     problematic_axes.to_csv(out / "problematic_axes.csv", index=False)
     frame_summary.to_csv(out / "frame_summary.csv", index=False)
-    reflection_scores.to_csv(out / "reflection_scores.csv", index=False)
+    _compact_reflection_scores(reflection_scores).to_csv(out / "reflection_scores.csv", index=False)
+    if write_full_reflection_scores:
+        reflection_scores.to_csv(out / "reflection_scores_full.csv", index=False)
     score_terms_summary.to_csv(out / "score_terms_summary.csv", index=False)
     _write_top(reflection_scores, out / "top_self_risk.csv", "self_risk_raw")
     _write_top(reflection_scores, out / "top_graph_crowding_risk.csv", "graph_crowding_raw")
@@ -81,6 +116,15 @@ def write_outputs(
     payload = dict(metadata)
     payload.setdefault("generated_utc", datetime.now(timezone.utc).isoformat())
     (out / "run_metadata.json").write_text(json.dumps(_json_safe(payload), indent=2, sort_keys=True))
+
+
+def _compact_reflection_scores(scores: pd.DataFrame) -> pd.DataFrame:
+    compact = scores.copy()
+    for column in COMPACT_REFLECTION_COLUMNS:
+        if column in compact:
+            continue
+        compact[column] = "" if column in COMPACT_STRING_COLUMNS else np.nan
+    return compact[COMPACT_REFLECTION_COLUMNS]
 
 
 def _write_top(scores: pd.DataFrame, path: Path, column: str, n: int = 100) -> None:

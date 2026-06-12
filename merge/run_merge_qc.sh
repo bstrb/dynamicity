@@ -10,7 +10,7 @@ set -euo pipefail
 # Hardcoded list of stream files
 #######################################
 STREAMS=(
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300-VIII_cut_20-0_3_sigma_dyn.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300-VIII_cut_20-0_3_oridyn_affine_spread_ge005_keep_best20pct_min20.stream"
 )
 #COF300
 #--model=offset -y 4/m --iterations=25 --polarisation=none --min-measurements=2 --no-Bscale -j 8

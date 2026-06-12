@@ -18,11 +18,9 @@ from .excitation import compute_excited_candidate_nodes
 from .geometry import (
     axis_angle_deg,
     beam_in_direct_coordinates,
-    canonical_triplet,
     d_spacings_from_q,
     excitation_error,
     excitation_weight,
-    gcd3,
     hkl_lab_vectors,
     triplet_label,
     vector_norms,
@@ -30,6 +28,7 @@ from .geometry import (
 from .graph_crowding import _delta_prior, _empty_graph_row
 from .self_risk import add_self_risk_terms
 from .stream_parser import STREAM_MATRIX_COLUMNS, StreamData
+from .systematic_rows import add_affine_row_terms_from_nodes
 
 _WORKER_STATE: dict[str, Any] = {}
 
@@ -38,6 +37,7 @@ OBSERVED_KEEP_COLUMNS = (
     "frame_number",
     "chunk_id",
     "crystal_in_chunk",
+    "source_filename",
     "event",
     "image_serial",
     "h",
@@ -349,7 +349,7 @@ def _score_observations(
     scored = add_self_risk_terms(scored, config)
     scored = _add_graph_terms_from_nodes(scored, nodes, config)
     scored = _add_laue_terms_from_nodes(scored, nodes, assigned_axis)
-    scored = _add_systematic_row_terms_from_nodes(scored, nodes, config)
+    scored = add_affine_row_terms_from_nodes(scored, nodes, config)
     return scored
 
 
@@ -422,38 +422,6 @@ def _add_laue_terms_from_nodes(
                 "near_zone_law": abs_n <= 1,
                 "same_laue_zone_crowding_raw": float(np.log1p(same_sum)),
                 "laue_zone_risk_raw": float(np.log1p(same_sum) * zone_weight),
-            }
-        )
-    return pd.concat([scores.reset_index(drop=True), pd.DataFrame.from_records(rows)], axis=1)
-
-
-def _add_systematic_row_terms_from_nodes(scores: pd.DataFrame, nodes: pd.DataFrame, config: OridynConfig) -> pd.DataFrame:
-    row_counts: dict[tuple[int, int, int], int] = {}
-    row_sums: dict[tuple[int, int, int], float] = {}
-    for node in nodes.itertuples(index=False):
-        h, k, l = int(node.h), int(node.k), int(node.l)
-        step = gcd3(h, k, l)
-        if step == 0 or step > config.row_max_steps:
-            continue
-        direction = canonical_triplet(h, k, l)
-        if max(abs(x) for x in direction) > config.row_direction_limit:
-            continue
-        row_counts[direction] = row_counts.get(direction, 0) + 1
-        row_sums[direction] = row_sums.get(direction, 0.0) + float(node.excitation_weight)
-
-    rows: list[dict[str, float | int | str]] = []
-    for target in scores.itertuples(index=False):
-        direction = canonical_triplet(int(target.h), int(target.k), int(target.l))
-        count = int(row_counts.get(direction, 0))
-        summed = float(row_sums.get(direction, 0.0))
-        direction_norm = float(np.linalg.norm(np.asarray(direction, dtype=float)))
-        low_order_row = 1.0 / (1.0 + (direction_norm / 1.5) ** config.low_order_power)
-        rows.append(
-            {
-                "nearest_row_direction": triplet_label(direction, brackets="()"),
-                "row_excited_count": count,
-                "row_excitation_sum": summed,
-                "systematic_row_risk_raw": float(np.log1p(summed) * low_order_row),
             }
         )
     return pd.concat([scores.reset_index(drop=True), pd.DataFrame.from_records(rows)], axis=1)

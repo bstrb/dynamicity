@@ -17,6 +17,7 @@ p0/corner_x = -512
 p0/corner_y = -512
 
 ----- Begin chunk -----
+Image filename: examples/frame-0001.h5
 Event: frame-0001
 Image serial number: 1
 --- Begin crystal
@@ -34,6 +35,7 @@ End of reflections
 ----- End chunk -----
 
 ----- Begin chunk -----
+Image filename: examples/frame-0002.h5
 Event: frame-0002
 Image serial number: 2
 --- Begin crystal
