@@ -10,8 +10,8 @@ set -euo pipefail
 # Hardcoded list of stream files
 #######################################
 STREAMS=(
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/enh_feed_weak_positive_poc_scaling_20260622_strict_with_resolution/MFM300-VIII_cut_20-0_3_enh_feed_weak_positive_poc.stream"
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300-VIII_cut_20-0_3.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/full_vs_80/geometry_trust_keep80.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/full_vs_80/MFM300-VIII_cut_20-0_3.stream"
 )
 #COF300
 #--model=offset -y 4/m --iterations=25 --polarisation=none --min-measurements=2 --no-Bscale -j 8
@@ -21,16 +21,16 @@ STREAMS=(
 
 THREADS=24
 SYM="4/mmm"
-ITERATIONS=1
-MIN_MEASUREMENTS=1
+ITERATIONS=25
+MIN_MEASUREMENTS=2
 PUSH_RES=inf
 MODEL="offset"   # partialator model to use (e.g. "unity", "offset", "scale", "scale+offset")
 OUTPUT_UNMERGED=false   # whether to output unmerged reflections (for manual merging downstream)
-DISABLE_PR=true   # whether to disable partialator's post-refinement (PR) step, which can be unstable for some datasets and is not required for a basic QC report
+DISABLE_PR=false   # whether to disable partialator's post-refinement (PR) step, which can be unstable for some datasets and is not required for a basic QC report
 
 # LOWRES & HIGHRES only used for qc report and is not a resolution cutoff & Wilson scaling can be unstable for some datasets, so it's optional
 LOWRES=20.0
-HIGHRES=0.4
+HIGHRES=0.35
 WILSON=""   # set to "" to skip
 
 #######################################
