@@ -17,9 +17,9 @@ python3 res_cut_stream.py \
 """
 # python3 res_cut_stream.py \
 #   --input "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300-VIII.stream" \
-#   --output "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300-VIII_cut_20-0_3.stream" \
+#   --output "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/MFM300-VIII_cut_20-0_5.stream" \
 #   --lowres 20 \
-#   --highres 0.3 \
+#   --highres 0.5 \
 #   --drop-empty-crystals
 
 FLOAT_RE = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
