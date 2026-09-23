@@ -1,0 +1,647 @@
+{
+  "score_grid": {
+    "sg0_multipliers": [
+      1.75
+    ],
+    "sigma_c_multipliers": [
+      1.0
+    ]
+  },
+  "filter_grid": {
+    "high_eg_fractions": [
+      0.3
+    ],
+    "drop_fractions": [
+      0.3
+    ],
+    "excitation_block_sizes": [
+      10
+    ],
+    "min_final_block_size": 5,
+    "min_high_eg_observations": 10,
+    "min_remaining_per_block": 2,
+    "block_gate_mode": "none"
+  },
+  "derived_scores": [
+    {
+      "name": "pl_ref",
+      "kind": "expression_tree",
+      "family": "shared_p_lambda_endpoint",
+      "formula": "Eg * M * D^3 (shared p=0, lambda=0 endpoint)",
+      "p": 0.0,
+      "lambda": 0.0,
+      "tree": {
+        "op": "mul",
+        "args": [
+          {
+            "var": "Eg"
+          },
+          {
+            "var": "M"
+          },
+          {
+            "op": "pow",
+            "base": {
+              "var": "D"
+            },
+            "exponent": 3.0
+          }
+        ]
+      }
+    },
+    {
+      "name": "p_m1p00",
+      "kind": "expression_tree",
+      "family": "excitation_normalization",
+      "formula": "Eg * M * D^3 * U",
+      "p": -1.0,
+      "tree": {
+        "op": "mul",
+        "args": [
+          {
+            "var": "Eg"
+          },
+          {
+            "var": "M"
+          },
+          {
+            "op": "pow",
+            "base": {
+              "var": "D"
+            },
+            "exponent": 3.0
+          },
+          {
+            "var": "U"
+          }
+        ]
+      }
+    },
+    {
+      "name": "p_0p50",
+      "kind": "expression_tree",
+      "family": "excitation_normalization",
+      "formula": "Eg * M * D^3 / U^0.5",
+      "p": 0.5,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "var": "M"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 3.0
+            }
+          ]
+        },
+        "denominator": {
+          "op": "pow",
+          "base": {
+            "var": "U"
+          },
+          "exponent": 0.5
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    },
+    {
+      "name": "p_1p00",
+      "kind": "expression_tree",
+      "family": "excitation_normalization",
+      "formula": "Eg * M * D^3 / U",
+      "p": 1.0,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "var": "M"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 3.0
+            }
+          ]
+        },
+        "denominator": {
+          "var": "U"
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    },
+    {
+      "name": "p_1p50",
+      "kind": "expression_tree",
+      "family": "excitation_normalization",
+      "formula": "Eg * M * D^3 / U^1.5",
+      "p": 1.5,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "var": "M"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 3.0
+            }
+          ]
+        },
+        "denominator": {
+          "op": "pow",
+          "base": {
+            "var": "U"
+          },
+          "exponent": 1.5
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    },
+    {
+      "name": "l_m1p00",
+      "kind": "expression_tree",
+      "family": "strong_link_interpolation",
+      "formula": "Eg * D^4 * M^2 / M2",
+      "lambda": -1.0,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 4.0
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "M"
+              },
+              "exponent": 2.0
+            }
+          ]
+        },
+        "denominator": {
+          "var": "M2"
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    },
+    {
+      "name": "l_0p50",
+      "kind": "expression_tree",
+      "family": "strong_link_interpolation",
+      "formula": "Eg * D^2.5 * M^0.5 * M2^0.5",
+      "lambda": 0.5,
+      "tree": {
+        "op": "mul",
+        "args": [
+          {
+            "var": "Eg"
+          },
+          {
+            "op": "pow",
+            "base": {
+              "var": "D"
+            },
+            "exponent": 2.5
+          },
+          {
+            "op": "pow",
+            "base": {
+              "var": "M"
+            },
+            "exponent": 0.5
+          },
+          {
+            "op": "pow",
+            "base": {
+              "var": "M2"
+            },
+            "exponent": 0.5
+          }
+        ]
+      }
+    },
+    {
+      "name": "l_1p00",
+      "kind": "expression_tree",
+      "family": "strong_link_interpolation",
+      "formula": "Eg * D^2 * M2",
+      "lambda": 1.0,
+      "tree": {
+        "op": "mul",
+        "args": [
+          {
+            "var": "Eg"
+          },
+          {
+            "op": "pow",
+            "base": {
+              "var": "D"
+            },
+            "exponent": 2.0
+          },
+          {
+            "var": "M2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "pl_m1p00_0p50",
+      "kind": "expression_tree",
+      "family": "combined_p_lambda",
+      "formula": "Eg * D^2.5 * M^0.5 * M2^0.5 * U",
+      "p": -1.0,
+      "lambda": 0.5,
+      "tree": {
+        "op": "mul",
+        "args": [
+          {
+            "var": "Eg"
+          },
+          {
+            "op": "pow",
+            "base": {
+              "var": "D"
+            },
+            "exponent": 2.5
+          },
+          {
+            "op": "pow",
+            "base": {
+              "var": "M"
+            },
+            "exponent": 0.5
+          },
+          {
+            "op": "pow",
+            "base": {
+              "var": "M2"
+            },
+            "exponent": 0.5
+          },
+          {
+            "var": "U"
+          }
+        ]
+      }
+    },
+    {
+      "name": "pl_m1p00_1p00",
+      "kind": "expression_tree",
+      "family": "combined_p_lambda",
+      "formula": "Eg * D^2 * M2 * U",
+      "p": -1.0,
+      "lambda": 1.0,
+      "tree": {
+        "op": "mul",
+        "args": [
+          {
+            "var": "Eg"
+          },
+          {
+            "op": "pow",
+            "base": {
+              "var": "D"
+            },
+            "exponent": 2.0
+          },
+          {
+            "var": "M2"
+          },
+          {
+            "var": "U"
+          }
+        ]
+      }
+    },
+    {
+      "name": "pl_m1p00_m1p00",
+      "kind": "expression_tree",
+      "family": "combined_p_lambda",
+      "formula": "Eg * D^4 * M^2 * U / M2",
+      "p": -1.0,
+      "lambda": -1.0,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 4.0
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "M"
+              },
+              "exponent": 2.0
+            },
+            {
+              "var": "U"
+            }
+          ]
+        },
+        "denominator": {
+          "var": "M2"
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    },
+    {
+      "name": "pl_0p50_0p50",
+      "kind": "expression_tree",
+      "family": "combined_p_lambda",
+      "formula": "Eg * D^2.5 * M^0.5 * M2^0.5 / U^0.5",
+      "p": 0.5,
+      "lambda": 0.5,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 2.5
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "M"
+              },
+              "exponent": 0.5
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "M2"
+              },
+              "exponent": 0.5
+            }
+          ]
+        },
+        "denominator": {
+          "op": "pow",
+          "base": {
+            "var": "U"
+          },
+          "exponent": 0.5
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    },
+    {
+      "name": "pl_0p50_1p00",
+      "kind": "expression_tree",
+      "family": "combined_p_lambda",
+      "formula": "Eg * D^2 * M2 / U^0.5",
+      "p": 0.5,
+      "lambda": 1.0,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 2.0
+            },
+            {
+              "var": "M2"
+            }
+          ]
+        },
+        "denominator": {
+          "op": "pow",
+          "base": {
+            "var": "U"
+          },
+          "exponent": 0.5
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    },
+    {
+      "name": "pl_0p50_m1p00",
+      "kind": "expression_tree",
+      "family": "combined_p_lambda",
+      "formula": "Eg * D^4 * M^2 / (M2 * U^0.5)",
+      "p": 0.5,
+      "lambda": -1.0,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 4.0
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "M"
+              },
+              "exponent": 2.0
+            }
+          ]
+        },
+        "denominator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "M2"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "U"
+              },
+              "exponent": 0.5
+            }
+          ]
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    },
+    {
+      "name": "pl_1p00_0p50",
+      "kind": "expression_tree",
+      "family": "combined_p_lambda",
+      "formula": "Eg * D^2.5 * M^0.5 * M2^0.5 / U",
+      "p": 1.0,
+      "lambda": 0.5,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 2.5
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "M"
+              },
+              "exponent": 0.5
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "M2"
+              },
+              "exponent": 0.5
+            }
+          ]
+        },
+        "denominator": {
+          "var": "U"
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    },
+    {
+      "name": "pl_1p00_1p00",
+      "kind": "expression_tree",
+      "family": "combined_p_lambda",
+      "formula": "Eg * D^2 * M2 / U",
+      "p": 1.0,
+      "lambda": 1.0,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 2.0
+            },
+            {
+              "var": "M2"
+            }
+          ]
+        },
+        "denominator": {
+          "var": "U"
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    },
+    {
+      "name": "pl_1p00_m1p00",
+      "kind": "expression_tree",
+      "family": "combined_p_lambda",
+      "formula": "Eg * D^4 * M^2 / (M2 * U)",
+      "p": 1.0,
+      "lambda": -1.0,
+      "tree": {
+        "op": "div",
+        "numerator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "Eg"
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "D"
+              },
+              "exponent": 4.0
+            },
+            {
+              "op": "pow",
+              "base": {
+                "var": "M"
+              },
+              "exponent": 2.0
+            }
+          ]
+        },
+        "denominator": {
+          "op": "mul",
+          "args": [
+            {
+              "var": "M2"
+            },
+            {
+              "var": "U"
+            }
+          ]
+        },
+        "zero_policy": "zero_if_zero_over_zero_else_fail"
+      }
+    }
+  ]
+}

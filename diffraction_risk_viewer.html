@@ -1,0 +1,1584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Diffraction Risk Explorer</title>
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --panel: #fffdf8;
+      --panel-strong: #f2e6d2;
+      --border: #cdbd9f;
+      --text: #2c2419;
+      --muted: #665948;
+      --accent: #a14d2a;
+      --accent-2: #206a5d;
+      --trace-center: #d97706;
+      --trace-marker: #b91c1c;
+      --trace-x: #15803d;
+      --trace-z: #7c3aed;
+      --pivot: #0f766e;
+      --grid: #d9cfbf;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 16px;
+      background:
+        radial-gradient(circle at top left, rgba(161, 77, 42, 0.12), transparent 30%),
+        radial-gradient(circle at bottom right, rgba(32, 106, 93, 0.14), transparent 28%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--text);
+      -webkit-text-size-adjust: 100%;
+    }
+
+    .page {
+      max-width: 1260px;
+      margin: 0 auto;
+      padding: 24px;
+      padding-left: max(24px, env(safe-area-inset-left));
+      padding-right: max(24px, env(safe-area-inset-right));
+      padding-top: max(24px, env(safe-area-inset-top));
+      padding-bottom: max(24px, env(safe-area-inset-bottom));
+    }
+
+    .header {
+      margin-bottom: 18px;
+    }
+
+    .eyebrow {
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-size: 0.78rem;
+      margin-bottom: 6px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.3rem);
+      line-height: 0.96;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      max-width: 860px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 350px minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 10px 30px rgba(54, 37, 15, 0.08);
+    }
+
+    .controls {
+      padding: 18px;
+      position: sticky;
+      top: 18px;
+    }
+
+    .plot-panel {
+      padding: 14px;
+      overflow: hidden;
+    }
+
+    .note {
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+      line-height: 1.45;
+      color: var(--text);
+    }
+
+    .control-group {
+      margin-bottom: 14px;
+    }
+
+    .control-group label,
+    .control-inline-title {
+      display: block;
+      font-size: 0.92rem;
+      margin-bottom: 6px;
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .range-wrap {
+      display: grid;
+      gap: 6px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    input[type="number"],
+    select,
+    button {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fffdf9;
+      color: var(--text);
+      font: inherit;
+      font-size: 1rem;
+    }
+
+    input[type="number"] {
+      font-variant-numeric: tabular-nums;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .button-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .button-row .wide {
+      grid-column: 1 / -1;
+    }
+
+    .toggle-button {
+      background: var(--panel-strong);
+      font-weight: 600;
+    }
+
+    .toggle-button:hover {
+      background: #efe0c9;
+    }
+
+    .primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .value-box {
+      min-width: 74px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .derived-readout {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.35;
+    }
+
+    .number-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .number-grid + .number-grid {
+      margin-top: 8px;
+    }
+
+    .number-grid label {
+      margin-bottom: 0;
+    }
+
+    .number-grid span {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+
+    .checkboxes {
+      display: grid;
+      gap: 8px;
+    }
+
+    .checkbox {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.95rem;
+      color: var(--text);
+    }
+
+    .checkbox input {
+      width: 18px;
+      height: 18px;
+    }
+
+    .readout {
+      display: grid;
+      gap: 5px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.35;
+    }
+
+    .readout strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .formula {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      color: var(--muted);
+      word-break: break-word;
+    }
+
+    .plot-topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .plot-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin: 0;
+    }
+
+    .status {
+      min-height: 1.3em;
+      color: var(--accent);
+      font-size: 0.95rem;
+    }
+
+    .canvas-wrap {
+      width: 100%;
+      height: min(70vh, 720px);
+      min-height: 590px;
+      border-radius: 16px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.76), rgba(245, 241, 232, 0.92)),
+        repeating-linear-gradient(
+          135deg,
+          rgba(161, 77, 42, 0.04),
+          rgba(161, 77, 42, 0.04) 12px,
+          rgba(32, 106, 93, 0.03) 12px,
+          rgba(32, 106, 93, 0.03) 24px
+        );
+      border: 1px solid var(--border);
+      overflow: hidden;
+      position: relative;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+
+    .gesture-hint {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      padding: 7px 9px;
+      border-radius: 10px;
+      background: rgba(255, 253, 249, 0.9);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.86rem;
+      pointer-events: none;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      margin-top: 12px;
+      font-size: 0.93rem;
+      color: var(--muted);
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .swatch {
+      width: 24px;
+      height: 0;
+      border-top-width: 3px;
+      border-top-style: solid;
+    }
+
+    .risk-strip {
+      width: 84px;
+      height: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(44, 36, 25, 0.18);
+      background: linear-gradient(90deg, #2b4f6b, #206a5d, #d97706, #b91c1c);
+    }
+
+    .footer-note {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .controls {
+        position: static;
+      }
+
+      .plot-panel {
+        order: -1;
+        position: sticky;
+        top: max(10px, env(safe-area-inset-top));
+        z-index: 10;
+      }
+
+      .canvas-wrap {
+        min-height: 0;
+        height: min(54vh, 560px);
+      }
+    }
+
+    @media (max-width: 720px) {
+      .page {
+        padding: 16px;
+        padding-left: max(16px, env(safe-area-inset-left));
+        padding-right: max(16px, env(safe-area-inset-right));
+        padding-top: max(16px, env(safe-area-inset-top));
+        padding-bottom: max(20px, env(safe-area-inset-bottom));
+      }
+
+      .header {
+        margin-bottom: 12px;
+      }
+
+      h1 {
+        font-size: clamp(1.65rem, 6.5vw, 2.2rem);
+      }
+
+      .subtitle {
+        display: none;
+      }
+
+      .layout {
+        gap: 12px;
+      }
+
+      .plot-panel {
+        padding: 8px;
+        border-radius: 14px;
+        box-shadow: 0 8px 22px rgba(54, 37, 15, 0.14);
+      }
+
+      .controls {
+        padding: 14px;
+        border-radius: 14px;
+      }
+
+      .row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+
+      .value-box {
+        text-align: left;
+        min-width: 0;
+      }
+
+      input[type="range"] {
+        height: 34px;
+      }
+
+      input[type="number"],
+      select,
+      button {
+        min-height: 44px;
+      }
+
+      .checkboxes {
+        gap: 12px;
+      }
+
+      .checkbox input {
+        width: 20px;
+        height: 20px;
+      }
+
+      .plot-topbar {
+        align-items: flex-start;
+        margin-bottom: 6px;
+      }
+
+      .plot-title {
+        font-size: 1rem;
+      }
+
+      .legend,
+      .footer-note,
+      .gesture-hint {
+        display: none;
+      }
+
+      .canvas-wrap {
+        border-radius: 10px;
+        height: min(46vh, 360px);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div class="eyebrow">Interactive HTML App</div>
+      <h1>Diffraction Risk Explorer</h1>
+      <div class="subtitle">
+        A zone-axis electron diffraction pattern colored by reciprocal-space dynamical risk. The candidate sum uses full 3D reciprocal-vector distances, while the plot keeps the familiar projected diffraction view.
+      </div>
+    </div>
+
+    <div class="layout">
+      <aside class="panel controls">
+        <div class="note">
+          <div class="formula">S_risk(g) = E(g) * R_env(g)<br>R_env(g) = sum E(h)C(g,h)<br>E(g) = exp[-(s_g/s0)^2]</div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-inline-title">Unit cell</div>
+          <div class="number-grid">
+            <label><span>a</span><input id="aInput" type="number" step="any" value="15.12"></label>
+            <label><span>b</span><input id="bInput" type="number" step="any" value="15.12"></label>
+            <label><span>c</span><input id="cInput" type="number" step="any" value="11.99"></label>
+          </div>
+          <div class="number-grid">
+            <label><span>alpha</span><input id="alphaInput" type="number" step="any" value="90"></label>
+            <label><span>beta</span><input id="betaInput" type="number" step="any" value="90"></label>
+            <label><span>gamma</span><input id="gammaInput" type="number" step="any" value="90"></label>
+          </div>
+          <div class="derived-readout" id="cellReadout">a,b,c in A; angles in degrees</div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-inline-title">Continuous uvw</div>
+          <div class="number-grid">
+            <label><span>u</span><input id="uInput" type="number" step="any" value="0.583271"></label>
+            <label><span>v</span><input id="vInput" type="number" step="any" value="0.621551"></label>
+            <label><span>w</span><input id="wInput" type="number" step="any" value="-0.522943"></label>
+          </div>
+          <div class="derived-readout" id="uvwNorm">norm = 1.0000</div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-inline-title">Mark hkl</div>
+          <div class="number-grid">
+            <label><span>h</span><input id="hInput" type="number" step="1" value="10"></label>
+            <label><span>k</span><input id="kInput" type="number" step="1" value="-7"></label>
+            <label><span>l</span><input id="lInput" type="number" step="1" value="3"></label>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="button-row">
+            <button id="applyInputs" class="primary" type="button">Apply inputs</button>
+            <button id="clearMark" class="toggle-button" type="button">Clear mark</button>
+            <button id="resetCell" class="toggle-button wide" type="button">Reset cell</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label for="s0Slider">s0 excitation softening</label>
+          <div class="row">
+            <div class="range-wrap">
+              <input id="s0Slider" type="range" min="0.001" max="0.030" step="0.0005" value="0.01">
+            </div>
+            <div id="s0Value" class="value-box">0.01</div>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label for="sigmaSlider">sigma_C distance coupling</label>
+          <div class="row">
+            <div class="range-wrap">
+              <input id="sigmaSlider" type="range" min="0.005" max="0.05" step="0.001" value="0.015">
+            </div>
+            <div id="sigmaValue" class="value-box">0.015</div>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label for="rCutSlider">r_cut neighbor inclusion</label>
+          <div class="row">
+            <div class="range-wrap">
+              <input id="rCutSlider" type="range" min="0.005" max="0.500" step="0.005" value="0.150">
+            </div>
+            <div id="rCutValue" class="value-box">0.1500</div>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label for="displayCutoffSlider">minimum visible spot intensity</label>
+          <div class="row">
+            <div class="range-wrap">
+              <input id="displayCutoffSlider" type="range" min="0.000" max="0.150" step="0.001" value="0.018">
+            </div>
+            <div id="displayCutoffValue" class="value-box">0.018</div>
+          </div>
+          <div class="derived-readout">Raise this to show fewer reflections.</div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-inline-title">Display</div>
+          <div class="checkboxes">
+            <label class="checkbox"><input id="showAllCandidates" type="checkbox"> Show all forward candidates</label>
+            <label class="checkbox"><input id="showDirectBeam" type="checkbox" checked> Show direct beam</label>
+            <label class="checkbox"><input id="showLabels" type="checkbox" checked> Show marked label</label>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="button-row">
+            <button id="resetRisk" class="toggle-button" type="button">Reset risk</button>
+            <button id="resetView" class="toggle-button" type="button">Reset view</button>
+          </div>
+        </div>
+
+        <div class="note">
+          <strong>Marked reflection</strong>
+          <div class="readout" id="markReadout"></div>
+        </div>
+
+        <div class="readout" id="summaryReadout"></div>
+      </aside>
+
+      <section class="panel plot-panel">
+        <div class="plot-topbar">
+          <h2 class="plot-title">Zone-axis diffraction risk</h2>
+          <div id="status" class="status">Building reciprocal lattice...</div>
+        </div>
+
+        <div class="canvas-wrap">
+          <canvas id="vizCanvas"></canvas>
+          <div class="gesture-hint">Drag: pan · wheel or pinch: zoom · click a spot to mark it</div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><span class="risk-strip"></span>Low to high S_risk</div>
+          <div class="legend-item"><span class="swatch" style="border-top-color: var(--trace-marker)"></span>Marked reflection</div>
+          <div class="legend-item"><span class="swatch" style="border-top-color: var(--accent-2)"></span>Candidate-neighbor sum over full 3D g distance</div>
+        </div>
+
+        <div class="footer-note">
+          Defaults: a = 15.12, b = 15.12, c = 11.99, alpha = beta = gamma = 90; lambda = 0.020 A; d_min = 0.5 A.
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      'use strict';
+
+      const TAU = Math.PI * 2;
+
+      const defaults = {
+        cell: [15.12, 15.12, 11.99, 90.0, 90.0, 90.0],
+        lambdaAng: 0.020,
+        dMin: 0.5,
+        sMax: 0.008,
+        zoneTolerance: 1.0,
+        scale: 50.0,
+        maxIndex: 90,
+        minDisplayIntensity: 0.018,
+        riskPercentile: 99.0,
+        envContributionFloor: 1e-12,
+        s0: 0.008,
+        sigmaC: 0.060,
+        rCut: 0.150,
+        rCutMax: 0.500
+      };
+
+      const canvas = document.getElementById('vizCanvas');
+      const ctx = canvas.getContext('2d');
+
+      const ui = {
+        aInput: document.getElementById('aInput'),
+        bInput: document.getElementById('bInput'),
+        cInput: document.getElementById('cInput'),
+        alphaInput: document.getElementById('alphaInput'),
+        betaInput: document.getElementById('betaInput'),
+        gammaInput: document.getElementById('gammaInput'),
+        uInput: document.getElementById('uInput'),
+        vInput: document.getElementById('vInput'),
+        wInput: document.getElementById('wInput'),
+        hInput: document.getElementById('hInput'),
+        kInput: document.getElementById('kInput'),
+        lInput: document.getElementById('lInput'),
+        applyInputs: document.getElementById('applyInputs'),
+        clearMark: document.getElementById('clearMark'),
+        resetCell: document.getElementById('resetCell'),
+        s0Slider: document.getElementById('s0Slider'),
+        sigmaSlider: document.getElementById('sigmaSlider'),
+        rCutSlider: document.getElementById('rCutSlider'),
+        displayCutoffSlider: document.getElementById('displayCutoffSlider'),
+        s0Value: document.getElementById('s0Value'),
+        sigmaValue: document.getElementById('sigmaValue'),
+        rCutValue: document.getElementById('rCutValue'),
+        displayCutoffValue: document.getElementById('displayCutoffValue'),
+        uvwNorm: document.getElementById('uvwNorm'),
+        cellReadout: document.getElementById('cellReadout'),
+        showAllCandidates: document.getElementById('showAllCandidates'),
+        showDirectBeam: document.getElementById('showDirectBeam'),
+        showLabels: document.getElementById('showLabels'),
+        resetRisk: document.getElementById('resetRisk'),
+        resetView: document.getElementById('resetView'),
+        markReadout: document.getElementById('markReadout'),
+        summaryReadout: document.getElementById('summaryReadout'),
+        status: document.getElementById('status')
+      };
+
+      function cssVar(name, fallback) {
+        const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        return value || fallback;
+      }
+
+      const colors = {
+        bgTop: '#fffdf9',
+        bgBottom: '#f2ebde',
+        grid: cssVar('--grid', '#d9cfbf'),
+        axis: cssVar('--muted', '#665948'),
+        accent: cssVar('--accent', '#a14d2a'),
+        accent2: cssVar('--accent-2', '#206a5d'),
+        high: cssVar('--trace-marker', '#b91c1c'),
+        mid: cssVar('--trace-center', '#d97706'),
+        text: cssVar('--text', '#2c2419'),
+        muted: cssVar('--muted', '#665948')
+      };
+
+      const app = {
+        width: 300,
+        height: 300,
+        dpr: Math.min(window.devicePixelRatio || 1, 2),
+        cell: defaults.cell.slice(),
+        direct: null,
+        reciprocal: null,
+        fullReflections: [],
+        pattern: null,
+        markHkl: [10, -7, 3],
+        view: {
+          centerX: 0,
+          centerY: 0,
+          radius: 1,
+          fittedRadius: 1
+        },
+        pointer: {
+          active: false,
+          moved: false,
+          lastX: 0,
+          lastY: 0,
+          touches: new Map(),
+          pinchDistance: 0,
+          pinchRadius: 1
+        }
+      };
+
+      function v(x=0, y=0, z=0){ return {x, y, z}; }
+      function add(a,b){ return {x:a.x+b.x, y:a.y+b.y, z:a.z+b.z}; }
+      function sub(a,b){ return {x:a.x-b.x, y:a.y-b.y, z:a.z-b.z}; }
+      function scaleVec(a,s){ return {x:a.x*s, y:a.y*s, z:a.z*s}; }
+      function dot(a,b){ return a.x*b.x + a.y*b.y + a.z*b.z; }
+      function cross(a,b){ return {x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x}; }
+      function len(a){ return Math.hypot(a.x, a.y, a.z); }
+      function norm(a){
+        const l = len(a);
+        if (l < 1e-12) throw new Error('uvw is too close to zero');
+        return {x:a.x/l, y:a.y/l, z:a.z/l};
+      }
+      function clamp(x,a,b){ return Math.max(a, Math.min(b, x)); }
+      function deg(x){ return x * Math.PI / 180; }
+
+      function directCellMatrix(cell) {
+        const [a, b, c, alphaDeg, betaDeg, gammaDeg] = cell;
+        const alpha = deg(alphaDeg);
+        const beta = deg(betaDeg);
+        const gamma = deg(gammaDeg);
+        const sinGamma = Math.sin(gamma);
+        if (Math.abs(sinGamma) < 1e-10) throw new Error('gamma angle is too close to 0 or 180 degrees');
+        const avec = v(a, 0, 0);
+        const bvec = v(b * Math.cos(gamma), b * sinGamma, 0);
+        const cx = c * Math.cos(beta);
+        const cy = c * (Math.cos(alpha) - Math.cos(beta) * Math.cos(gamma)) / sinGamma;
+        const cz2 = c * c - cx * cx - cy * cy;
+        if (cz2 <= 0) throw new Error('cell angles produce a non-physical unit cell');
+        const cvec = v(cx, cy, Math.sqrt(cz2));
+        return [avec, bvec, cvec];
+      }
+
+      function reciprocalCellMatrix(direct) {
+        const [avec, bvec, cvec] = direct;
+        const volume = dot(avec, cross(bvec, cvec));
+        if (Math.abs(volume) < 1e-12) throw new Error('unit-cell volume is too small');
+        return [
+          scaleVec(cross(bvec, cvec), 1 / volume),
+          scaleVec(cross(cvec, avec), 1 / volume),
+          scaleVec(cross(avec, bvec), 1 / volume)
+        ];
+      }
+
+      function matVec(columns, coeffs) {
+        return add(add(scaleVec(columns[0], coeffs[0]), scaleVec(columns[1], coeffs[1])), scaleVec(columns[2], coeffs[2]));
+      }
+
+      function reciprocalPoints(direct, reciprocal, qmax, maxIndex) {
+        const directLengths = direct.map(len);
+        const capped = directLengths.map(length => Math.min(Math.ceil(qmax * length + 3), maxIndex));
+        const reflections = [];
+        for (let h = -capped[0]; h <= capped[0]; h += 1) {
+          for (let k = -capped[1]; k <= capped[1]; k += 1) {
+            for (let l = -capped[2]; l <= capped[2]; l += 1) {
+              if (h === 0 && k === 0 && l === 0) continue;
+              const g = matVec(reciprocal, [h, k, l]);
+              const q = len(g);
+              if (q <= qmax * 1.000001) reflections.push({h, k, l, g, q});
+            }
+          }
+        }
+        return reflections;
+      }
+
+      function zoneBeamBasis(direct, uvw) {
+        const beam = norm(matVec(direct, uvw));
+        let ref = direct[0];
+        let xhat = sub(ref, scaleVec(beam, dot(ref, beam)));
+        if (len(xhat) < 1e-8) {
+          ref = direct[1];
+          xhat = sub(ref, scaleVec(beam, dot(ref, beam)));
+        }
+        if (len(xhat) < 1e-8) {
+          ref = v(0, 0, 1);
+          xhat = sub(ref, scaleVec(beam, dot(ref, beam)));
+        }
+        xhat = norm(xhat);
+        const yhat = norm(cross(beam, xhat));
+        return {beam, xhat, yhat};
+      }
+
+      function percentile(values, p) {
+        if (!values.length) return 0;
+        const sorted = values.slice().sort((a,b) => a - b);
+        const idx = (p / 100) * (sorted.length - 1);
+        const lo = Math.floor(idx);
+        const hi = Math.ceil(idx);
+        if (lo === hi) return sorted[lo];
+        return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+      }
+
+      function readUvw() {
+        const uvw = [Number(ui.uInput.value), Number(ui.vInput.value), Number(ui.wInput.value)];
+        if (!uvw.every(Number.isFinite)) throw new Error('uvw fields must be numeric');
+        norm(v(uvw[0], uvw[1], uvw[2]));
+        return uvw;
+      }
+
+      function readCell() {
+        const cell = [
+          Number(ui.aInput.value),
+          Number(ui.bInput.value),
+          Number(ui.cInput.value),
+          Number(ui.alphaInput.value),
+          Number(ui.betaInput.value),
+          Number(ui.gammaInput.value)
+        ];
+        if (!cell.every(Number.isFinite)) throw new Error('cell fields must be numeric');
+        if (cell[0] <= 0 || cell[1] <= 0 || cell[2] <= 0) throw new Error('cell lengths must be positive');
+        if (cell[3] <= 0 || cell[3] >= 180 || cell[4] <= 0 || cell[4] >= 180 || cell[5] <= 0 || cell[5] >= 180) {
+          throw new Error('cell angles must be between 0 and 180 degrees');
+        }
+        return cell;
+      }
+
+      function cellsMatch(a, b) {
+        if (!a || !b) return false;
+        for (let i = 0; i < a.length; i += 1) {
+          if (Math.abs(a[i] - b[i]) > 1e-10) return false;
+        }
+        return true;
+      }
+
+      function writeCellInputs(cell) {
+        ui.aInput.value = String(cell[0]);
+        ui.bInput.value = String(cell[1]);
+        ui.cInput.value = String(cell[2]);
+        ui.alphaInput.value = String(cell[3]);
+        ui.betaInput.value = String(cell[4]);
+        ui.gammaInput.value = String(cell[5]);
+      }
+
+      function readMarkHkl() {
+        const raw = [ui.hInput.value.trim(), ui.kInput.value.trim(), ui.lInput.value.trim()];
+        if (raw.every(value => value === '')) return null;
+        if (raw.some(value => value === '')) throw new Error('mark hkl needs h, k, and l, or all blank');
+        const hkl = raw.map(Number);
+        if (!hkl.every(Number.isInteger)) throw new Error('mark hkl values must be integers');
+        return hkl;
+      }
+
+      function currentRiskSettings() {
+        return {
+          s0: Number(ui.s0Slider.value),
+          sigmaC: Number(ui.sigmaSlider.value),
+          rCut: Number(ui.rCutSlider.value)
+        };
+      }
+
+      function currentDisplaySettings() {
+        return {
+          minDisplayIntensity: Number(ui.displayCutoffSlider.value),
+          showAllCandidates: ui.showAllCandidates.checked
+        };
+      }
+
+      function updateSliderReadouts() {
+        const settings = currentRiskSettings();
+        ui.s0Value.textContent = settings.s0.toFixed(4);
+        ui.sigmaValue.textContent = settings.sigmaC.toFixed(4);
+        ui.rCutValue.textContent = settings.rCut.toFixed(4);
+        ui.displayCutoffValue.textContent = Number(ui.displayCutoffSlider.value).toFixed(3);
+      }
+
+      function updateUvwReadout(uvw) {
+        const magnitude = Math.hypot(uvw[0], uvw[1], uvw[2]);
+        ui.uvwNorm.textContent = 'norm = ' + magnitude.toFixed(5);
+      }
+
+      function updateCellReadout(cell) {
+        ui.cellReadout.textContent =
+          'a,b,c = ' + cell.slice(0, 3).map(value => value.toPrecision(5)).join(', ') +
+          '; angles = ' + cell.slice(3).map(value => value.toPrecision(5)).join(', ');
+      }
+
+      function rebuildLatticeForCell(cell) {
+        if (cellsMatch(cell, app.cell) && app.direct && app.reciprocal && app.fullReflections.length) return false;
+        app.cell = cell.slice();
+        app.direct = directCellMatrix(app.cell);
+        app.reciprocal = reciprocalCellMatrix(app.direct);
+        app.fullReflections = reciprocalPoints(app.direct, app.reciprocal, 1 / defaults.dMin, defaults.maxIndex);
+        return true;
+      }
+
+      function buildPattern(uvw, markHkl, riskSettings, displaySettings) {
+        const qmax = 1 / defaults.dMin;
+        const uvwNorm = norm(v(uvw[0], uvw[1], uvw[2]));
+        const zone = [];
+        for (const ref of app.fullReflections) {
+          const zoneDistance = ref.h * uvwNorm.x + ref.k * uvwNorm.y + ref.l * uvwNorm.z;
+          if (Math.abs(zoneDistance) <= defaults.zoneTolerance) zone.push(ref);
+        }
+        if (!zone.length) throw new Error('no reflections selected by the continuous zone slab');
+
+        const basis = zoneBeamBasis(app.direct, uvw);
+        const kMag = 1 / defaults.lambdaAng;
+        const candidates = [];
+        for (let i = 0; i < zone.length; i += 1) {
+          const ref = zone[i];
+          const gx = dot(ref.g, basis.xhat);
+          const gy = dot(ref.g, basis.yhat);
+          const gz = dot(ref.g, basis.beam);
+          const koutZ = kMag + gz;
+          const s = Math.sqrt(gx * gx + gy * gy + koutZ * koutZ) - kMag;
+          const forward = koutZ > 1e-12;
+          candidates.push({
+            candidateIndex: i,
+            h: ref.h,
+            k: ref.k,
+            l: ref.l,
+            g: ref.g,
+            q: ref.q,
+            s,
+            forward,
+            x: forward ? defaults.scale * gx / koutZ : NaN,
+            y: forward ? defaults.scale * gy / koutZ : NaN
+          });
+        }
+
+        const sWidth = Math.max(0.50 * defaults.sMax, 1e-9);
+        const qWidth = Math.max(0.62 * qmax, 1e-9);
+        const intensities = [];
+        const resolutionWeights = [];
+        for (const candidate of candidates) {
+          const excitationWeight = Math.exp(-Math.pow(candidate.s / sWidth, 2));
+          const resolutionWeight = Math.exp(-Math.pow(candidate.q / qWidth, 2));
+          resolutionWeights.push(resolutionWeight);
+          intensities.push(excitationWeight * resolutionWeight);
+        }
+
+        const robustTop = Math.max(percentile(intensities, 99.5), 1e-12);
+        const displayIndices = [];
+        const displayIntensityByCandidate = new Map();
+        for (let i = 0; i < candidates.length; i += 1) {
+          const candidate = candidates[i];
+          const intensity = clamp(intensities[i] / robustTop, 0, 1);
+          const displayIntensity = displaySettings.showAllCandidates ? clamp(0.12 + 0.88 * resolutionWeights[i], 0, 1) : intensity;
+          const keep = displaySettings.showAllCandidates
+            ? candidate.forward
+            : candidate.forward && Math.abs(candidate.s) <= defaults.sMax && intensity >= displaySettings.minDisplayIntensity;
+          if (keep) {
+            displayIndices.push(i);
+            displayIntensityByCandidate.set(i, displayIntensity);
+          }
+        }
+
+        let markDisplayIndex = null;
+        if (markHkl) {
+          const markCandidateIndex = candidates.findIndex(candidate =>
+            candidate.h === markHkl[0] && candidate.k === markHkl[1] && candidate.l === markHkl[2]
+          );
+          if (markCandidateIndex >= 0 && candidates[markCandidateIndex].forward) {
+            if (!displayIntensityByCandidate.has(markCandidateIndex)) {
+              const forcedIntensity = clamp(intensities[markCandidateIndex] / robustTop, 0, 1);
+              displayIndices.push(markCandidateIndex);
+              displayIntensityByCandidate.set(markCandidateIndex, Math.max(0.35, forcedIntensity));
+            }
+          }
+        }
+
+        if (!displayIndices.length) throw new Error('no reflections passed the display filter');
+
+        const displaySpots = displayIndices.map((candidateIndex, displayIndex) => {
+          const candidate = candidates[candidateIndex];
+          const spot = {
+            displayIndex,
+            candidateIndex,
+            h: candidate.h,
+            k: candidate.k,
+            l: candidate.l,
+            g: candidate.g,
+            q: candidate.q,
+            s: candidate.s,
+            x: candidate.x,
+            y: candidate.y,
+            displayIntensity: displayIntensityByCandidate.get(candidateIndex),
+            risk: 0,
+            e: 0,
+            neighborSum: 0,
+            neighborCount: 0,
+            activeNeighborCount: 0
+          };
+          if (markHkl && spot.h === markHkl[0] && spot.k === markHkl[1] && spot.l === markHkl[2]) {
+            markDisplayIndex = displayIndex;
+          }
+          return spot;
+        });
+
+        const neighborLists = precomputeNeighborLists(displaySpots, candidates, defaults.rCutMax);
+        applyRisk(candidates, displaySpots, neighborLists, riskSettings);
+
+        return {
+          uvw,
+          zoneCount: zone.length,
+          candidates,
+          displaySpots,
+          neighborLists,
+          markDisplayIndex,
+          markHkl,
+          vmax: robustRiskMax(displaySpots),
+          plotRadius: autoPlotRadius(displaySpots)
+        };
+      }
+
+      function precomputeNeighborLists(displaySpots, candidates, maxRCut) {
+        const maxR2 = maxRCut * maxRCut;
+        const neighborLists = [];
+        for (const spot of displaySpots) {
+          const indices = [];
+          const distances = [];
+          const g = spot.g;
+          for (let j = 0; j < candidates.length; j += 1) {
+            if (j === spot.candidateIndex) continue;
+            const h = candidates[j].g;
+            const dx = g.x - h.x;
+            const dy = g.y - h.y;
+            const dz = g.z - h.z;
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 < maxR2 && d2 > 1e-18) {
+              indices.push(j);
+              distances.push(Math.sqrt(d2));
+            }
+          }
+          neighborLists.push({indices, distances});
+        }
+        return neighborLists;
+      }
+
+      function applyRisk(candidates, displaySpots, neighborLists, settings) {
+        const s0 = Math.max(settings.s0, 1e-12);
+        const sigmaC = Math.max(settings.sigmaC, 1e-12);
+        const rCut = Math.max(settings.rCut, 0);
+        const eAll = candidates.map(candidate => Math.exp(-Math.pow(candidate.s / s0, 2)));
+        for (let i = 0; i < displaySpots.length; i += 1) {
+          const spot = displaySpots[i];
+          const neighbors = neighborLists[i];
+          let neighborSum = 0;
+          let neighborCount = 0;
+          let activeNeighborCount = 0;
+          for (let n = 0; n < neighbors.indices.length; n += 1) {
+            const distance = neighbors.distances[n];
+            if (distance >= rCut) continue;
+            const coupling = Math.exp(-Math.pow(distance / sigmaC, 2));
+            const contribution = eAll[neighbors.indices[n]] * coupling;
+            neighborSum += contribution;
+            neighborCount += 1;
+            if (eAll[neighbors.indices[n]] > 0 && contribution > defaults.envContributionFloor) {
+              activeNeighborCount += 1;
+            }
+          }
+          spot.e = eAll[spot.candidateIndex];
+          spot.neighborSum = neighborSum;
+          spot.neighborCount = neighborCount;
+          spot.activeNeighborCount = activeNeighborCount;
+          spot.risk = spot.e * neighborSum;
+        }
+      }
+
+      function robustRiskMax(spots) {
+        const positive = spots.map(spot => spot.risk).filter(value => value > 0);
+        return Math.max(percentile(positive, defaults.riskPercentile), 1e-12);
+      }
+
+      function autoPlotRadius(spots) {
+        let maxAbs = 1e-6;
+        for (const spot of spots) {
+          maxAbs = Math.max(maxAbs, Math.abs(spot.x), Math.abs(spot.y));
+        }
+        return maxAbs * 1.12;
+      }
+
+      function resetViewToPattern() {
+        if (!app.pattern) return;
+        app.view.centerX = 0;
+        app.view.centerY = 0;
+        app.view.fittedRadius = app.pattern.plotRadius;
+        app.view.radius = app.pattern.plotRadius;
+      }
+
+      function screenScale() {
+        return Math.min(app.width, app.height) * 0.45 / app.view.radius;
+      }
+
+      function worldToScreen(x, y) {
+        const s = screenScale();
+        return {
+          x: app.width * 0.5 + (x - app.view.centerX) * s,
+          y: app.height * 0.5 - (y - app.view.centerY) * s
+        };
+      }
+
+      function screenToWorld(x, y) {
+        const s = screenScale();
+        return {
+          x: app.view.centerX + (x - app.width * 0.5) / s,
+          y: app.view.centerY - (y - app.height * 0.5) / s
+        };
+      }
+
+      function lerp(a, b, t) {
+        return a + (b - a) * t;
+      }
+
+      function colorRamp(t, alpha=1) {
+        const stops = [
+          {t: 0.00, c: [43, 79, 107]},
+          {t: 0.36, c: [32, 106, 93]},
+          {t: 0.68, c: [217, 119, 6]},
+          {t: 1.00, c: [185, 28, 28]}
+        ];
+        const x = clamp(t, 0, 1);
+        let a = stops[0];
+        let b = stops[stops.length - 1];
+        for (let i = 0; i < stops.length - 1; i += 1) {
+          if (x >= stops[i].t && x <= stops[i + 1].t) {
+            a = stops[i];
+            b = stops[i + 1];
+            break;
+          }
+        }
+        const local = (x - a.t) / Math.max(1e-12, b.t - a.t);
+        const r = Math.round(lerp(a.c[0], b.c[0], local));
+        const g = Math.round(lerp(a.c[1], b.c[1], local));
+        const bl = Math.round(lerp(a.c[2], b.c[2], local));
+        return 'rgba(' + r + ',' + g + ',' + bl + ',' + alpha + ')';
+      }
+
+      function drawBackground() {
+        const g = ctx.createLinearGradient(0, 0, 0, app.height);
+        g.addColorStop(0, colors.bgTop);
+        g.addColorStop(1, colors.bgBottom);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, app.width, app.height);
+
+        ctx.save();
+        ctx.strokeStyle = colors.grid;
+        ctx.globalAlpha = 0.32;
+        ctx.lineWidth = 1;
+        const gap = app.width < 500 ? 32 : 42;
+        for (let x = -gap; x < app.width + gap; x += gap) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x + app.height, app.height);
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        drawDetectorGrid();
+      }
+
+      function drawDetectorGrid() {
+        const s = screenScale();
+        const minWorldX = screenToWorld(0, 0).x;
+        const maxWorldX = screenToWorld(app.width, 0).x;
+        const minWorldY = screenToWorld(0, app.height).y;
+        const maxWorldY = screenToWorld(0, 0).y;
+        const step = niceStep((maxWorldX - minWorldX) / 8);
+
+        ctx.save();
+        ctx.strokeStyle = colors.axis;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.12;
+        for (let x = Math.floor(minWorldX / step) * step; x <= maxWorldX; x += step) {
+          const p = worldToScreen(x, 0);
+          ctx.beginPath();
+          ctx.moveTo(p.x, 0);
+          ctx.lineTo(p.x, app.height);
+          ctx.stroke();
+        }
+        for (let y = Math.floor(minWorldY / step) * step; y <= maxWorldY; y += step) {
+          const p = worldToScreen(0, y);
+          ctx.beginPath();
+          ctx.moveTo(0, p.y);
+          ctx.lineTo(app.width, p.y);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 0.34;
+        const origin = worldToScreen(0, 0);
+        ctx.beginPath();
+        ctx.moveTo(origin.x, 0);
+        ctx.lineTo(origin.x, app.height);
+        ctx.moveTo(0, origin.y);
+        ctx.lineTo(app.width, origin.y);
+        ctx.stroke();
+        ctx.restore();
+        void s;
+      }
+
+      function niceStep(raw) {
+        const exponent = Math.floor(Math.log10(Math.max(raw, 1e-12)));
+        const base = raw / Math.pow(10, exponent);
+        const nice = base < 1.5 ? 1 : base < 3 ? 2 : base < 7 ? 5 : 10;
+        return nice * Math.pow(10, exponent);
+      }
+
+      function drawPattern() {
+        drawBackground();
+        const pattern = app.pattern;
+        if (!pattern) return;
+
+        const spots = pattern.displaySpots.slice().sort((a,b) => a.displayIntensity - b.displayIntensity);
+        const pxScale = screenScale();
+        for (const spot of spots) {
+          const p = worldToScreen(spot.x, spot.y);
+          if (p.x < -30 || p.x > app.width + 30 || p.y < -30 || p.y > app.height + 30) continue;
+          const t = clamp(spot.risk / pattern.vmax, 0, 1);
+          const size = (2.0 + 6.6 * Math.pow(spot.displayIntensity, 1.35)) * Math.sqrt(Math.max(pxScale, 1) / 75);
+          const glow = size * (2.2 + 1.6 * t);
+
+          ctx.save();
+          ctx.fillStyle = colorRamp(t, 0.13 + 0.10 * t);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, glow, 0, TAU);
+          ctx.fill();
+          ctx.restore();
+
+          ctx.save();
+          ctx.fillStyle = colorRamp(t, 0.72 + 0.25 * Math.pow(spot.displayIntensity, 0.7));
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, Math.max(1.2, size), 0, TAU);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        if (ui.showDirectBeam.checked) drawDirectBeam();
+        drawMark();
+      }
+
+      function drawDirectBeam() {
+        const p = worldToScreen(0, 0);
+        ctx.save();
+        ctx.fillStyle = 'rgba(32, 106, 93, 0.15)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 21, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255, 253, 249, 0.88)';
+        ctx.strokeStyle = 'rgba(32, 106, 93, 0.7)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 7.5, 0, TAU);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawMark() {
+        const pattern = app.pattern;
+        if (!pattern || pattern.markDisplayIndex === null) return;
+        const spot = pattern.displaySpots[pattern.markDisplayIndex];
+        const p = worldToScreen(spot.x, spot.y);
+        ctx.save();
+        ctx.strokeStyle = colors.high;
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 13, 0, TAU);
+        ctx.stroke();
+        if (ui.showLabels.checked) {
+          ctx.fillStyle = colors.high;
+          ctx.font = '14px Georgia, "Times New Roman", serif';
+          ctx.fillText('(' + spot.h + ' ' + spot.k + ' ' + spot.l + ')', p.x + 10, p.y - 10);
+        }
+        ctx.restore();
+      }
+
+      function formatNumber(value, digits=5) {
+        if (!Number.isFinite(value)) return 'n/a';
+        if (Math.abs(value) >= 1000 || (Math.abs(value) > 0 && Math.abs(value) < 0.001)) return value.toExponential(3);
+        return value.toPrecision(digits);
+      }
+
+      function updateReadouts() {
+        updateSliderReadouts();
+        const pattern = app.pattern;
+        if (!pattern) return;
+        updateUvwReadout(pattern.uvw);
+        updateCellReadout(app.cell);
+        ui.summaryReadout.innerHTML =
+          '<div><strong>Risk source</strong>: ' + pattern.zoneCount + ' candidate reflections</div>' +
+          '<div><strong>Displayed</strong>: ' + pattern.displaySpots.length + ' hkls</div>' +
+          '<div><strong>Visible cutoff</strong>: ' + Number(ui.displayCutoffSlider.value).toFixed(3) + '</div>' +
+          '<div><strong>Color vmax</strong>: ' + formatNumber(pattern.vmax) + '</div>' +
+          '<div><strong>View radius</strong>: ' + formatNumber(app.view.radius) + '</div>';
+
+        if (!pattern.markHkl) {
+          ui.markReadout.innerHTML = '<div>No marked hkl</div>';
+          return;
+        }
+
+        const [h, k, l] = pattern.markHkl;
+        if (pattern.markDisplayIndex === null) {
+          const exists = pattern.candidates.some(candidate => candidate.h === h && candidate.k === k && candidate.l === l);
+          ui.markReadout.innerHTML =
+            '<div><strong>(' + h + ' ' + k + ' ' + l + ')</strong></div>' +
+            '<div>' + (exists ? 'not in forward half-space' : 'not in candidate slab') + '</div>';
+          return;
+        }
+
+        const spot = pattern.displaySpots[pattern.markDisplayIndex];
+        ui.markReadout.innerHTML =
+          '<div><strong>(' + spot.h + ' ' + spot.k + ' ' + spot.l + ')</strong></div>' +
+          '<div>S_risk = ' + formatNumber(spot.risk) + '</div>' +
+          '<div>R_env = ' + formatNumber(spot.neighborSum) + '</div>' +
+          '<div>N_r_cut = ' + spot.neighborCount + '</div>' +
+          '<div>N_env = ' + spot.activeNeighborCount + '</div>' +
+          '<div>E(g) = ' + formatNumber(spot.e) + '</div>' +
+          '<div>s_g = ' + formatNumber(spot.s) + ' 1/A</div>' +
+          '<div>|g| = ' + formatNumber(spot.q) + ' 1/A</div>';
+      }
+
+      function rebuildPattern(resetView=true) {
+        try {
+          const cell = readCell();
+          const uvw = readUvw();
+          const markHkl = readMarkHkl();
+          const riskSettings = currentRiskSettings();
+          const displaySettings = currentDisplaySettings();
+          const latticeChanged = rebuildLatticeForCell(cell);
+          app.markHkl = markHkl;
+          ui.status.textContent = latticeChanged ? 'Re-indexing reciprocal lattice...' : 'Computing reflections...';
+          const pattern = buildPattern(uvw, markHkl, riskSettings, displaySettings);
+          app.pattern = pattern;
+          if (resetView) resetViewToPattern();
+          pattern.vmax = robustRiskMax(pattern.displaySpots);
+          updateReadouts();
+          drawPattern();
+          ui.status.textContent = pattern.zoneCount + ' candidates, ' + pattern.displaySpots.length + ' displayed.';
+        } catch (err) {
+          ui.status.textContent = err.message || String(err);
+          updateSliderReadouts();
+          drawPattern();
+        }
+      }
+
+      function recomputeRiskOnly() {
+        if (!app.pattern) return;
+        const settings = currentRiskSettings();
+        applyRisk(app.pattern.candidates, app.pattern.displaySpots, app.pattern.neighborLists, settings);
+        app.pattern.vmax = robustRiskMax(app.pattern.displaySpots);
+        updateReadouts();
+        drawPattern();
+      }
+
+      function markSpot(spot) {
+        ui.hInput.value = String(spot.h);
+        ui.kInput.value = String(spot.k);
+        ui.lInput.value = String(spot.l);
+        rebuildPattern(false);
+      }
+
+      function nearestSpot(screenX, screenY) {
+        if (!app.pattern) return null;
+        let best = null;
+        let bestDist2 = Infinity;
+        for (const spot of app.pattern.displaySpots) {
+          const p = worldToScreen(spot.x, spot.y);
+          const dx = p.x - screenX;
+          const dy = p.y - screenY;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestDist2) {
+            bestDist2 = d2;
+            best = spot;
+          }
+        }
+        return bestDist2 <= 16 * 16 ? best : null;
+      }
+
+      function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        app.width = Math.max(1, Math.floor(rect.width));
+        app.height = Math.max(1, Math.floor(rect.height));
+        app.dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.floor(app.width * app.dpr);
+        canvas.height = Math.floor(app.height * app.dpr);
+        ctx.setTransform(app.dpr, 0, 0, app.dpr, 0, 0);
+        drawPattern();
+      }
+
+      function canvasPoint(event) {
+        const rect = canvas.getBoundingClientRect();
+        return {x: event.clientX - rect.left, y: event.clientY - rect.top};
+      }
+
+      function bindUI() {
+        ui.applyInputs.addEventListener('click', () => rebuildPattern(true));
+        [
+          ui.aInput,
+          ui.bInput,
+          ui.cInput,
+          ui.alphaInput,
+          ui.betaInput,
+          ui.gammaInput,
+          ui.uInput,
+          ui.vInput,
+          ui.wInput,
+          ui.hInput,
+          ui.kInput,
+          ui.lInput
+        ].forEach(input => {
+          input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') rebuildPattern(true);
+          });
+        });
+        [ui.aInput, ui.bInput, ui.cInput, ui.alphaInput, ui.betaInput, ui.gammaInput].forEach(input => {
+          input.addEventListener('input', () => {
+            try { updateCellReadout(readCell()); } catch (err) { ui.cellReadout.textContent = 'cell = n/a'; }
+          });
+        });
+        [ui.uInput, ui.vInput, ui.wInput].forEach(input => {
+          input.addEventListener('input', () => {
+            try { updateUvwReadout(readUvw()); } catch (err) { ui.uvwNorm.textContent = 'norm = n/a'; }
+          });
+        });
+        ui.clearMark.addEventListener('click', () => {
+          ui.hInput.value = '';
+          ui.kInput.value = '';
+          ui.lInput.value = '';
+          rebuildPattern(false);
+        });
+        ui.resetCell.addEventListener('click', () => {
+          writeCellInputs(defaults.cell);
+          rebuildPattern(true);
+        });
+        [ui.s0Slider, ui.sigmaSlider, ui.rCutSlider].forEach(slider => {
+          slider.addEventListener('input', recomputeRiskOnly);
+        });
+        ui.displayCutoffSlider.addEventListener('input', () => rebuildPattern(false));
+        ui.showAllCandidates.addEventListener('change', () => rebuildPattern(true));
+        [ui.showDirectBeam, ui.showLabels].forEach(input => input.addEventListener('change', drawPattern));
+        ui.resetRisk.addEventListener('click', () => {
+          ui.s0Slider.value = defaults.s0;
+          ui.sigmaSlider.value = defaults.sigmaC;
+          ui.rCutSlider.value = defaults.rCut;
+          recomputeRiskOnly();
+        });
+        ui.resetView.addEventListener('click', () => {
+          resetViewToPattern();
+          updateReadouts();
+          drawPattern();
+        });
+      }
+
+      function bindCanvas() {
+        canvas.addEventListener('pointerdown', (event) => {
+          canvas.setPointerCapture(event.pointerId);
+          const point = canvasPoint(event);
+          app.pointer.active = true;
+          app.pointer.moved = false;
+          app.pointer.lastX = point.x;
+          app.pointer.lastY = point.y;
+          app.pointer.touches.set(event.pointerId, point);
+        });
+
+        canvas.addEventListener('pointermove', (event) => {
+          if (!app.pointer.active) return;
+          const point = canvasPoint(event);
+          app.pointer.touches.set(event.pointerId, point);
+
+          if (app.pointer.touches.size >= 2) {
+            const values = [...app.pointer.touches.values()];
+            const d = Math.hypot(values[0].x - values[1].x, values[0].y - values[1].y);
+            if (app.pointer.pinchDistance > 0) {
+              const ratio = app.pointer.pinchDistance / Math.max(d, 1);
+              app.view.radius = clamp(app.pointer.pinchRadius * ratio, app.view.fittedRadius * 0.08, app.view.fittedRadius * 8);
+              updateReadouts();
+              drawPattern();
+            } else {
+              app.pointer.pinchDistance = d;
+              app.pointer.pinchRadius = app.view.radius;
+            }
+            app.pointer.moved = true;
+            return;
+          }
+
+          if (event.buttons === 0 && event.pointerType === 'mouse') return;
+          const dx = point.x - app.pointer.lastX;
+          const dy = point.y - app.pointer.lastY;
+          if (Math.hypot(dx, dy) > 2) app.pointer.moved = true;
+          const s = screenScale();
+          app.view.centerX -= dx / s;
+          app.view.centerY += dy / s;
+          app.pointer.lastX = point.x;
+          app.pointer.lastY = point.y;
+          updateReadouts();
+          drawPattern();
+        });
+
+        function endPointer(event) {
+          const point = canvasPoint(event);
+          app.pointer.touches.delete(event.pointerId);
+          if (app.pointer.touches.size < 2) {
+            app.pointer.pinchDistance = 0;
+          }
+          if (!app.pointer.moved) {
+            const spot = nearestSpot(point.x, point.y);
+            if (spot) markSpot(spot);
+          }
+          if (app.pointer.touches.size === 0) {
+            app.pointer.active = false;
+            app.pointer.moved = false;
+          }
+        }
+
+        canvas.addEventListener('pointerup', endPointer);
+        canvas.addEventListener('pointercancel', endPointer);
+
+        canvas.addEventListener('wheel', (event) => {
+          event.preventDefault();
+          if (!app.pattern) return;
+          const point = canvasPoint(event);
+          const before = screenToWorld(point.x, point.y);
+          const factor = Math.exp(event.deltaY * 0.001);
+          app.view.radius = clamp(app.view.radius * factor, app.view.fittedRadius * 0.08, app.view.fittedRadius * 8);
+          const after = screenToWorld(point.x, point.y);
+          app.view.centerX += before.x - after.x;
+          app.view.centerY += before.y - after.y;
+          updateReadouts();
+          drawPattern();
+        }, {passive: false});
+
+        canvas.addEventListener('dblclick', () => {
+          resetViewToPattern();
+          updateReadouts();
+          drawPattern();
+        });
+      }
+
+      function init() {
+        try {
+          writeCellInputs(defaults.cell);
+          app.cell = defaults.cell.slice();
+          app.direct = directCellMatrix(app.cell);
+          app.reciprocal = reciprocalCellMatrix(app.direct);
+          app.fullReflections = reciprocalPoints(app.direct, app.reciprocal, 1 / defaults.dMin, defaults.maxIndex);
+          ui.status.textContent = app.fullReflections.length + ' reciprocal points indexed.';
+        } catch (err) {
+          ui.status.textContent = err.message || String(err);
+          return;
+        }
+
+        updateSliderReadouts();
+        updateCellReadout(app.cell);
+        bindUI();
+        bindCanvas();
+
+        const resizeObserver = new ResizeObserver(resizeCanvas);
+        resizeObserver.observe(canvas);
+        window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 120));
+
+        resizeCanvas();
+        rebuildPattern(true);
+      }
+
+      init();
+    })();
+  </script>
+</body>
+</html>

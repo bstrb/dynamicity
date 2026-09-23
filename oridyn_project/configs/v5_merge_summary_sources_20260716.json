@@ -1,0 +1,29 @@
+{
+  "source_directories": [
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_aggressive_broad_filter_poc_20_0p3_20260713",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_aggressive_filter_poc_20_0p3_20260713",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_allscore_filter_and_50split_20_0p3_20260706",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_broad_resolution_poc_cv5_20_0p3_20260713",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_broad_resolution_poc_prepare_20_0p3_20260713",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_broad_resolution_poc_summary_cv5_20_0p3_20260713",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_coarse_score_sweep_20_0p3_20260715",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_crowding_target_excitation_corners_20_0p3_20260714",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_dexc_actionability_pilot12_cv5_20_0p3_20260713",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_dexc_all_hkl_actionability_screen_20_0p3_20260713",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_dexc_correction_candidate_validation_20_0p3_20260712",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_dexc_target_hkl_families_20_0p3_20260712",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_excitation_imbalance_orientation_broad_hkl_20_0p3_20260712",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_excitation_imbalance_orientation_broad_hkl_v2_20_0p3_20260712",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_excitation_imbalance_orientation_diagnostic_20_0p3_20260712",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_highEg_excitation_matched_crowding_filter_20_0p3_20260714",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_nonself_local_excitation_raw_20_0p3_20260705",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_nonself_positive_accepted_filter_sweep_20_0p3_20260706",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_p_lambda_screen_20260716",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_sg175_derived_expression_screen_20_0p3_20260715",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_sg175_pathway_moment_screen_20_0p3_20260715",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_sg175_sc100_alpha_m3_m4_20_0p3_20260715",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_sg175_sc100_alpha_screen_20_0p3_20260715",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_sg200_sg250_sc100_a000_20_0p3_20260715",
+    "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v5_target_excitation_stratified_filter_20_0p3_20260712"
+  ]
+}

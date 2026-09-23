@@ -10,12 +10,16 @@ set -euo pipefail
 # Hardcoded list of stream files
 #######################################
 STREAMS=(
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v2_scoring_filtering_20_0p5_20260623/filtered_v2_full/geometry_coupling_v2_full_keep90.stream"
-
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v2_scoring_filtering_20_0p5_20260623/filtered_v2_full/geometry_coupling_v2_full_keep80.stream"
-
-  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v2_scoring_filtering_20_0p5_20260623/filtered_v2_full/geometry_coupling_v2_full_keep70.stream"
+  "/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v7_absolute_Srisk_filter_streams_s0_0p002_sig0p05_rcut0p20_20260904/v7_abs_srisk_gt_0p050/v7_abs_srisk_gt_0p050.stream"
+"/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v7_absolute_Srisk_filter_streams_s0_0p002_sig0p05_rcut0p20_20260904/random_matched_v7_abs_srisk_gt_0p050_seed20260904/random_matched_v7_abs_srisk_gt_0p050_seed20260904.stream"
+"/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v7_absolute_Srisk_filter_streams_s0_0p002_sig0p05_rcut0p20_20260904/v7_abs_srisk_gt_0p020/v7_abs_srisk_gt_0p020.stream"
+"/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v7_absolute_Srisk_filter_streams_s0_0p002_sig0p05_rcut0p20_20260904/random_matched_v7_abs_srisk_gt_0p020_seed20260904/random_matched_v7_abs_srisk_gt_0p020_seed20260904.stream"
+"/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v7_absolute_Srisk_filter_streams_s0_0p002_sig0p05_rcut0p20_20260904/v7_abs_srisk_gt_0p010/v7_abs_srisk_gt_0p010.stream"
+"/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v7_absolute_Srisk_filter_streams_s0_0p002_sig0p05_rcut0p20_20260904/random_matched_v7_abs_srisk_gt_0p010_seed20260904/random_matched_v7_abs_srisk_gt_0p010_seed20260904.stream"
+"/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v7_absolute_Srisk_filter_streams_s0_0p002_sig0p05_rcut0p20_20260904/v7_abs_srisk_gt_0p005/v7_abs_srisk_gt_0p005.stream"
+"/home/bubl3932/files/MFM300_VIII/MFM300_UK_2ndGrid_spot_4_220mm_0deg_150nm_50ms_20250524/oridyn_v7_absolute_Srisk_filter_streams_s0_0p002_sig0p05_rcut0p20_20260904/random_matched_v7_abs_srisk_gt_0p005_seed20260904/random_matched_v7_abs_srisk_gt_0p005_seed20260904.stream"
 )
+
 #COF300
 #--model=offset -y 4/m --iterations=25 --polarisation=none --min-measurements=2 --no-Bscale -j 8
 #######################################
@@ -25,6 +29,8 @@ STREAMS=(
 THREADS=24
 SYM="4/mmm"
 ITERATIONS=10
+# SYM="1"
+# ITERATIONS=1
 MIN_MEASUREMENTS=1
 PUSH_RES=inf
 MODEL="offset"   # partialator model to use (e.g. "unity", "offset", "scale", "scale+offset")
@@ -33,7 +39,7 @@ DISABLE_PR=true   # whether to disable partialator's post-refinement (PR) step, 
 
 # LOWRES & HIGHRES only used for qc report and is not a resolution cutoff & Wilson scaling can be unstable for some datasets, so it's optional
 LOWRES=20.0
-HIGHRES=0.5
+HIGHRES=0.35
 WILSON=""   # set to "" to skip
 
 #######################################
@@ -306,18 +312,103 @@ PY
 #######################################
 # Run all hardcoded streams
 #######################################
+# EXITCODE=0
+# for s in "${STREAMS[@]}"; do
+#   echo "=== Processing stream: $s ==="
+#   if process_stream "$s"; then
+#     echo "[OK] $s"
+#   else
+#     echo "[WARN] $s"
+#     EXITCODE=1
+#   fi
+# done
+
+# echo
+# echo "Multi-stream run finished: $(timestamp)"
+
+# exit "$EXITCODE"
 EXITCODE=0
+TOTAL_STREAMS="${#STREAMS[@]}"
+COMPLETED_STREAMS=0
+SUCCESSFUL_STREAMS=0
+FAILED_STREAMS=0
+BATCH_START_EPOCH="$(date +%s)"
+
+echo "[$(timestamp)] Starting multi-stream merge: ${TOTAL_STREAMS} streams"
+
 for s in "${STREAMS[@]}"; do
-  echo "=== Processing stream: $s ==="
+  CURRENT_STREAM=$((COMPLETED_STREAMS + 1))
+  STREAM_NAME="$(basename "$s")"
+  STREAM_START_EPOCH="$(date +%s)"
+
+  echo
+  echo "================================================================"
+  echo "[$(timestamp)] Starting stream ${CURRENT_STREAM}/${TOTAL_STREAMS}: ${STREAM_NAME}"
+  echo "================================================================"
+
   if process_stream "$s"; then
-    echo "[OK] $s"
+    STATUS="OK"
+    SUCCESSFUL_STREAMS=$((SUCCESSFUL_STREAMS + 1))
   else
-    echo "[WARN] $s"
+    STATUS="WARN/FAILED"
+    FAILED_STREAMS=$((FAILED_STREAMS + 1))
     EXITCODE=1
   fi
+
+  COMPLETED_STREAMS=$((COMPLETED_STREAMS + 1))
+
+  NOW_EPOCH="$(date +%s)"
+  STREAM_ELAPSED=$((NOW_EPOCH - STREAM_START_EPOCH))
+  TOTAL_ELAPSED=$((NOW_EPOCH - BATCH_START_EPOCH))
+  PERCENT="$(awk -v done="$COMPLETED_STREAMS" -v total="$TOTAL_STREAMS" \
+    'BEGIN { printf "%.1f", 100 * done / total }')"
+
+  if [ "$COMPLETED_STREAMS" -gt 0 ]; then
+    AVG_SECONDS=$((TOTAL_ELAPSED / COMPLETED_STREAMS))
+    REMAINING_STREAMS=$((TOTAL_STREAMS - COMPLETED_STREAMS))
+    ETA_SECONDS=$((AVG_SECONDS * REMAINING_STREAMS))
+  else
+    ETA_SECONDS=0
+  fi
+
+  printf -v STREAM_ELAPSED_FMT '%02dh:%02dm:%02ds' \
+    $((STREAM_ELAPSED / 3600)) \
+    $(((STREAM_ELAPSED % 3600) / 60)) \
+    $((STREAM_ELAPSED % 60))
+
+  printf -v TOTAL_ELAPSED_FMT '%02dh:%02dm:%02ds' \
+    $((TOTAL_ELAPSED / 3600)) \
+    $(((TOTAL_ELAPSED % 3600) / 60)) \
+    $((TOTAL_ELAPSED % 60))
+
+  printf -v ETA_FMT '%02dh:%02dm:%02ds' \
+    $((ETA_SECONDS / 3600)) \
+    $(((ETA_SECONDS % 3600) / 60)) \
+    $((ETA_SECONDS % 60))
+
+  echo "[$(timestamp)] Stream ${CURRENT_STREAM}/${TOTAL_STREAMS} finished: ${STATUS}"
+  echo "[$(timestamp)] Progress: ${COMPLETED_STREAMS}/${TOTAL_STREAMS} (${PERCENT}%)"
+  echo "[$(timestamp)] Stream elapsed: ${STREAM_ELAPSED_FMT}"
+  echo "[$(timestamp)] Total elapsed: ${TOTAL_ELAPSED_FMT}"
+  echo "[$(timestamp)] Estimated remaining time: ${ETA_FMT}"
+  echo "[$(timestamp)] Successful: ${SUCCESSFUL_STREAMS}; warnings/failed: ${FAILED_STREAMS}"
 done
 
+BATCH_END_EPOCH="$(date +%s)"
+BATCH_ELAPSED=$((BATCH_END_EPOCH - BATCH_START_EPOCH))
+
+printf -v BATCH_ELAPSED_FMT '%02dh:%02dm:%02ds' \
+  $((BATCH_ELAPSED / 3600)) \
+  $(((BATCH_ELAPSED % 3600) / 60)) \
+  $((BATCH_ELAPSED % 60))
+
 echo
-echo "Multi-stream run finished: $(timestamp)"
+echo "================================================================"
+echo "[$(timestamp)] Multi-stream run finished"
+echo "Completed: ${COMPLETED_STREAMS}/${TOTAL_STREAMS}"
+echo "Successful: ${SUCCESSFUL_STREAMS}"
+echo "Warnings/failed: ${FAILED_STREAMS}"
+echo "Total elapsed: ${BATCH_ELAPSED_FMT}"
+echo "================================================================"
 
 exit "$EXITCODE"
