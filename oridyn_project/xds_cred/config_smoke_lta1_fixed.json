@@ -1,0 +1,26 @@
+{
+  "dataset_name": "LTA_t1_fixed_smoke",
+  "input_dir": "/Users/xiaodong/Desktop/LTA1_0.03deg/XDS",
+  "output_dir": "/Users/xiaodong/Desktop/dynamicity/oridyn_project/xds_cred/smoke_output_fixed",
+  "score": {
+    "s0": 0.005,
+    "sigma_c": 0.03,
+    "r_cut": 0.2
+  },
+  "workers": 2,
+  "chunk_size": 100,
+  "min_symmetry_multiplicity": 3,
+  "max_observations": 300,
+  "allow_overwrite": true,
+  "random_seed": 0,
+  "use_integrate_lp_batches": true,
+  "zcal_angle_offset_frames": 1.0,
+  "orientation_audit_count": 12,
+  "strongest_neighbors": 10,
+  "geometry_audit": {
+    "max_observations": 120,
+    "prediction_window_frames": 30.0,
+    "max_median_abs_z_residual_frames": 0.25,
+    "max_median_abs_excitation_invA": 0.001
+  }
+}

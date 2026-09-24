@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.cache/
+smoke_output/
+smoke_output_fixed/
+tests/scratch/

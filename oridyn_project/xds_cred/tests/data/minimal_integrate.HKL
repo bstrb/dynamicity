@@ -1,0 +1,5 @@
+!NUMBER_OF_ITEMS_IN_EACH_DATA_RECORD=5
+!H,K,L,IOBS,SIGMA,
+!Items are separated by a blank and can be read in free-format
+!END_OF_HEADER
+1 2 3 4.0 5.0
